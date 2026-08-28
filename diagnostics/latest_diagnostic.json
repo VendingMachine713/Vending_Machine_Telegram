@@ -1,0 +1,189 @@
+{
+  "schema_version": 1,
+  "vm_core_version": "0.2.0",
+  "generated_at_utc": "2026-08-27T15:04:03.039180+00:00",
+  "project_root": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram",
+  "bot_count": 5,
+  "checks": [
+    {
+      "category": "platform",
+      "name": "project_root",
+      "status": "PASS",
+      "detail": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram"
+    },
+    {
+      "category": "platform",
+      "name": "bots_directory",
+      "status": "PASS",
+      "detail": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots"
+    },
+    {
+      "category": "runtime",
+      "name": "python",
+      "status": "PASS",
+      "detail": "3.12.10 | C:\\Users\\cherr\\AppData\\Local\\Microsoft\\WindowsApps\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\python.exe"
+    },
+    {
+      "category": "runtime",
+      "name": "operating_system",
+      "status": "PASS",
+      "detail": "Windows 11"
+    },
+    {
+      "category": "runtime",
+      "name": "disk_free",
+      "status": "PASS",
+      "detail": "13.3 GiB free"
+    },
+    {
+      "category": "runtime",
+      "name": "root_write_access",
+      "status": "PASS",
+      "detail": "writable"
+    },
+    {
+      "category": "dependencies",
+      "name": "telethon",
+      "status": "PASS",
+      "detail": "installed"
+    },
+    {
+      "category": "dependencies",
+      "name": "telegram",
+      "status": "PASS",
+      "detail": "installed"
+    },
+    {
+      "category": "dependencies",
+      "name": "dotenv",
+      "status": "PASS",
+      "detail": "installed"
+    },
+    {
+      "category": "dependencies",
+      "name": "tzdata",
+      "status": "PASS",
+      "detail": "installed"
+    },
+    {
+      "category": "bot",
+      "name": "Admin_Command_Centre:entrypoint",
+      "status": "WARN",
+      "detail": "No likely entrypoint detected."
+    },
+    {
+      "category": "bot",
+      "name": "Admin_Command_Centre:dependencies",
+      "status": "INFO",
+      "detail": "No requirements.txt or pyproject.toml at bot root."
+    },
+    {
+      "category": "bot",
+      "name": "Smart_Auto_Poster_V2:entrypoint",
+      "status": "PASS",
+      "detail": "app.py (confidence=high)"
+    },
+    {
+      "category": "bot",
+      "name": "Smart_Auto_Poster_V2:dependencies",
+      "status": "PASS",
+      "detail": "requirements.txt"
+    },
+    {
+      "category": "bot",
+      "name": "Universal_Search:entrypoint",
+      "status": "WARN",
+      "detail": "No likely entrypoint detected."
+    },
+    {
+      "category": "bot",
+      "name": "Universal_Search:dependencies",
+      "status": "INFO",
+      "detail": "No requirements.txt or pyproject.toml at bot root."
+    },
+    {
+      "category": "bot",
+      "name": "VM_Guard:entrypoint",
+      "status": "WARN",
+      "detail": "No likely entrypoint detected."
+    },
+    {
+      "category": "bot",
+      "name": "VM_Guard:dependencies",
+      "status": "INFO",
+      "detail": "No requirements.txt or pyproject.toml at bot root."
+    },
+    {
+      "category": "bot",
+      "name": "VM_Relationship_Manager:entrypoint",
+      "status": "PASS",
+      "detail": "main.py (confidence=high)"
+    },
+    {
+      "category": "bot",
+      "name": "VM_Relationship_Manager:dependencies",
+      "status": "PASS",
+      "detail": "requirements.txt"
+    },
+    {
+      "category": "bot",
+      "name": "VM_Relationship_Manager:nested_duplicate",
+      "status": "WARN",
+      "detail": "Nested folder 'VM_Relationship_Manager/VM_Relationship_Manager' detected; review before future updates."
+    },
+    {
+      "category": "telegram",
+      "name": "session_files",
+      "status": "PASS",
+      "detail": "3 session file(s) detected; contents not inspected."
+    },
+    {
+      "category": "config",
+      "name": "json_syntax",
+      "status": "PASS",
+      "detail": "4 checked, 0 invalid"
+    },
+    {
+      "category": "database",
+      "name": "smart_autoposter_before_import_2026-08-27T062014+0000.sqlite3",
+      "status": "PASS",
+      "detail": "ok"
+    },
+    {
+      "category": "database",
+      "name": "smart_autoposter_before_import_2026-08-27T062725+0000.sqlite3",
+      "status": "PASS",
+      "detail": "ok"
+    },
+    {
+      "category": "database",
+      "name": "smart_autoposter.sqlite3",
+      "status": "PASS",
+      "detail": "ok"
+    },
+    {
+      "category": "database",
+      "name": "vm_relationships_20260827_053738.db",
+      "status": "PASS",
+      "detail": "ok"
+    },
+    {
+      "category": "database",
+      "name": "vm_relationships_20260827_073606.db",
+      "status": "PASS",
+      "detail": "ok"
+    },
+    {
+      "category": "database",
+      "name": "vm_relationships.db",
+      "status": "PASS",
+      "detail": "ok"
+    }
+  ],
+  "summary": {
+    "PASS": 22,
+    "INFO": 3,
+    "WARN": 4,
+    "FAIL": 0
+  }
+}

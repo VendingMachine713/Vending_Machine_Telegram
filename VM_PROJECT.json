@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "project": "Vending_Machine_Telegram",
+  "platform_version": "0.2.0",
+  "architecture": "modular_bots_shared_core",
+  "principles": [
+    "preserve_permanent_bot_folders",
+    "incremental_delta_updates",
+    "shared_infrastructure_for_cross_bot_capabilities",
+    "independent_bot_failure_domains",
+    "admin_by_exception",
+    "safe_reversible_changes"
+  ],
+  "canonical_bot_folders": [
+    "Smart_Auto_Poster_V2",
+    "VM_Guard",
+    "Universal_Search",
+    "Admin_Command_Centre",
+    "VM_Relationship_Manager"
+  ],
+  "runtime_state": "state/vm_inventory.json"
+}

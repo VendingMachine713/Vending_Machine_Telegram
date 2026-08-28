@@ -1,0 +1,8 @@
+[project]
+name = "vending-machine-telegram-platform"
+version = "0.2.0"
+description = "Shared tooling and core infrastructure for the Vending Machine Telegram ecosystem"
+requires-python = ">=3.11"
+
+[tool.vm]
+architecture = "modular-bots-shared-core"

@@ -1,0 +1,34 @@
+SMART AUTO POSTER V3.0.0 - BUILD REPORT
+============================================================
+Build: Production Platform Release
+Schema: 6 (additive migration)
+Regression tests: 117/117 PASS before package build
+Python compileall: PASS
+Exact reconstructed V2.2.3 -> V3.0 seeded migration: PASS
+SQLite integrity after migration: PASS
+Legacy active campaign preservation: PASS
+Legacy priority/tags/content preservation: PASS
+Legacy sent queue history + Telegram message IDs preservation: PASS
+
+Major completed areas:
+- Live-tested V2 sender/routing/duplicate-protection core retained
+- Multi-content campaigns, rotation, lifecycle preview gate and Post Now safety path
+- Interval/daily/weekday/one-off schedules, spread windows and cross-campaign spacing
+- Campaign categories, reusable destination collections and maximum cycle limits
+- Deterministic destination automation rules with review-safe enable behavior
+- Protected/NEVER_AUTO_POST destinations and smart access/mode/forum tags
+- Queue guardrails, retry/cancel/defer/uncertain/quarantine/expiry controls
+- FloodWait/SlowMode/network/permanent-failure recovery and circuit breaker
+- Health-aware dual-account balancing while respecting explicit affinity
+- Content fingerprints/tags/lifecycle/inbox duplicate rejection and media-cache tools
+- Watchdog/heartbeats, automatic rescan, backup, maintenance and reconnect recovery
+- Analytics + persistent operational recommendations + daily/weekly V3 reports
+- Telegram Admin Control Centre with full-control and read-only roles
+- Expanded local V3 Control Panel for collections/rules/recommendations/release checks
+- Safe diagnostics, audit/update history and database integrity/VACUUM controls
+- Manifest-v3 master updater with exact payload membership and SHA-256 verification
+- Consistent SQLite pre-update backup + automatic source/database rollback on failure
+- Consolidated direct upgrade path from V2.2.3 or newer
+
+LIVE TELEGRAM NOTE
+The V2 sender/routing path already completed a real controlled Telegram LIVE_TEST on the user's PC. V3.0 still requires one controlled LIVE_TEST after installation before unattended production is resumed. The optional Telegram Admin Control Centre also requires the user's local bot token/admin allowlist and a local authorization/permission test.

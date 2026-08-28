@@ -1,0 +1,92 @@
+{
+  "schema_version": 2,
+  "project_root": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram",
+  "bot_count": 5,
+  "bots": [
+    {
+      "folder": "Admin_Command_Centre",
+      "path": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots\\Admin_Command_Centre",
+      "manifest_present": false,
+      "version": null,
+      "entrypoint": null,
+      "entrypoint_confidence": "none",
+      "launchers": [],
+      "requirements": null,
+      "pyproject": null,
+      "databases": [],
+      "session_files": [],
+      "nested_duplicate_folder": false
+    },
+    {
+      "folder": "Smart_Auto_Poster_V2",
+      "path": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots\\Smart_Auto_Poster_V2",
+      "manifest_present": false,
+      "version": null,
+      "entrypoint": "app.py",
+      "entrypoint_confidence": "high",
+      "launchers": [
+        "START_AUTO_POSTER.ps1",
+        "run_setup.ps1"
+      ],
+      "requirements": "requirements.txt",
+      "pyproject": null,
+      "databases": [
+        "backups\\smart_autoposter_before_import_2026-08-27T062014+0000.sqlite3",
+        "backups\\smart_autoposter_before_import_2026-08-27T062725+0000.sqlite3",
+        "data\\smart_autoposter.sqlite3"
+      ],
+      "session_files": [
+        "runtime\\sessions\\Auto_Post_Secondary.session",
+        "runtime\\sessions\\my_account.session"
+      ],
+      "nested_duplicate_folder": false
+    },
+    {
+      "folder": "Universal_Search",
+      "path": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots\\Universal_Search",
+      "manifest_present": false,
+      "version": null,
+      "entrypoint": null,
+      "entrypoint_confidence": "none",
+      "launchers": [],
+      "requirements": null,
+      "pyproject": null,
+      "databases": [],
+      "session_files": [],
+      "nested_duplicate_folder": false
+    },
+    {
+      "folder": "VM_Guard",
+      "path": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots\\VM_Guard",
+      "manifest_present": false,
+      "version": null,
+      "entrypoint": null,
+      "entrypoint_confidence": "none",
+      "launchers": [],
+      "requirements": null,
+      "pyproject": null,
+      "databases": [],
+      "session_files": [],
+      "nested_duplicate_folder": false
+    },
+    {
+      "folder": "VM_Relationship_Manager",
+      "path": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots\\VM_Relationship_Manager",
+      "manifest_present": false,
+      "version": "1.0.2",
+      "entrypoint": "main.py",
+      "entrypoint_confidence": "high",
+      "launchers": [
+        "START_VM_RELATIONSHIPS.bat",
+        "START_VM_RELATIONSHIPS.ps1"
+      ],
+      "requirements": "requirements.txt",
+      "pyproject": null,
+      "databases": [],
+      "session_files": [
+        "runtime\\vm_relationship_user.session"
+      ],
+      "nested_duplicate_folder": true
+    }
+  ]
+}

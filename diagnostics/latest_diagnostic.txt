@@ -1,0 +1,44 @@
+========================================================================
+VM DOCTOR
+========================================================================
+Generated: 2026-08-27T15:04:03.039180+00:00
+Root:      C:\Users\cherr\OneDrive\Desktop\Vending_Machine_Telegram
+Bots:      5
+
+[PASS] platform/project_root: C:\Users\cherr\OneDrive\Desktop\Vending_Machine_Telegram
+[PASS] platform/bots_directory: C:\Users\cherr\OneDrive\Desktop\Vending_Machine_Telegram\bots
+[PASS] runtime/python: 3.12.10 | C:\Users\cherr\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\python.exe
+[PASS] runtime/operating_system: Windows 11
+[PASS] runtime/disk_free: 13.3 GiB free
+[PASS] runtime/root_write_access: writable
+[PASS] dependencies/telethon: installed
+[PASS] dependencies/telegram: installed
+[PASS] dependencies/dotenv: installed
+[PASS] dependencies/tzdata: installed
+[WARN] bot/Admin_Command_Centre:entrypoint: No likely entrypoint detected.
+[INFO] bot/Admin_Command_Centre:dependencies: No requirements.txt or pyproject.toml at bot root.
+[PASS] bot/Smart_Auto_Poster_V2:entrypoint: app.py (confidence=high)
+[PASS] bot/Smart_Auto_Poster_V2:dependencies: requirements.txt
+[WARN] bot/Universal_Search:entrypoint: No likely entrypoint detected.
+[INFO] bot/Universal_Search:dependencies: No requirements.txt or pyproject.toml at bot root.
+[WARN] bot/VM_Guard:entrypoint: No likely entrypoint detected.
+[INFO] bot/VM_Guard:dependencies: No requirements.txt or pyproject.toml at bot root.
+[PASS] bot/VM_Relationship_Manager:entrypoint: main.py (confidence=high)
+[PASS] bot/VM_Relationship_Manager:dependencies: requirements.txt
+[WARN] bot/VM_Relationship_Manager:nested_duplicate: Nested folder 'VM_Relationship_Manager/VM_Relationship_Manager' detected; review before future updates.
+[PASS] telegram/session_files: 3 session file(s) detected; contents not inspected.
+[PASS] config/json_syntax: 4 checked, 0 invalid
+[PASS] database/smart_autoposter_before_import_2026-08-27T062014+0000.sqlite3: ok
+[PASS] database/smart_autoposter_before_import_2026-08-27T062725+0000.sqlite3: ok
+[PASS] database/smart_autoposter.sqlite3: ok
+[PASS] database/vm_relationships_20260827_053738.db: ok
+[PASS] database/vm_relationships_20260827_073606.db: ok
+[PASS] database/vm_relationships.db: ok
+
+------------------------------------------------------------------------
+SUMMARY
+------------------------------------------------------------------------
+PASS: 22
+INFO: 3
+WARN: 4
+FAIL: 0

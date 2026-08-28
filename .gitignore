@@ -1,0 +1,117 @@
+﻿# ============================================================
+# Vending Machine Telegram - Git Ignore
+# ============================================================
+
+# ---------- Secrets / credentials ----------
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+*.pem
+*.key
+*.p12
+*.pfx
+
+credentials.json
+credentials*.json
+client_secret*.json
+secrets.json
+secret.json
+token.json
+tokens.json
+
+# ---------- Telegram sessions ----------
+*.session
+*.session-journal
+**/*.session
+**/*.session-journal
+
+# ---------- Runtime databases ----------
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+
+# ---------- Python ----------
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+.venv/
+venv/
+env/
+**/.venv/
+**/venv/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---------- Logs ----------
+*.log
+logs/
+log/
+**/logs/
+**/log/
+
+shared/logs/
+
+# ---------- Runtime exports / backups ----------
+backups/
+**/backups/
+shared/backups/
+
+exports/
+**/exports/
+shared/exports/
+
+# ---------- Cache / temporary ----------
+cache/
+**/cache/
+tmp/
+temp/
+**/tmp/
+**/temp/
+
+*.tmp
+*.temp
+*.bak
+
+# ---------- IDE / editor ----------
+.vscode/
+.idea/
+*.code-workspace
+
+# ---------- Windows ----------
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ---------- macOS ----------
+.DS_Store
+
+# ---------- Packaging ----------
+build/
+dist/
+*.egg-info/
+
+# ---------- Node / web tooling ----------
+node_modules/
+.next/
+.vercel/
+
+# ---------- Local-only configuration ----------
+*.local
+*.local.json
+*.local.yaml
+*.local.yml
+*.local.toml
+config.local.*

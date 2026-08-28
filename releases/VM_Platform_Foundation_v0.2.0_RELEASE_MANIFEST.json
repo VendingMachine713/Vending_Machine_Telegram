@@ -1,0 +1,17 @@
+{
+  "release": "VM_Platform_Foundation_v0.2.0",
+  "release_type": "additive_platform_upgrade",
+  "target_root": "Vending_Machine_Telegram/",
+  "replaces_existing_bot_files": false,
+  "touches_credentials": false,
+  "auto_writes_bot_manifests": false,
+  "new_commands": [
+    "py vm.py inspect"
+  ],
+  "expected_outputs": [
+    "diagnostics/project_structure.txt",
+    "diagnostics/project_structure.json",
+    "state/vm_inventory.json",
+    "diagnostics/latest_diagnostic.txt"
+  ]
+}
