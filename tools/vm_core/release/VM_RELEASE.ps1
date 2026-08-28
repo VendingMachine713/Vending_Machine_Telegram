@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Message = "",
     [switch]$NoPush
 )
@@ -67,12 +67,14 @@ if(!$changes){
     if(!$Message){
         $Message="release: VM platform $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
     }
-    git commit -m $Message | Out-Host
+    & cmd.exe /c "git commit -m `"$Message`"" | Out-Host
+    if($LASTEXITCODE -ne 0){ Fail "Git commit failed." }
 }
 
 Write-Host "[6/8] Push..."
 if(!$NoPush){
-    git push | Out-Host
+    & cmd.exe /c "git push" | Out-Host
+    if($LASTEXITCODE -ne 0){ Fail "Git push failed." }
     if($LASTEXITCODE -ne 0){ Fail "Git push failed." }
 }else{
     Write-Host "[SKIP] Push disabled by -NoPush."
@@ -87,3 +89,4 @@ Write-Host "[8/8] Final status..."
 
 Write-Host ""
 Write-Host "[PASS] VM safe release completed."
+
