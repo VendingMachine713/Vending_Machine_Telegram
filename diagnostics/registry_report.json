@@ -1,0 +1,11 @@
+{
+  "accounts_synced": 4,
+  "destinations": {
+    "tables_scanned": 21,
+    "rows_imported_or_refreshed": 271
+  },
+  "summary": {
+    "destinations": 108,
+    "accounts": 4
+  }
+}

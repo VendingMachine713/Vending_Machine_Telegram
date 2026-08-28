@@ -1,7 +1,9 @@
+import io
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
 from smart_autoposter import cli
@@ -42,10 +44,13 @@ class LoginAccountRegressionTests(unittest.IsolatedAsyncioTestCase):
             fake_settings.media_cache_dir.mkdir(parents=True, exist_ok=True)
 
             args = SimpleNamespace(account='secondary', reset=True)
+            output = io.StringIO()
             with patch.object(cli.Settings, 'load', return_value=fake_settings), \
-                 patch('telethon.TelegramClient', FakeTelegramClient):
+                 patch('telethon.TelegramClient', FakeTelegramClient), \
+                 redirect_stdout(output):
                 await cli.async_login_account(args)
 
+            self.assertIn('[OK] SECONDARY authorized as secondary_test', output.getvalue())
             backups = list((fake_settings.backup_dir / 'session_backups').glob('Auto_Post_Secondary.session.*.bak'))
             self.assertEqual(len(backups), 1)
             self.assertFalse(session_file.exists())

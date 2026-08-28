@@ -1,0 +1,106 @@
+[
+  {
+    "service": "Admin_Command_Centre",
+    "status": "CONFIG_REQUIRED",
+    "detail": {
+      "classification": "CANONICAL",
+      "entrypoint": "main.py",
+      "entrypoint_confidence": "high",
+      "manifest": true,
+      "runtime_status": "UNKNOWN",
+      "process_alive": false,
+      "configuration": {
+        "required_env": [
+          "VM_ADMIN_BOT_TOKEN"
+        ],
+        "present_env_names": [],
+        "missing_env_names": [
+          "VM_ADMIN_BOT_TOKEN"
+        ],
+        "configured": false
+      },
+      "databases": {}
+    }
+  },
+  {
+    "service": "Smart_Auto_Poster_V2",
+    "status": "READY",
+    "detail": {
+      "classification": "CANONICAL",
+      "entrypoint": "app.py",
+      "entrypoint_confidence": "high",
+      "manifest": true,
+      "runtime_status": "UNKNOWN",
+      "process_alive": false,
+      "configuration": {
+        "required_env": [],
+        "present_env_names": [],
+        "missing_env_names": [],
+        "configured": true
+      },
+      "databases": {
+        "backups\\smart_autoposter_2026-08-27T152315+0000.sqlite3": "ok",
+        "backups\\smart_autoposter_before_import_2026-08-27T062014+0000.sqlite3": "ok",
+        "backups\\smart_autoposter_before_import_2026-08-27T062725+0000.sqlite3": "ok",
+        "data\\smart_autoposter.sqlite3": "ok"
+      }
+    }
+  },
+  {
+    "service": "Universal_Search",
+    "status": "PLANNED",
+    "detail": {
+      "classification": "PLACEHOLDER",
+      "entrypoint": null,
+      "entrypoint_confidence": "none",
+      "manifest": true,
+      "runtime_status": "UNKNOWN",
+      "process_alive": false,
+      "configuration": {
+        "required_env": [],
+        "present_env_names": [],
+        "missing_env_names": [],
+        "configured": true
+      },
+      "databases": {}
+    }
+  },
+  {
+    "service": "VM_Guard",
+    "status": "PLANNED",
+    "detail": {
+      "classification": "PLACEHOLDER",
+      "entrypoint": null,
+      "entrypoint_confidence": "none",
+      "manifest": true,
+      "runtime_status": "UNKNOWN",
+      "process_alive": false,
+      "configuration": {
+        "required_env": [],
+        "present_env_names": [],
+        "missing_env_names": [],
+        "configured": true
+      },
+      "databases": {}
+    }
+  },
+  {
+    "service": "VM_Relationship_Manager",
+    "status": "READY",
+    "detail": {
+      "classification": "CANONICAL",
+      "entrypoint": "main.py",
+      "entrypoint_confidence": "high",
+      "manifest": true,
+      "runtime_status": "UNKNOWN",
+      "process_alive": false,
+      "configuration": {
+        "required_env": [],
+        "present_env_names": [],
+        "missing_env_names": [],
+        "configured": true
+      },
+      "databases": {}
+    }
+  }
+]

@@ -1,38 +1,24 @@
 from __future__ import annotations
-
 from pathlib import Path
 from datetime import datetime, timezone
 import json
 from typing import Any
-
 from .paths import project_root
 from .manifests import discover_bots
 
-EXCLUDED_DIRS = {
-    ".git", "__pycache__", ".venv", "venv", "env", "node_modules",
-    "backups", "logs", "media_cache", "content", "downloads",
-}
+EXCLUDED_DIRS = {".git","__pycache__", ".venv","venv","env","node_modules","backups","logs","media_cache","content","downloads"}
+SENSITIVE_NAMES = {".env","secrets.json","credentials.json","config.env"}
 
-SENSITIVE_NAMES = {
-    ".env", "secrets.json", "credentials.json", "config.env",
-}
-
-def _safe_tree(bot_dir: Path, max_depth: int = 3, max_files: int = 500) -> list[str]:
-    lines: list[str] = []
-    count = 0
-
+def _safe_tree(bot_dir: Path, max_depth: int = 4, max_files: int = 1000) -> list[str]:
+    lines, count = [], 0
     for path in sorted(bot_dir.rglob("*"), key=lambda p: str(p).lower()):
-        try:
-            rel = path.relative_to(bot_dir)
-        except ValueError:
-            continue
-
+        rel = path.relative_to(bot_dir)
         if any(part in EXCLUDED_DIRS for part in rel.parts):
             continue
-        if path.name.lower() in SENSITIVE_NAMES:
-            lines.append(f"{rel.as_posix()} [REDACTED FILE]")
-            continue
         if len(rel.parts) > max_depth:
+            continue
+        if path.name.lower() in SENSITIVE_NAMES:
+            lines.append(rel.as_posix() + " [REDACTED FILE]")
             continue
         if path.is_dir():
             lines.append(rel.as_posix() + "/")
@@ -44,62 +30,50 @@ def _safe_tree(bot_dir: Path, max_depth: int = 3, max_files: int = 500) -> list[
                 break
     return lines
 
-
 def build_structure_report(root: Path | None = None) -> dict[str, Any]:
     root = root or project_root()
-    bots = discover_bots(root)
-    data = {
-        "schema_version": 1,
+    return {
+        "schema_version": 2,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "project_root": str(root),
-        "bots": [],
+        "bots": [{
+            "folder": b.folder,
+            "classification": b.classification,
+            "version": b.version,
+            "entrypoint": b.entrypoint,
+            "entrypoint_confidence": b.entrypoint_confidence,
+            "launchers": b.launchers,
+            "requirements": b.requirements,
+            "pyproject": b.pyproject,
+            "databases": b.databases,
+            "tests": b.test_files,
+            "nested_duplicate_folder": b.nested_duplicate_folder,
+            "tree": _safe_tree(Path(b.path)),
+        } for b in discover_bots(root)]
     }
-
-    for bot in bots:
-        bot_dir = Path(bot.path)
-        data["bots"].append({
-            "folder": bot.folder,
-            "entrypoint": bot.entrypoint,
-            "entrypoint_confidence": bot.entrypoint_confidence,
-            "launchers": bot.launchers,
-            "requirements": bot.requirements,
-            "pyproject": bot.pyproject,
-            "nested_duplicate_folder": bot.nested_duplicate_folder,
-            "tree": _safe_tree(bot_dir),
-        })
-    return data
-
 
 def write_structure_report(root: Path | None = None) -> tuple[Path, Path]:
     root = root or project_root()
     out = root / "diagnostics"
     out.mkdir(parents=True, exist_ok=True)
     data = build_structure_report(root)
-
-    json_path = out / "project_structure.json"
-    txt_path = out / "project_structure.txt"
-
-    json_path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
-    lines = [
-        "=" * 72,
-        "VM PROJECT STRUCTURE",
-        "=" * 72,
-        f"Generated: {data['generated_at_utc']}",
-        f"Root: {data['project_root']}",
-        "",
-    ]
-    for bot in data["bots"]:
+    jp, tp = out / "project_structure.json", out / "project_structure.txt"
+    jp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    lines = ["="*72, "VM PROJECT STRUCTURE", "="*72, f"Generated: {data['generated_at_utc']}", f"Root: {data['project_root']}", ""]
+    for b in data["bots"]:
         lines += [
-            f"[{bot['folder']}]",
-            f"entrypoint={bot['entrypoint'] or 'not detected'}",
-            f"entrypoint_confidence={bot['entrypoint_confidence']}",
-            f"launchers={', '.join(bot['launchers']) if bot['launchers'] else 'none'}",
-            f"nested_duplicate={bot['nested_duplicate_folder']}",
+            f"[{b['folder']}]",
+            f"classification={b['classification']}",
+            f"version={b['version'] or 'unknown'}",
+            f"entrypoint={b['entrypoint'] or 'not detected'}",
+            f"entrypoint_confidence={b['entrypoint_confidence']}",
+            f"launchers={', '.join(b['launchers']) if b['launchers'] else 'none'}",
+            f"nested_duplicate={b['nested_duplicate_folder']}",
+            f"databases={len(b['databases'])}",
+            f"tests={len(b['tests'])}",
             "tree:",
         ]
-        lines.extend("  " + line for line in bot["tree"])
+        lines.extend("  " + x for x in b["tree"])
         lines.append("")
-
-    txt_path.write_text("\n".join(lines), encoding="utf-8")
-    return json_path, txt_path
+    tp.write_text("\n".join(lines), encoding="utf-8")
+    return jp, tp

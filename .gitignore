@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 # Vending Machine Telegram - Git Ignore
 # ============================================================
 
@@ -115,3 +115,82 @@ node_modules/
 *.local.yml
 *.local.toml
 config.local.*
+
+# ============================================================
+# VM Platform generated/local runtime state
+# ============================================================
+
+# Runtime locks and transient runtime state
+**/runtime/*.lock/
+**/runtime/**/*.lock/
+**/runtime/**/owner.json
+
+# Local bot runtime state
+bots/Universal_Search/state/*
+!bots/Universal_Search/state/.gitkeep
+
+bots/VM_Guard/state/*
+!bots/VM_Guard/state/.gitkeep
+
+# Generated support bundles
+state/support/*
+!state/support/.gitkeep
+
+# Ad-hoc source backups
+*.bak_*
+*.backup
+*.backup_*
+
+# ===== VM PLATFORM SECURITY / RUNTIME =====
+# Secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.sample
+!**/.env.template
+*.session
+*.session-journal
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python environments / cache
+.venv/
+**/.venv/
+venv/
+**/venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+**/.pytest_cache/
+
+# Runtime data
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+logs/
+backups/
+shared/logs/
+shared/backups/
+shared/exports/
+**/state/admin_id.txt
+**/state/claim_code.txt
+
+# Generated / local-only
+diagnostics/*_latest.txt
+*.log
+*.tmp
+*.bak_before_*
+Thumbs.db
+.DS_Store
+# ===== END VM PLATFORM SECURITY / RUNTIME =====
+*.before_*

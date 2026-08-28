@@ -849,14 +849,21 @@ def cmd_admin_bot(args):
             raise RuntimeError("Admin bot not configured. Set ADMIN_BOT_TOKEN and ADMIN_USER_IDS in .env")
         controller=TelegramAdminController(db,s,_safety_controller(s,db))
         await controller.run()
-    try: asyncio.run(run_admin())
-    except KeyboardInterrupt: print("\n[STOPPED] Telegram admin bot stopped")
+    try:
+        asyncio.run(run_admin())
+    except KeyboardInterrupt:
+        print("\n[STOPPED] Telegram admin bot stopped")
+    except RuntimeError as exc:
+        print(f"[ERROR] {exc}")
 
 
 def cmd_admin_status(args):
     s=Settings.load(False); db=db_for(s)
-    print(json.dumps({"configured":s.admin_bot_enabled,"control_admin_count":len(s.admin_user_ids),
+    print(json.dumps({"configured":s.admin_bot_enabled,"token_configured":bool(s.admin_bot_token),
+                      "control_admin_count":len(s.admin_user_ids),
                       "readonly_admin_count":len(s.admin_readonly_user_ids),"session":s.admin_bot_session,
+                      "dotenv_source":str(getattr(__import__('smart_autoposter.settings', fromlist=['PROJECT_ENV_PATH']), 'PROJECT_ENV_PATH', '.env')),
+                      "dotenv_precedence":"project .env overrides inherited environment",
                       "min_notification_severity":s.admin_notifications_min_severity},indent=2))
 
 

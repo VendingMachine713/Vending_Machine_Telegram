@@ -325,6 +325,8 @@ class V30PlatformTests(unittest.TestCase):
         text=(Path(__file__).parents[1]/'master_updater'/'APPLY_UPDATE.ps1').read_text(encoding='utf-8')
         self.assertIn('SHA-256 mismatch',text); self.assertIn('Unsafe manifest target',text); self.assertIn('not newer than installed version',text)
         self.assertIn('SQLite online backup failed before update',text); self.assertIn('Database restored automatically',text)
+        self.assertIn('Has-ParentTraversal', text)
+        self.assertNotIn("(^|\\)\\.\\.(\\|$)", text)
         rb=(Path(__file__).parents[1]/'master_updater'/'ROLLBACK_LAST_UPDATE.ps1').read_text(encoding='utf-8')
         self.assertIn('Database rollback complete',rb); self.assertIn('database_path',rb)
 

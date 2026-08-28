@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "vm_core_version": "1.2.0",
+  "started_at_utc": "2026-08-28T16:03:17.110900+00:00",
+  "completed_at_utc": "2026-08-28T16:04:05.414139+00:00",
+  "backup": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\backups\\vm_backup_validation_20260828T160317Z.zip",
+  "bots_total": 5,
+  "bots_runnable": 3,
+  "bots_planned": 2,
+  "manifest_refresh": [
+    {
+      "bot": "Admin_Command_Centre",
+      "action": "refreshed",
+      "classification": "CANONICAL",
+      "path": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots\\Admin_Command_Centre\\BOT_MANIFEST.json"
+    },
+    {
+      "bot": "Smart_Auto_Poster_V2",
+      "action": "refreshed",
+      "classification": "CANONICAL",
+      "path": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots\\Smart_Auto_Poster_V2\\BOT_MANIFEST.json"
+    },
+    {
+      "bot": "Universal_Search",
+      "action": "refreshed",
+      "classification": "PLACEHOLDER",
+      "path": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots\\Universal_Search\\BOT_MANIFEST.json"
+    },
+    {
+      "bot": "VM_Guard",
+      "action": "refreshed",
+      "classification": "PLACEHOLDER",
+      "path": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots\\VM_Guard\\BOT_MANIFEST.json"
+    },
+    {
+      "bot": "VM_Relationship_Manager",
+      "action": "refreshed",
+      "classification": "CANONICAL",
+      "path": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots\\VM_Relationship_Manager\\BOT_MANIFEST.json"
+    }
+  ],
+  "platform_tests_ok": true,
+  "health": {
+    "Admin_Command_Centre": "CONFIG_REQUIRED",
+    "Smart_Auto_Poster_V2": "READY",
+    "Universal_Search": "PLANNED",
+    "VM_Guard": "PLANNED",
+    "VM_Relationship_Manager": "READY"
+  },
+  "doctor_summary": {
+    "PASS": 21,
+    "INFO": 6,
+    "WARN": 1,
+    "FAIL": 0
+  },
+  "invalid_json_files": [],
+  "preflight_ok": true,
+  "registry": {
+    "accounts_synced": 4,
+    "destinations": {
+      "tables_scanned": 21,
+      "rows_imported_or_refreshed": 271
+    },
+    "summary": {
+      "destinations": 108,
+      "accounts": 4
+    }
+  },
+  "nested_duplicate_bots": [
+    "VM_Relationship_Manager"
+  ],
+  "supervisor_actions": [
+    {
+      "service": "Admin_Command_Centre",
+      "action": "none",
+      "alive": false,
+      "policy": {
+        "auto_start": false,
+        "auto_restart": false
+      }
+    },
+    {
+      "service": "Smart_Auto_Poster_V2",
+      "action": "none",
+      "alive": false,
+      "policy": {
+        "auto_start": false,
+        "auto_restart": false
+      }
+    },
+    {
+      "service": "Universal_Search",
+      "action": "none",
+      "reason": "PLANNED placeholder; no runnable service installed."
+    },
+    {
+      "service": "VM_Guard",
+      "action": "none",
+      "reason": "PLANNED placeholder; no runnable service installed."
+    },
+    {
+      "service": "VM_Relationship_Manager",
+      "action": "none",
+      "alive": false,
+      "policy": {
+        "auto_start": false,
+        "auto_restart": false
+      }
+    }
+  ],
+  "artifacts": {
+    "inventory": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\state\\vm_inventory.json",
+    "structure": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\diagnostics\\project_structure.txt",
+    "duplicates": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\diagnostics\\duplicate_analysis.txt"
+  }
+}

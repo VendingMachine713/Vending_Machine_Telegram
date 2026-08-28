@@ -1,3 +1,12 @@
+# Smart Auto Poster V3.0.3
+
+## Admin credential loading hotfix
+- Project-local `.env` now overrides inherited Windows environment variables for Smart Auto Poster settings.
+- Settings are reloaded from the project `.env` on each `Settings.load()` call.
+- Invalid/revoked Telegram Admin Bot tokens now return a concise operator error instead of a full traceback.
+- Admin status reports which `.env` file is authoritative without exposing the token.
+- Added regression coverage for stale environment-variable override and invalid-token handling.
+
 # Changelog
 
 ## 3.0.0 — Production Platform Release
@@ -112,3 +121,25 @@
 - Added recurring interval and daily/day-of-week schedules.
 - Added combined scheduler + queue service.
 - Added persistent queue idempotency, quiet hours, account cooldown/pacing, routing, backups, exports, and Windows Control Panel.
+
+## 3.0.1 - Windows runtime-lock hotfix
+
+- Replaced the exclusive runtime lock file with an atomic lock directory to avoid
+  interrupted Windows file handles blocking temporary-directory cleanup.
+- Added native Windows PID liveness probing instead of relying on `os.kill(pid, 0)`.
+- Preserved compatibility with stale V3.0 lock files.
+- Added fail-closed grace handling for a lock directory whose owner metadata is
+  still being written.
+- Added regression coverage for stale legacy lock files, fresh incomplete locks,
+  old incomplete locks, duplicate runtime blocking, and deterministic cleanup.
+
+
+## 3.0.2 - Master updater parser repair
+- Replaced fragile parent-traversal regex checks with segment-based path validation safe on Windows PowerShell.
+- Includes the 3.0.1 atomic runtime-lock hotfix.
+- Adds direct repair installer path so this update does not depend on the broken V3.0 updater.
+
+## 3.0.4
+- Fixed a Windows-sensitive release-verification test for deterministic campaign spread windows.
+- The test now freezes the scheduler reference clock, so it validates the deterministic spread offset itself instead of failing when two equivalent enqueue calls cross a one-second wall-clock boundary.
+- Carries forward the V3.0.1 Windows runtime-lock repair, V3.0.2 master-updater repair, and V3.0.3 project-local `.env` precedence/admin-token diagnostics.

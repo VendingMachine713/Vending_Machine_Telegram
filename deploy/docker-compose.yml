@@ -1,0 +1,12 @@
+services:
+  vm-platform:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    working_dir: /app
+    command: ["python", "vm.py", "supervise-loop", "--apply", "--interval", "60"]
+    volumes:
+      - ../:/app
+    environment:
+      - TZ=Australia/Adelaide

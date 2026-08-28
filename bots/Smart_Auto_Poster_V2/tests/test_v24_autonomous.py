@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -285,18 +286,25 @@ class V24AutonomousTests(unittest.TestCase):
         self.assertEqual(q, 1)
 
     def test_spread_window_is_deterministic_and_bounded(self):
+        # Freeze the scheduler reference clock so this test verifies deterministic
+        # spread offset rather than depending on how long two enqueue calls take
+        # on the host OS. The previous test could cross a one-second boundary on
+        # Windows and fail even though the spread algorithm itself was stable.
+        fixed_now = "2026-08-28T16:00:00+00:00"
         with self.db.connect() as con:
             con.execute("UPDATE campaigns SET spread_seconds=1800 WHERE campaign_id='camp'")
         self._preview_activate()
-        result = enqueue_campaign(self.db, "camp", run_key="spread")
+        with patch("smart_autoposter.core.utcnow", return_value=fixed_now):
+            result = enqueue_campaign(self.db, "camp", run_key="spread")
         due = datetime.fromisoformat(result["first_due_at"])
-        base = datetime.fromisoformat(utcnow())
-        self.assertGreaterEqual((due - base).total_seconds(), -2)
-        self.assertLessEqual((due - base).total_seconds(), 1802)
+        base = datetime.fromisoformat(fixed_now)
+        self.assertGreaterEqual((due - base).total_seconds(), 0)
+        self.assertLessEqual((due - base).total_seconds(), 1800)
         with self.db.connect() as con:
             first = con.execute("SELECT due_at FROM queue").fetchone()[0]
             con.execute("DELETE FROM queue")
-        result2 = enqueue_campaign(self.db, "camp", run_key="spread")
+        with patch("smart_autoposter.core.utcnow", return_value=fixed_now):
+            result2 = enqueue_campaign(self.db, "camp", run_key="spread")
         self.assertEqual(first, result2["first_due_at"])
 
     def test_cross_campaign_gap(self):

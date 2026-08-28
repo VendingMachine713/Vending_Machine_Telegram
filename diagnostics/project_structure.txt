@@ -1,27 +1,47 @@
 ========================================================================
 VM PROJECT STRUCTURE
 ========================================================================
-Generated: 2026-08-27T15:03:48.681484+00:00
+Generated: 2026-08-28T16:04:06.704763+00:00
 Root: C:\Users\cherr\OneDrive\Desktop\Vending_Machine_Telegram
 
 [Admin_Command_Centre]
-entrypoint=not detected
-entrypoint_confidence=none
-launchers=none
+classification=CANONICAL
+version=0.2.0
+entrypoint=main.py
+entrypoint_confidence=high
+launchers=START_ADMIN_COMMAND_CENTRE.bat
 nested_duplicate=False
+databases=0
+tests=1
 tree:
+  .env.example
   .gitkeep
+  admin_core.py
+  BOT_MANIFEST.json
+  main.py
+  README.md
+  requirements.txt
+  START_ADMIN_COMMAND_CENTRE.bat
+  tests/
+  tests/test_admin_core.py
+  VERSION.txt
 
 [Smart_Auto_Poster_V2]
+classification=CANONICAL
+version=3.0.4
 entrypoint=app.py
 entrypoint_confidence=high
-launchers=START_AUTO_POSTER.ps1, run_setup.ps1
+launchers=RUN_SERVICE.ps1, START_AUTO_POSTER.ps1, run_setup.ps1
 nested_duplicate=False
+databases=4
+tests=12
 tree:
   .env [REDACTED FILE]
   .env.example
   .gitkeep
   app.py
+  AUTOSTART_STATUS.ps1
+  BOT_MANIFEST.json
   BUILD_REPORT.txt
   CHANGELOG.md
   config/
@@ -30,13 +50,27 @@ tree:
   data/
   data/cache/
   data/smart_autoposter.sqlite3
-  data/smart_autoposter.sqlite3-shm
-  data/smart_autoposter.sqlite3-wal
+  diagnostics/
+  docs/
+  docs/LIVE_TEST_CHECKLIST.md
+  docs/OPERATIONS.md
+  docs/RELEASE_3_0_CHECKLIST.md
+  docs/TELEGRAM_ADMIN_SETUP.md
+  docs/UPGRADE_FROM_2.2.3.md
+  docs/V3_PLATFORM.md
   exports/
+  INSTALL_AUTOSTART.ps1
+  INSTALL_MASTER_UPDATER.ps1
+  master_updater/
+  master_updater/APPLY_UPDATE.ps1
+  master_updater/ROLLBACK_LAST_UPDATE.ps1
   README.md
+  REMOVE_AUTOSTART.ps1
   requirements.txt
+  RUN_SERVICE.ps1
   run_setup.ps1
   runtime/
+  runtime/admin_bot.session
   runtime/sessions/
   runtime/sessions/Auto_Post_Secondary.session
   runtime/sessions/my_account.session
@@ -45,57 +79,97 @@ tree:
   smart_autoposter/
   smart_autoposter/__init__.py
   smart_autoposter/account_guard.py
+  smart_autoposter/admin_bot.py
+  smart_autoposter/analytics.py
   smart_autoposter/cli.py
+  smart_autoposter/collections.py
+  smart_autoposter/content_library.py
   smart_autoposter/core.py
   smart_autoposter/db.py
+  smart_autoposter/destination_sync.py
   smart_autoposter/importer.py
+  smart_autoposter/maintenance.py
   smart_autoposter/media_cache.py
+  smart_autoposter/notifications.py
+  smart_autoposter/operations.py
+  smart_autoposter/recommendations.py
+  smart_autoposter/redaction.py
+  smart_autoposter/reports.py
+  smart_autoposter/rules.py
   smart_autoposter/runtime_lock.py
   smart_autoposter/safety.py
   smart_autoposter/scheduler.py
   smart_autoposter/service.py
   smart_autoposter/settings.py
   smart_autoposter/telegram_io.py
+  smart_autoposter/templates.py
   smart_autoposter/time_rules.py
+  smart_autoposter/watchdog.py
+  smart_autoposter/wizard.py
   smart_autoposter/worker.py
   START_AUTO_POSTER.ps1
   tests/
   tests/fixtures/
   tests/fixtures/test_config.csv
   tests/test_account_guard.py
+  tests/test_admin_credentials.py
   tests/test_core.py
+  tests/test_destination_sync.py
   tests/test_login_account.py
   tests/test_migration.py
   tests/test_safety_runtime.py
+  tests/test_v23_production.py
+  tests/test_v24_autonomous.py
+  tests/test_v24_recovery.py
+  tests/test_v30_platform.py
   tests/test_worker_logic.py
+  updates/
+  updates/applied/
+  updates/failed/
+  updates/inbox/
   VERSION.txt
 
 [Universal_Search]
+classification=PLACEHOLDER
+version=unknown
 entrypoint=not detected
 entrypoint_confidence=none
 launchers=none
 nested_duplicate=False
+databases=0
+tests=0
 tree:
   .gitkeep
+  BOT_MANIFEST.json
 
 [VM_Guard]
+classification=PLACEHOLDER
+version=unknown
 entrypoint=not detected
 entrypoint_confidence=none
 launchers=none
 nested_duplicate=False
+databases=0
+tests=0
 tree:
   .gitkeep
+  BOT_MANIFEST.json
 
 [VM_Relationship_Manager]
+classification=CANONICAL
+version=1.2.0
 entrypoint=main.py
 entrypoint_confidence=high
 launchers=START_VM_RELATIONSHIPS.bat, START_VM_RELATIONSHIPS.ps1
 nested_duplicate=True
+databases=0
+tests=0
 tree:
   .env [REDACTED FILE]
   .env.example
   .gitignore
   admin_bot.py
+  BOT_MANIFEST.json
   CHANGELOG.md
   config.py
   database.py

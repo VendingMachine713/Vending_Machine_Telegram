@@ -18,6 +18,14 @@ function Fail-Update([string]$Message) {
     Write-Host "[ERROR] $Message" -ForegroundColor Red
     throw $Message
 }
+function Has-ParentTraversal([string]$Value) {
+    if (-not $Value) { return $false }
+    if ([IO.Path]::IsPathRooted($Value)) { return $true }
+    foreach ($seg in ($Value -split '[\\/]')) {
+        if ($seg -eq '..') { return $true }
+    }
+    return $false
+}
 
 if (-not $Package) {
     $item = Get-ChildItem $Inbox -Filter '*.zip' -File | Sort-Object LastWriteTime -Descending | Select-Object -First 1
@@ -39,7 +47,7 @@ try {
     if (-not $manifest.bot -or -not $manifest.version -or -not $manifest.target) { Fail-Update 'Manifest missing bot/version/target' }
     if ($manifest.format_version -and [int]$manifest.format_version -gt 3) { Fail-Update "Unsupported update manifest format: $($manifest.format_version)" }
     $targetRel = ([string]$manifest.target).Replace('\','/')
-    if ($targetRel -match '(^|/)\.\.(/|$)' -or -not $targetRel.StartsWith('bots/')) { Fail-Update "Unsafe manifest target: $targetRel" }
+    if ((Has-ParentTraversal $targetRel) -or -not $targetRel.StartsWith('bots/')) { Fail-Update "Unsafe manifest target: $targetRel" }
     $payload = Join-Path $manifestFile.Directory.FullName 'payload'
     if (-not (Test-Path $payload)) { Fail-Update 'Manifest payload folder is missing' }
 
@@ -53,7 +61,7 @@ try {
     if ($manifest.sha256) {
         foreach ($prop in $manifest.sha256.PSObject.Properties) {
             $rel = ([string]$prop.Name).Replace('/','\')
-            if ($rel -match '(^|\)\.\.(\|$)') { Fail-Update "Unsafe hash path: $rel" }
+            if (Has-ParentTraversal $rel) { Fail-Update "Unsafe hash path: $rel" }
             $file = Join-Path $payload $rel
             if (-not (Test-Path $file)) { Fail-Update "Hashed payload file missing: $rel" }
             $actualHash = (Get-FileHash -Algorithm SHA256 -Path $file).Hash.ToLowerInvariant()
@@ -102,7 +110,7 @@ try {
     # restore both code and database to the same pre-update state.
     if ($manifest.database_backup) {
         $dbRel = if ($manifest.database_path) { ([string]$manifest.database_path).Replace('/', '\\') } else { 'data\smart_autoposter.sqlite3' }
-        if ($dbRel -match '(^|\\)\.\.(\\|$)') { Fail-Update "Unsafe database_path: $dbRel" }
+        if (Has-ParentTraversal $dbRel) { Fail-Update "Unsafe database_path: $dbRel" }
         $dbLiveFile = Join-Path $Target $dbRel
         if (Test-Path $dbLiveFile) {
             $dbDir = Join-Path $backupDir 'database'

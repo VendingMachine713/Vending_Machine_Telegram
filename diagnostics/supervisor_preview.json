@@ -1,0 +1,39 @@
+[
+  {
+    "service": "Admin_Command_Centre",
+    "action": "none",
+    "alive": false,
+    "policy": {
+      "auto_start": false,
+      "auto_restart": false
+    }
+  },
+  {
+    "service": "Smart_Auto_Poster_V2",
+    "action": "none",
+    "alive": false,
+    "policy": {
+      "auto_start": false,
+      "auto_restart": false
+    }
+  },
+  {
+    "service": "Universal_Search",
+    "action": "none",
+    "reason": "PLANNED placeholder; no runnable service installed."
+  },
+  {
+    "service": "VM_Guard",
+    "action": "none",
+    "reason": "PLANNED placeholder; no runnable service installed."
+  },
+  {
+    "service": "VM_Relationship_Manager",
+    "action": "none",
+    "alive": false,
+    "policy": {
+      "auto_start": false,
+      "auto_restart": false
+    }
+  }
+]

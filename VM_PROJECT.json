@@ -1,15 +1,18 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "project": "Vending_Machine_Telegram",
-  "platform_version": "0.2.0",
+  "platform_version": "1.2.0",
   "architecture": "modular_bots_shared_core",
+  "python_baseline": "3.12",
   "principles": [
     "preserve_permanent_bot_folders",
     "incremental_delta_updates",
     "shared_infrastructure_for_cross_bot_capabilities",
     "independent_bot_failure_domains",
     "admin_by_exception",
-    "safe_reversible_changes"
+    "safe_reversible_changes",
+    "dry_run_before_destructive_changes",
+    "no_credentials_in_diagnostics_or_support_bundles"
   ],
   "canonical_bot_folders": [
     "Smart_Auto_Poster_V2",
@@ -18,5 +21,6 @@
     "Admin_Command_Centre",
     "VM_Relationship_Manager"
   ],
-  "runtime_state": "state/vm_inventory.json"
+  "state_db": "state/vm_platform.sqlite3",
+  "runtime_inventory": "state/vm_inventory.json"
 }

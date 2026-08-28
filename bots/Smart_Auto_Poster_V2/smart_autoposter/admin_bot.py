@@ -233,7 +233,26 @@ class TelegramAdminController:
             self.settings.api_hash,
             flood_sleep_threshold=0,
         )
-        await client.start(bot_token=self.settings.admin_bot_token)
+        try:
+            await client.start(bot_token=self.settings.admin_bot_token)
+        except Exception as exc:
+            # Telethon raises AccessTokenInvalidError when BotFather token is
+            # revoked, mistyped, or belongs to no current bot.  Keep the
+            # operator output concise and never echo the token itself.
+            try:
+                from telethon.errors import AccessTokenInvalidError
+            except Exception:
+                AccessTokenInvalidError = ()
+            if AccessTokenInvalidError and isinstance(exc, AccessTokenInvalidError):
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+                raise RuntimeError(
+                    "ADMIN_BOT_TOKEN was rejected by Telegram. Generate a fresh token in @BotFather, "
+                    "save it in this bot's .env, then retry option 53."
+                ) from exc
+            raise
         self.client = client
 
         @client.on(events.NewMessage)

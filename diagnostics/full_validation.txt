@@ -1,0 +1,24 @@
+========================================================================
+VM FULL PLATFORM VALIDATION
+========================================================================
+VM Core:          1.2.0
+Bots:             5 total | 3 runnable | 2 planned
+Platform tests:   PASS
+Pre-flight:       PASS
+Doctor failures:  0
+Doctor warnings:  1
+Destinations:     108
+Accounts:         4
+Backup:           C:\Users\cherr\OneDrive\Desktop\Vending_Machine_Telegram\backups\vm_backup_validation_20260828T160317Z.zip
+
+SERVICE HEALTH
+------------------------------------------------------------------------
+CONFIG_REQUIRED Admin_Command_Centre
+READY      Smart_Auto_Poster_V2
+PLANNED    Universal_Search
+PLANNED    VM_Guard
+READY      VM_Relationship_Manager
+
+NESTED DUPLICATES
+------------------------------------------------------------------------
+VM_Relationship_Manager

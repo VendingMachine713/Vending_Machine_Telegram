@@ -9,7 +9,14 @@ except ImportError:
     def load_dotenv(*args, **kwargs):
         return False
 
-load_dotenv()
+PROJECT_ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+
+def _load_project_env() -> None:
+    # The project-local .env is authoritative for this bot.  override=True
+    # prevents stale Windows/user environment variables from shadowing edits.
+    load_dotenv(dotenv_path=PROJECT_ENV_PATH, override=True)
+
+_load_project_env()
 
 
 def _path(name: str, default: str) -> Path:
@@ -82,6 +89,7 @@ class Settings:
 
     @classmethod
     def load(cls, require_credentials: bool = False) -> "Settings":
+        _load_project_env()
         api_id_raw = os.getenv("TELEGRAM_API_ID", "").strip()
         api_hash = os.getenv("TELEGRAM_API_HASH", "").strip()
         if require_credentials and (not api_id_raw or not api_hash):

@@ -1,15 +1,13 @@
 # VM Platform Changelog
 
-## 0.2.0 — Discovery & Inspection
+## 1.2.0 — Control Plane Bootstrap
 
-- Improved entrypoint discovery using launcher parsing and common source directories.
-- Added entrypoint confidence metadata.
-- Added safe project structure inspection.
-- Added credential filename redaction.
-- Added cache/runtime-folder exclusions.
-- Upgraded inventory schema.
-- Expanded self-tests.
+- Added CONFIG_REQUIRED health state and runtime config-key checks.
+- Routine Doctor skips backup/archive/update database copies.
+- Added Ruff/uv preview installer and Git status.
+- Enhanced duplicate analysis with hashes/sizes.
+- Installed Admin Command Centre v0.1.0 with allowlist and mutations disabled by default.
 
-## 0.1.0 — Foundation
+## 1.1.0 — Live Project Hardening
 
-- Established VM Core, VM Doctor, inventory, manifests and platform CLI.
+- Placeholder classification, one-button validation, exact JSON reporting, duplicate analysis.

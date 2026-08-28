@@ -1,8 +1,10 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from smart_autoposter.db import Database
 from smart_autoposter.runtime_lock import RuntimeLock
@@ -49,22 +51,56 @@ class SafetyAndRuntimeTests(unittest.TestCase):
         path = self.root / "runtime.lock"
         first = RuntimeLock(path)
         first.acquire()
-        try:
-            with self.assertRaises(RuntimeError):
-                RuntimeLock(path).acquire()
-        finally:
-            first.release()
+        self.addCleanup(first.release)
+        self.assertTrue(path.is_dir())
+        with self.assertRaises(RuntimeError):
+            RuntimeLock(path).acquire()
+        first.release()
         self.assertFalse(path.exists())
 
     def test_stale_runtime_lock_is_reclaimed(self):
         path = self.root / "runtime.lock"
-        path.write_text(json.dumps({"pid": 99999999, "token": "old"}), encoding="utf-8")
+        path.mkdir()
+        (path / "owner.json").write_text(
+            json.dumps({"pid": 42424242, "token": "old"}), encoding="utf-8"
+        )
         lock = RuntimeLock(path)
+        self.addCleanup(lock.release)
+        # Do not depend on platform-specific PID probing in this filesystem test.
+        with mock.patch("smart_autoposter.runtime_lock._pid_alive", return_value=False):
+            lock.acquire()
+        self.assertTrue(path.is_dir())
+        lock.release()
+        self.assertFalse(path.exists())
+
+    def test_old_v30_stale_lock_file_is_reclaimed(self):
+        path = self.root / "runtime.lock"
+        path.write_text(json.dumps({"pid": 42424242, "token": "old"}), encoding="utf-8")
+        lock = RuntimeLock(path)
+        self.addCleanup(lock.release)
+        with mock.patch("smart_autoposter.runtime_lock._pid_alive", return_value=False):
+            lock.acquire()
+        self.assertTrue(path.is_dir())
+        lock.release()
+        self.assertFalse(path.exists())
+
+    def test_uninitialized_fresh_lock_directory_fails_closed(self):
+        path = self.root / "runtime.lock"
+        path.mkdir()
+        with self.assertRaises(RuntimeError):
+            RuntimeLock(path).acquire()
+        self.assertTrue(path.exists())
+
+    def test_uninitialized_old_lock_directory_is_reclaimed(self):
+        path = self.root / "runtime.lock"
+        path.mkdir()
+        old = time.time() - 120
+        os.utime(path, (old, old))
+        lock = RuntimeLock(path)
+        self.addCleanup(lock.release)
         lock.acquire()
-        try:
-            self.assertTrue(path.exists())
-        finally:
-            lock.release()
+        self.assertTrue(path.is_dir())
+        lock.release()
         self.assertFalse(path.exists())
 
 
