@@ -45,6 +45,7 @@ def _bot(name: str, root: Path):
     aliases = {
         "autoposter": "smart_auto_poster_v2",
         "auto": "smart_auto_poster_v2",
+        "poster": "smart_auto_poster_v2",
         "guard": "vm_guard",
         "search": "universal_search",
         "relationship": "vm_relationship_manager",
@@ -146,3 +147,36 @@ def service_status(root: Path | None = None) -> list[dict[str, Any]]:
         elif row["runtime_status"] == "RUNNING":
             row["runtime_status"] = "STOPPED"
     return rows
+
+def run_service_cli(name: str, args: list[str], root: Path | None = None, timeout: int = 30) -> dict[str, Any]:
+    """Run one service's Python entrypoint as a bounded subprocess.
+
+    This is the shared VM Core bridge used by control surfaces such as the
+    standalone Admin Command Centre. It deliberately uses argv lists with
+    shell=False semantics, captures output, and applies a timeout so callers do
+    not need to import another bot's internal Python modules.
+    """
+    root = root or project_root()
+    bot = _bot(name, root)
+    if not bot.entrypoint:
+        return {"ok": False, "service": bot.folder, "reason": "Service has no Python entrypoint."}
+    cmd = [sys.executable, bot.entrypoint, *[str(x) for x in args]]
+    try:
+        proc = subprocess.run(cmd, cwd=bot.path, capture_output=True, text=True, timeout=max(1, int(timeout)), shell=False)
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "ok": False,
+            "service": bot.folder,
+            "timeout": True,
+            "stdout": (exc.stdout or "")[-4000:] if isinstance(exc.stdout, str) else "",
+            "stderr": (exc.stderr or "")[-2000:] if isinstance(exc.stderr, str) else "",
+        }
+    except OSError as exc:
+        return {"ok": False, "service": bot.folder, "error": f"{type(exc).__name__}: {exc}"}
+    return {
+        "ok": proc.returncode == 0,
+        "service": bot.folder,
+        "returncode": proc.returncode,
+        "stdout": (proc.stdout or "")[-4000:],
+        "stderr": (proc.stderr or "")[-2000:],
+    }
