@@ -12,7 +12,7 @@ VM Intelligence is the shared evidence and reasoning layer for the Vending Machi
 
 ## Event contract
 
-Events are stored in `state/vm_platform.sqlite3` and use schema version 2 metadata:
+Events are stored in `state/vm_platform.sqlite3` and use structured metadata:
 
 - `event_type`: namespaced machine-readable type, for example `service.started` or `signal.guard_risk_elevated`
 - `source`: canonical bot/service name
@@ -74,6 +74,20 @@ Initial cross-bot reasoning includes:
 - delivery-risk signals from posting uncertainty/failure events
 - relationship dormancy + search/activity spike opportunity detection
 - VM Guard risk suppression of relationship/activity opportunities
+
+## Evidence-governed recommendations
+
+VM Core schema version 3 turns active cross-bot signals into durable recommendations. Each recommendation records:
+
+- a stable idempotency key, type, subject, priority and confidence
+- the proposed action and human-readable rationale
+- the rule ID and rule version that produced it
+- the supporting signal IDs and safety controls
+- a lifecycle state: `PROPOSED`, `BLOCKED`, `ACCEPTED`, `DISMISSED`, `COMPLETED` or `EXPIRED`
+
+Current rules recommend safe delivery reconciliation, relationship review and guard-risk review. A guard signal on the same chat blocks relationship outreach. Recommendations never execute Telegram actions, and uncertain Smart Auto Poster jobs remain protected from automatic retry.
+
+Run `python -m shared.vm_core.cli intelligence` to refresh and display the shared view.
 
 ## Authority model
 
