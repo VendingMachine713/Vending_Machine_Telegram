@@ -17,10 +17,10 @@ function Safe-Role([string]$CommandLine) {
     return 'RELATED'
 }
 
-function Get-Descendants([int]$Pid, $All) {
+function Get-Descendants([int]$RootProcessId, $All) {
     $found = New-Object System.Collections.Generic.List[object]
     $queue = New-Object System.Collections.Generic.Queue[int]
-    $queue.Enqueue($Pid)
+    $queue.Enqueue($RootProcessId)
     while ($queue.Count -gt 0) {
         $parent = $queue.Dequeue()
         foreach ($child in @($All | Where-Object { $_.ParentProcessId -eq $parent })) {
