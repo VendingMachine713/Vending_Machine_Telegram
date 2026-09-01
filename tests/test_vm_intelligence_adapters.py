@@ -151,6 +151,32 @@ class VMIntelligenceAdapterTests(unittest.TestCase):
             self.assertEqual(opportunities[0]["subject_id"], "123")
             evidence = json.loads(opportunities[0]["evidence_json"])
             self.assertEqual(evidence["contact_ids"], ["999"])
+            recommendations = PlatformDB(root=root).recommendations(20)
+            relationship = [r for r in recommendations if r["recommendation_type"] == "relationship_review"]
+            delivery = [r for r in recommendations if r["recommendation_type"] == "delivery_reconciliation"]
+            self.assertEqual(len(relationship), 1)
+            self.assertEqual(relationship[0]["status"], "PROPOSED")
+            self.assertEqual(len(delivery), 1)
+            self.assertFalse(json.loads(delivery[0]["evidence_json"])["automatic_retry"])
+
+    def test_guard_signal_blocks_relationship_outreach_recommendation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._root(tmp)
+            self._relationship_db(root, chat_id=123)
+            self._search_db(root, chat_id=123)
+            db = PlatformDB(root=root)
+            db.init()
+            db.upsert_signal(
+                "guard:123", "guard_risk_elevated", "Elevated risk",
+                subject_type="chat", subject_id="123", score=85, confidence=.95,
+            )
+            materialize_intelligence(root)
+            rows = db.recommendations(20)
+            relationship = [r for r in rows if r["recommendation_type"] == "relationship_review"]
+            self.assertEqual(relationship[0]["status"], "BLOCKED")
+            evidence = json.loads(relationship[0]["evidence_json"])
+            self.assertEqual(evidence["guard_risk_score"], 85)
+            self.assertFalse(evidence["automatic_execution"])
 
 
 if __name__ == "__main__":
