@@ -1,5 +1,4 @@
-
-import logging, secrets
+import logging, secrets, sys
 from datetime import timezone
 from pathlib import Path
 from telegram import Update
@@ -8,6 +7,11 @@ from envutil import load_env
 from core import Store, parse_query
 
 BASE=Path(__file__).resolve().parent
+ROOT=BASE.parents[1]
+if str(ROOT) not in sys.path: sys.path.insert(0,str(ROOT))
+from shared.vm_core.publisher import BotEventPublisher
+publisher=BotEventPublisher("Universal_Search",ROOT)
+
 ENV=load_env(BASE/".env")
 TOKEN=ENV.get("BOT_TOKEN","").strip()
 if not TOKEN:
@@ -61,6 +65,17 @@ async def search_cmd(update, context, cross=False, force_ads=False):
         await update.effective_message.reply_text("Use /search words [--user @name] [--days 7] [--limit 10]")
         return
     rows=store.search(q, None if cross else update.effective_chat.id)
+    publisher.signal(
+        "search_activity",
+        subject_type="chat",
+        subject_id=update.effective_chat.id,
+        score=min(100, len(rows)*10),
+        confidence=0.9,
+        rationale="Universal Search query completed",
+        result_count=len(rows),
+        cross_chat=bool(cross),
+        ads_mode=bool(force_ads),
+    )
     if not rows:
         await update.effective_message.reply_text("No matches.")
         return
@@ -104,6 +119,13 @@ def main():
     if not admin_id():
         print(f"[CLAIM CODE] Send /claim {claim_code()} to this bot from your Telegram account.")
     print("[READY] VM Universal Search v1.0")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    publisher.started(indexed_messages=store.count())
+    try:
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
+    except BaseException as exc:
+        publisher.incident("process_crash","Universal Search exited unexpectedly",severity="CRITICAL",error_type=type(exc).__name__)
+        raise
+    finally:
+        publisher.stopped("polling_stopped")
 
 if __name__=="__main__": main()

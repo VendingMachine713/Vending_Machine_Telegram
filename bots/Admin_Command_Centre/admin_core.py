@@ -12,6 +12,7 @@ from shared.vm_core.backup import create_backup
 from shared.vm_core.doctor import run_doctor
 from shared.vm_core.support import create_support_bundle
 from shared.vm_core.supervisor import supervise_once
+from shared.vm_core.intelligence import intelligence_summary,format_intelligence_summary
 MUTATING={'backup','support','start','stop','restart','supervise','poster_start','poster_stop','poster_restart'}
 POSTER_SERVICE='Smart_Auto_Poster_V2'
 
@@ -51,7 +52,7 @@ def parse_command(text:str):
 def help_text(cfg):
     return (
         'VM ADMIN COMMAND CENTRE\n\n'
-        '/vm\n/status\n/health\n/registry\n/jobs\n/doctor\n/backup\n/support\n'
+        '/vm\n/status\n/health\n/intelligence\n/brain\n/registry\n/jobs\n/doctor\n/backup\n/support\n'
         '/start <service>\n/stop <service>\n/restart <service>\n/supervise\n\n'
         'SMART AUTO POSTER\n'
         '/poster\n/poster_status\n/poster_health\n/poster_queue\n/poster_campaigns\n'
@@ -114,6 +115,7 @@ def handle_command(user_id:int,text:str,cfg:dict[str,Any]|None=None)->str:
     if cmd=='poster_campaigns': return _poster_cli('campaigns')
     if cmd=='status': return 'VM SERVICES\n'+'\n'.join(f"{('RUNNING' if r.get('process_alive') else r.get('runtime_status','UNKNOWN')):<12} {r['name']}" for r in service_status(ROOT))
     if cmd=='health': return 'VM HEALTH\n'+'\n'.join(f"{r['status']:<15} {r['service']}" for r in run_health(ROOT))
+    if cmd in {'intelligence','brain'}: return format_intelligence_summary(intelligence_summary(ROOT,refresh=True))[:3900]
     if cmd=='registry':
         r=registry_summary(ROOT); return f"VM REGISTRY\nDestinations: {r['destinations']}\nAccounts: {r['accounts']}"
     if cmd=='jobs':

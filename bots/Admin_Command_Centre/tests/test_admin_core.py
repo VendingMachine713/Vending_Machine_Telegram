@@ -35,6 +35,15 @@ class AdminCoreTests(unittest.TestCase):
         self.assertIn('Smart_Auto_Poster_V2',text)
         restart.assert_called_once()
         self.assertEqual(restart.call_args.args[0],'Smart_Auto_Poster_V2')
+    @patch('admin_core.format_intelligence_summary')
+    @patch('admin_core.intelligence_summary')
+    def test_brain_is_read_only_intelligence_surface(self,summary,formatter):
+        summary.return_value={'platform_health':{},'open_incidents':[],'active_signals':[]}
+        formatter.return_value='VM INTELLIGENCE\nServices healthy: 5/5'
+        text=handle_command(123,'/brain',ADMIN)
+        self.assertIn('VM INTELLIGENCE',text)
+        summary.assert_called_once_with(ROOT,refresh=True)
+        formatter.assert_called_once()
     def test_local_claim_persistence_helper(self):
         with tempfile.TemporaryDirectory() as tmp:
             p=Path(tmp)/'.env'; set_local_env('VM_ADMIN_USER_IDS','123',p); self.assertEqual(load_local_env(p)['VM_ADMIN_USER_IDS'],'123')

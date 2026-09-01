@@ -1,9 +1,10 @@
-
 from __future__ import annotations
 
 import asyncio
 import logging
 import signal
+import sys
+from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
 from admin_bot import AdminBot
@@ -12,6 +13,12 @@ from database import Database, utcnow
 from jobs import BackgroundJobs
 from monitor import TelegramMonitor
 from relationship_engine import RelationshipEngine
+
+BOT_DIR=Path(__file__).resolve().parent
+ROOT=BOT_DIR.parents[1]
+if str(ROOT) not in sys.path: sys.path.insert(0,str(ROOT))
+from shared.vm_core.publisher import BotEventPublisher
+publisher=BotEventPublisher("VM_Relationship_Manager",ROOT)
 
 
 def configure_logging(log_dir):
@@ -37,9 +44,6 @@ def configure_logging(log_dir):
     file_handler.setFormatter(formatter)
     root.addHandler(file_handler)
 
-    # httpx logs full Telegram Bot API URLs at INFO level, which includes the
-    # bot token. Keep routine HTTP polling out of console/files so credentials
-    # are not exposed in normal logs.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
@@ -62,8 +66,10 @@ async def main():
                VALUES (?, ?, ?, ?)""",
             (component, status, details, utcnow()),
         )
+        publisher.heartbeat(status=status, component=component, details=details)
 
     health("system", "starting", "VM Relationship Manager starting")
+    publisher.started(database=str(settings.database_path))
 
     stop_event = asyncio.Event()
 
@@ -75,7 +81,6 @@ async def main():
         try:
             loop.add_signal_handler(sig, ask_stop)
         except (NotImplementedError, RuntimeError):
-            # Windows may not support asyncio signal handlers here.
             pass
 
     await admin_bot.start()
@@ -101,6 +106,7 @@ async def main():
             exc = monitor_task.exception()
             details = f"Telegram monitor stopped unexpectedly: {exc!r}"
             health("telegram_monitor", "error", details)
+            publisher.incident("monitor_stopped",details,severity="ERROR",component="telegram_monitor")
             log.error(details)
             await admin_bot.notify_admins(
                 "<b>🔴 VM Relationship Manager monitor stopped</b>\n"
@@ -112,6 +118,7 @@ async def main():
             exc = jobs_task.exception()
             details = f"Background jobs stopped unexpectedly: {exc!r}"
             health("scheduler", "error", details)
+            publisher.incident("scheduler_stopped",details,severity="ERROR",component="scheduler")
             log.error(details)
             await admin_bot.notify_admins(
                 "<b>🔴 VM Relationship Manager scheduler stopped</b>\n"
@@ -137,6 +144,7 @@ async def main():
         await asyncio.gather(monitor_task, jobs_task, stop_task, return_exceptions=True)
 
         health("system", "offline", "VM Relationship Manager stopped")
+        publisher.stopped("normal")
         log.info("VM Relationship Manager stopped")
 
 

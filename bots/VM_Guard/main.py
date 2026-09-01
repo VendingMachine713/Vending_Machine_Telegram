@@ -1,5 +1,4 @@
-
-import logging, secrets, json
+import logging, secrets, json, sys
 from pathlib import Path
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
@@ -7,6 +6,11 @@ from envutil import load_env
 from core import score_message, FloodTracker
 
 BASE=Path(__file__).resolve().parent
+ROOT=BASE.parents[1]
+if str(ROOT) not in sys.path: sys.path.insert(0,str(ROOT))
+from shared.vm_core.publisher import BotEventPublisher
+publisher=BotEventPublisher("VM_Guard",ROOT)
+
 ENV=load_env(BASE/".env")
 TOKEN=ENV.get("BOT_TOKEN","").strip()
 if not TOKEN:
@@ -61,6 +65,16 @@ async def inspect(update,context):
     if flooded: risk=max(risk,70); reasons.append(f"flood ({count} msgs)")
     c=config()
     if risk < c.get("risk_threshold",60): return
+    publisher.signal(
+        "guard_risk_elevated",
+        subject_type="chat",
+        subject_id=chat.id,
+        score=risk,
+        confidence=0.9,
+        rationale="VM Guard risk threshold exceeded",
+        evidence={"reason_codes": list(reasons), "message_id": m.message_id},
+        flooded=bool(flooded),
+    )
     aid=admin_id()
     if aid:
         who="@"+u.username if u.username else u.full_name
@@ -83,6 +97,13 @@ def main():
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND,inspect))
     if not admin_id(): print(f"[CLAIM CODE] Send /claim {claim_code()} to this bot from your Telegram account.")
     print("[READY] VM Guard v1.0 — monitor-only default")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    publisher.started(mode="active" if config().get("mutations_enabled") else "monitor_only")
+    try:
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
+    except BaseException as exc:
+        publisher.incident("process_crash","VM Guard exited unexpectedly",severity="CRITICAL",error_type=type(exc).__name__)
+        raise
+    finally:
+        publisher.stopped("polling_stopped")
 
 if __name__=="__main__": main()

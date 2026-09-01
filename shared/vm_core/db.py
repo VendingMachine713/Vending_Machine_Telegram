@@ -7,10 +7,12 @@ from datetime import datetime, timezone
 from typing import Iterator, Any
 from .paths import project_root
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
+
 
 class PlatformDB:
     def __init__(self, path: Path | None = None, root: Path | None = None):
@@ -29,6 +31,12 @@ class PlatformDB:
             con.commit()
         finally:
             con.close()
+
+    @staticmethod
+    def _ensure_column(con: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+        cols = {str(row[1]) for row in con.execute(f"PRAGMA table_info({table})")}
+        if column not in cols:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
     def init(self) -> None:
         with self.connect() as con:
@@ -75,7 +83,44 @@ class PlatformDB:
                 event_type TEXT NOT NULL,
                 source TEXT NOT NULL,
                 payload_json TEXT NOT NULL DEFAULT '{}',
-                created_at_utc TEXT NOT NULL
+                created_at_utc TEXT NOT NULL,
+                event_version INTEGER NOT NULL DEFAULT 1,
+                severity TEXT NOT NULL DEFAULT 'INFO',
+                subject_type TEXT,
+                subject_id TEXT,
+                correlation_id TEXT,
+                evidence_json TEXT NOT NULL DEFAULT '{}'
+            );
+
+            CREATE TABLE IF NOT EXISTS incidents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                incident_key TEXT NOT NULL UNIQUE,
+                incident_type TEXT NOT NULL,
+                source TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'OPEN',
+                subject_type TEXT,
+                subject_id TEXT,
+                summary TEXT NOT NULL,
+                evidence_json TEXT NOT NULL DEFAULT '{}',
+                first_seen_utc TEXT NOT NULL,
+                last_seen_utc TEXT NOT NULL,
+                resolved_at_utc TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS intelligence_signals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_key TEXT NOT NULL UNIQUE,
+                signal_type TEXT NOT NULL,
+                subject_type TEXT,
+                subject_id TEXT,
+                score REAL NOT NULL DEFAULT 0,
+                confidence REAL NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'ACTIVE',
+                rationale TEXT NOT NULL,
+                evidence_json TEXT NOT NULL DEFAULT '{}',
+                created_at_utc TEXT NOT NULL,
+                updated_at_utc TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS destinations (
@@ -117,9 +162,30 @@ class PlatformDB:
                 description TEXT NOT NULL
             );
             """)
+            for column, ddl in (
+                ("event_version", "INTEGER NOT NULL DEFAULT 1"),
+                ("severity", "TEXT NOT NULL DEFAULT 'INFO'"),
+                ("subject_type", "TEXT"),
+                ("subject_id", "TEXT"),
+                ("correlation_id", "TEXT"),
+                ("evidence_json", "TEXT NOT NULL DEFAULT '{}'")
+            ):
+                self._ensure_column(con, "events", column, ddl)
+
+            con.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_events_type_created ON events(event_type, created_at_utc);
+            CREATE INDEX IF NOT EXISTS idx_events_subject ON events(subject_type, subject_id, created_at_utc);
+            CREATE INDEX IF NOT EXISTS idx_events_correlation ON events(correlation_id);
+            CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status, severity, last_seen_utc);
+            CREATE INDEX IF NOT EXISTS idx_signals_subject ON intelligence_signals(subject_type, subject_id, status);
+            """)
             con.execute(
                 "INSERT OR IGNORE INTO migrations(version, applied_at_utc, description) VALUES(?,?,?)",
                 (1, utcnow(), "Initial VM Platform schema"),
+            )
+            con.execute(
+                "INSERT OR IGNORE INTO migrations(version, applied_at_utc, description) VALUES(?,?,?)",
+                (2, utcnow(), "Structured events, incidents and VM intelligence signals"),
             )
             con.execute(
                 "INSERT OR REPLACE INTO meta(key,value) VALUES('schema_version',?)",
@@ -164,19 +230,122 @@ class PlatformDB:
         with self.connect() as con:
             return [dict(r) for r in con.execute("SELECT * FROM services ORDER BY name")]
 
-    def add_event(self, event_type: str, source: str, payload: dict[str, Any] | None = None) -> int:
+    def add_event(self, event_type: str, source: str, payload: dict[str, Any] | None = None,
+                  *, event_version: int = 1, severity: str = "INFO",
+                  subject_type: str | None = None, subject_id: str | None = None,
+                  correlation_id: str | None = None,
+                  evidence: dict[str, Any] | None = None) -> int:
         with self.connect() as con:
-            cur = con.execute(
-                "INSERT INTO events(event_type,source,payload_json,created_at_utc) VALUES(?,?,?,?)",
-                (event_type, source, json.dumps(payload or {}, ensure_ascii=False), utcnow()),
-            )
+            cur = con.execute("""
+                INSERT INTO events(
+                    event_type,source,payload_json,created_at_utc,event_version,severity,
+                    subject_type,subject_id,correlation_id,evidence_json
+                ) VALUES(?,?,?,?,?,?,?,?,?,?)
+            """, (
+                event_type, source, json.dumps(payload or {}, ensure_ascii=False), utcnow(),
+                int(event_version), severity.upper(), subject_type, subject_id, correlation_id,
+                json.dumps(evidence or {}, ensure_ascii=False),
+            ))
             return int(cur.lastrowid)
 
-    def events(self, limit: int = 50) -> list[dict[str, Any]]:
+    def events(self, limit: int = 50, event_type: str | None = None) -> list[dict[str, Any]]:
+        query = "SELECT * FROM events"
+        params: list[Any] = []
+        if event_type:
+            query += " WHERE event_type=?"
+            params.append(event_type)
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(max(1, limit))
         with self.connect() as con:
-            return [dict(r) for r in con.execute(
-                "SELECT * FROM events ORDER BY id DESC LIMIT ?", (max(1, limit),)
-            )]
+            return [dict(r) for r in con.execute(query, params)]
+
+    def upsert_incident(self, incident_key: str, incident_type: str, source: str,
+                        severity: str, summary: str, *, subject_type: str | None = None,
+                        subject_id: str | None = None,
+                        evidence: dict[str, Any] | None = None) -> int:
+        now = utcnow()
+        with self.connect() as con:
+            con.execute("""
+                INSERT INTO incidents(
+                    incident_key,incident_type,source,severity,status,subject_type,subject_id,
+                    summary,evidence_json,first_seen_utc,last_seen_utc
+                ) VALUES(?,?,?,?, 'OPEN',?,?,?,?,?,?)
+                ON CONFLICT(incident_key) DO UPDATE SET
+                    incident_type=excluded.incident_type,
+                    source=excluded.source,
+                    severity=excluded.severity,
+                    status='OPEN',
+                    subject_type=excluded.subject_type,
+                    subject_id=excluded.subject_id,
+                    summary=excluded.summary,
+                    evidence_json=excluded.evidence_json,
+                    last_seen_utc=excluded.last_seen_utc,
+                    resolved_at_utc=NULL
+            """, (
+                incident_key, incident_type, source, severity.upper(), subject_type, subject_id,
+                summary, json.dumps(evidence or {}, ensure_ascii=False), now, now,
+            ))
+            row = con.execute("SELECT id FROM incidents WHERE incident_key=?", (incident_key,)).fetchone()
+            return int(row[0])
+
+    def resolve_incident(self, incident_key: str) -> bool:
+        now = utcnow()
+        with self.connect() as con:
+            cur = con.execute(
+                "UPDATE incidents SET status='RESOLVED', resolved_at_utc=?, last_seen_utc=? WHERE incident_key=? AND status!='RESOLVED'",
+                (now, now, incident_key),
+            )
+            return bool(cur.rowcount)
+
+    def incidents(self, limit: int = 50, status: str | None = None) -> list[dict[str, Any]]:
+        query = "SELECT * FROM incidents"
+        params: list[Any] = []
+        if status:
+            query += " WHERE status=?"
+            params.append(status.upper())
+        query += " ORDER BY CASE severity WHEN 'CRITICAL' THEN 4 WHEN 'ERROR' THEN 3 WHEN 'WARNING' THEN 2 ELSE 1 END DESC, last_seen_utc DESC LIMIT ?"
+        params.append(max(1, limit))
+        with self.connect() as con:
+            return [dict(r) for r in con.execute(query, params)]
+
+    def upsert_signal(self, signal_key: str, signal_type: str, rationale: str,
+                      *, subject_type: str | None = None, subject_id: str | None = None,
+                      score: float = 0, confidence: float = 0,
+                      evidence: dict[str, Any] | None = None, status: str = "ACTIVE") -> int:
+        now = utcnow()
+        with self.connect() as con:
+            con.execute("""
+                INSERT INTO intelligence_signals(
+                    signal_key,signal_type,subject_type,subject_id,score,confidence,status,
+                    rationale,evidence_json,created_at_utc,updated_at_utc
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(signal_key) DO UPDATE SET
+                    signal_type=excluded.signal_type,
+                    subject_type=excluded.subject_type,
+                    subject_id=excluded.subject_id,
+                    score=excluded.score,
+                    confidence=excluded.confidence,
+                    status=excluded.status,
+                    rationale=excluded.rationale,
+                    evidence_json=excluded.evidence_json,
+                    updated_at_utc=excluded.updated_at_utc
+            """, (
+                signal_key, signal_type, subject_type, subject_id, float(score), float(confidence),
+                status.upper(), rationale, json.dumps(evidence or {}, ensure_ascii=False), now, now,
+            ))
+            row = con.execute("SELECT id FROM intelligence_signals WHERE signal_key=?", (signal_key,)).fetchone()
+            return int(row[0])
+
+    def signals(self, limit: int = 50, status: str | None = "ACTIVE") -> list[dict[str, Any]]:
+        query = "SELECT * FROM intelligence_signals"
+        params: list[Any] = []
+        if status:
+            query += " WHERE status=?"
+            params.append(status.upper())
+        query += " ORDER BY score DESC, confidence DESC, updated_at_utc DESC LIMIT ?"
+        params.append(max(1, limit))
+        with self.connect() as con:
+            return [dict(r) for r in con.execute(query, params)]
 
     def add_job(self, job_type: str, payload: dict[str, Any] | None = None, max_attempts: int = 3) -> int:
         now = utcnow()
