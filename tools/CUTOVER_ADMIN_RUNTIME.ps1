@@ -51,19 +51,44 @@ function Get-RoleRoots([string]$Role) {
     return @($matches | Where-Object { -not $ids.ContainsKey([int]$_.ParentProcessId) } | Sort-Object ProcessId)
 }
 
+function Get-DescendantRows([int]$RootProcessId) {
+    $all = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+    $rows = @()
+    $queue = @([pscustomobject]@{ Id=$RootProcessId; Depth=0 })
+    while ($queue.Count -gt 0) {
+        $current = $queue[0]
+        if ($queue.Count -gt 1) { $queue = @($queue[1..($queue.Count-1)]) } else { $queue = @() }
+        foreach ($child in @($all | Where-Object { [int]$_.ParentProcessId -eq [int]$current.Id })) {
+            $row = [pscustomobject]@{ Id=[int]$child.ProcessId; Depth=([int]$current.Depth + 1); Name=$child.Name }
+            $rows += $row
+            $queue += $row
+        }
+    }
+    return @($rows)
+}
+
 function Stop-ProcessTree([int]$ProcessId, [string]$Label) {
     Write-Host "Stopping $Label root PID $ProcessId ..."
-    & taskkill.exe /PID $ProcessId /T | Out-Null
-    $deadline = (Get-Date).AddSeconds(15)
+    $desc = @(Get-DescendantRows $ProcessId | Sort-Object Depth -Descending)
+    foreach ($row in $desc) {
+        if (Get-Process -Id $row.Id -ErrorAction SilentlyContinue) {
+            Stop-Process -Id $row.Id -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds 150
+        }
+    }
+    if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
+        Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    $deadline = (Get-Date).AddSeconds(12)
     while ((Get-Date) -lt $deadline) {
         if (-not (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue)) { return }
-        Start-Sleep -Milliseconds 500
+        Start-Sleep -Milliseconds 400
     }
-    Write-Host "$Label did not exit promptly; forcing remaining tree."
-    & taskkill.exe /PID $ProcessId /T /F | Out-Null
+    Write-Host "$Label root is still present; using final taskkill fallback."
+    & taskkill.exe /PID $ProcessId /F | Out-Null
     Start-Sleep -Seconds 2
     if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
-        throw "$Label root PID $ProcessId is still running after forced termination."
+        throw "$Label root PID $ProcessId is still running after explicit descendant-first forced termination."
     }
 }
 
@@ -127,6 +152,7 @@ function Test-AdminBotApi([string]$Token) {
 Write-Host '============================================================'
 Write-Host ' VM ADMIN / SMART AUTO POSTER - CONTROLLED RUNTIME CUTOVER'
 Write-Host '============================================================'
+Write-Host 'Mode: RESUMABLE / FAIL-CLOSED'
 Write-Host 'Approval: VERIFIED'
 Write-Host "Root: $Root"
 Write-Host 'Campaign activation: NEVER REQUESTED'
@@ -138,9 +164,7 @@ if (-not (Test-Path -LiteralPath $posterApp -PathType Leaf)) { throw 'Smart Auto
 if (-not (Test-Path -LiteralPath $posterSettings -PathType Leaf)) { throw 'Smart Auto Poster settings.py not found.' }
 if (-not (Test-Path -LiteralPath $adminEnv -PathType Leaf)) { throw 'Admin Command Centre .env not found.' }
 $settingsText = Get-Content -LiteralPath $posterSettings -Raw
-if (-not [regex]::IsMatch($settingsText,'(?ms)def\s+admin_bot_enabled[\s\S]{0,500}?return\s+False')) {
-    throw 'Embedded Smart Auto Poster admin guard is not forced off.'
-}
+if (-not [regex]::IsMatch($settingsText,'(?ms)def\s+admin_bot_enabled[\s\S]{0,500}?return\s+False')) { throw 'Embedded Smart Auto Poster admin guard is not forced off.' }
 $adminToken = Read-EnvValue $adminEnv 'VM_ADMIN_BOT_TOKEN'
 $adminIds = Read-EnvValue $adminEnv 'VM_ADMIN_USER_IDS'
 $allowMutations = Read-EnvValue $adminEnv 'VM_ADMIN_ALLOW_MUTATIONS'
@@ -148,71 +172,68 @@ if ([string]::IsNullOrWhiteSpace($adminToken)) { throw 'VM_ADMIN_BOT_TOKEN is mi
 if ([string]::IsNullOrWhiteSpace($adminIds)) { throw 'VM_ADMIN_USER_IDS is missing.' }
 if (($allowMutations + '').ToLowerInvariant() -ne 'false') { throw 'VM_ADMIN_ALLOW_MUTATIONS must be false for cutover.' }
 $capacity = Invoke-PosterJson 'queue-capacity'
-if ([int]$capacity.active_total -ne 0) {
-    throw "Poster has active work (active_total=$($capacity.active_total)); refusing runtime cutover."
-}
+if ([int]$capacity.active_total -ne 0) { throw "Poster has active work (active_total=$($capacity.active_total)); refusing runtime cutover." }
 Write-Host 'Embedded admin guard: OFF'
 Write-Host 'Admin config ownership: READY'
 Write-Host 'Admin mutations: DISABLED'
 Write-Host 'Poster active queue: 0'
 Write-Host ''
 
-Write-Host '[2/7] Capture exact live roots and rollback metadata'
+Write-Host '[2/7] Capture live state and recovery commands'
 $posterRoots = @(Get-RoleRoots 'SMART_AUTO_POSTER')
 $adminRoots = @(Get-RoleRoots 'ADMIN_COMMAND_CENTRE')
-if ($posterRoots.Count -ne 1) { throw "Expected exactly one Smart Auto Poster root; found $($posterRoots.Count)." }
-if ($adminRoots.Count -ne 1) { throw "Expected exactly one Admin Command Centre root; found $($adminRoots.Count)." }
+if ($posterRoots.Count -ne 1) { throw "Expected exactly one Smart Auto Poster root so its exact launch command can be preserved; found $($posterRoots.Count)." }
+if ($adminRoots.Count -gt 1) { throw "Expected zero or one Admin Command Centre root; found $($adminRoots.Count)." }
 $posterRoot = $posterRoots[0]
-$adminRoot = $adminRoots[0]
 $posterCommand = $posterRoot.CommandLine
-$adminCommand = $adminRoot.CommandLine
+$adminCommand = $null
+if ($adminRoots.Count -eq 1) {
+    $adminCommand = $adminRoots[0].CommandLine
+} else {
+    $py = (Get-Command py.exe -ErrorAction Stop).Source
+    $adminCommand = ('"{0}" -3.12 main.py' -f $py)
+}
 @(
     "timestamp=$([DateTimeOffset]::Now.ToString('o'))",
     "poster_pid=$($posterRoot.ProcessId)",
-    "admin_pid=$($adminRoot.ProcessId)",
+    "admin_roots_before=$($adminRoots.Count)",
     'poster_command_captured=yes',
-    'admin_command_captured=yes',
+    "admin_command_source=$(if($adminRoots.Count -eq 1){'live'}else{'canonical-main.py'})",
     'secret_values_written=no'
 ) | Set-Content -LiteralPath (Join-Path $backup 'runtime-state.txt') -Encoding UTF8
 Write-Host "Rollback/state folder: $backup"
 Write-Host "Poster root PID: $($posterRoot.ProcessId)"
-Write-Host "Admin root PID:  $($adminRoot.ProcessId)"
+Write-Host "Admin roots before resume: $($adminRoots.Count)"
 Write-Host ''
 
-Write-Host '[3/7] Stop standalone Admin Command Centre first'
-Stop-ProcessTree ([int]$adminRoot.ProcessId) 'Admin Command Centre'
-Start-Sleep -Seconds 2
-if (@(Get-RoleRoots 'ADMIN_COMMAND_CENTRE').Count -ne 0) {
-    throw 'Admin Command Centre process still present after stop.'
+Write-Host '[3/7] Ensure standalone Admin Command Centre is stopped'
+if ($adminRoots.Count -eq 1) {
+    Stop-ProcessTree ([int]$adminRoots[0].ProcessId) 'Admin Command Centre'
+} else {
+    Write-Host 'Admin Command Centre is already stopped from the prior partial cutover.'
 }
+Start-Sleep -Seconds 1
+if (@(Get-RoleRoots 'ADMIN_COMMAND_CENTRE').Count -ne 0) { throw 'Admin Command Centre process still present after stop phase.' }
 Write-Host 'Standalone Admin Command Centre stopped.'
 Write-Host ''
 
 Write-Host '[4/7] Restart Smart Auto Poster to unload embedded admin from memory'
 Stop-ProcessTree ([int]$posterRoot.ProcessId) 'Smart Auto Poster'
-Start-Sleep -Seconds 2
-if (@(Get-RoleRoots 'SMART_AUTO_POSTER').Count -ne 0) {
-    throw 'Smart Auto Poster process still present after stop.'
-}
+Start-Sleep -Seconds 1
+if (@(Get-RoleRoots 'SMART_AUTO_POSTER').Count -ne 0) { throw 'Smart Auto Poster process still present after stop.' }
 Start-ExactCommand $posterCommand $poster 'Smart Auto Poster'
 Start-Sleep -Seconds 8
 $posterAfter = @(Get-RoleRoots 'SMART_AUTO_POSTER')
-if ($posterAfter.Count -ne 1) {
-    throw "Expected exactly one Smart Auto Poster root after restart; found $($posterAfter.Count)."
-}
+if ($posterAfter.Count -ne 1) { throw "Expected exactly one Smart Auto Poster root after restart; found $($posterAfter.Count)." }
 Write-Host "Smart Auto Poster running with one root PID $($posterAfter[0].ProcessId)."
 Write-Host ''
 
 Write-Host '[5/7] Verify poster before starting standalone admin'
 $capacityAfter = Invoke-PosterJson 'queue-capacity'
-if ([int]$capacityAfter.active_total -ne 0) {
-    throw "Unexpected active queue after poster restart (active_total=$($capacityAfter.active_total))."
-}
+if ([int]$capacityAfter.active_total -ne 0) { throw "Unexpected active queue after poster restart (active_total=$($capacityAfter.active_total))." }
 $health = Invoke-PosterText 'health'
 if ($health -notmatch '\[READY\]') { throw 'Poster health did not report READY after restart.' }
-if ($health -notmatch 'admin control bot\s+optional / not configured') {
-    throw 'Poster health does not confirm embedded admin is unconfigured.'
-}
+if ($health -notmatch 'admin control bot\s+optional / not configured') { throw 'Poster health does not confirm embedded admin is unconfigured.' }
 Write-Host 'Poster health: READY'
 Write-Host 'Embedded admin runtime ownership: NOT CONFIGURED'
 Write-Host 'Poster active queue after restart: 0'
@@ -222,9 +243,7 @@ Write-Host '[6/7] Restart exactly one standalone Admin Command Centre'
 Start-ExactCommand $adminCommand $admin 'Admin Command Centre'
 Start-Sleep -Seconds 8
 $adminAfter = @(Get-RoleRoots 'ADMIN_COMMAND_CENTRE')
-if ($adminAfter.Count -ne 1) {
-    throw "Expected exactly one Admin Command Centre root after restart; found $($adminAfter.Count)."
-}
+if ($adminAfter.Count -ne 1) { throw "Expected exactly one Admin Command Centre root after restart; found $($adminAfter.Count)." }
 Write-Host "Admin Command Centre running with one root PID $($adminAfter[0].ProcessId)."
 $apiOk = Test-AdminBotApi $adminToken
 Write-Host "Telegram Bot API getMe: $($(if($apiOk){'OK'}else{'UNVERIFIED'}))"
@@ -237,9 +256,7 @@ $capacityFinal = Invoke-PosterJson 'queue-capacity'
 if ($posterFinal.Count -ne 1) { throw "Final poster root count is $($posterFinal.Count), expected 1." }
 if ($adminFinal.Count -ne 1) { throw "Final admin root count is $($adminFinal.Count), expected 1." }
 if ([int]$capacityFinal.active_total -ne 0) { throw 'Final poster active queue is not zero.' }
-if (-not [regex]::IsMatch((Get-Content -LiteralPath $posterSettings -Raw),'(?ms)def\s+admin_bot_enabled[\s\S]{0,500}?return\s+False')) {
-    throw 'Final embedded-admin guard verification failed.'
-}
+if (-not [regex]::IsMatch((Get-Content -LiteralPath $posterSettings -Raw),'(?ms)def\s+admin_bot_enabled[\s\S]{0,500}?return\s+False')) { throw 'Final embedded-admin guard verification failed.' }
 Write-Host ''
 Write-Host 'RUNTIME CUTOVER: PASSED'
 Write-Host 'Smart Auto Poster roots: 1'
