@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,8 @@ def collect_relationship_presence(root: Path | None = None) -> dict[str, Any]:
 
     shared = PlatformDB(root=root)
     shared.init()
+    with shared.connect() as dst:
+        dst.execute("UPDATE intelligence_signals SET status='INACTIVE',updated_at_utc=? WHERE signal_key LIKE 'relationship:presence:%'", (datetime.now(timezone.utc).isoformat(),))
     result = {"available": True, "database": str(db_path), "memberships": 0, "dormant_memberships": 0}
     try:
         tables = _tables(con)
