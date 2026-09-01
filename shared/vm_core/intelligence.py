@@ -12,6 +12,8 @@ from .health import run_health
 from .paths import project_root
 from .relationship_adapter import collect_relationship_presence
 
+RECOMMENDATION_RULE_VERSION = 1
+
 
 def _payload(row: dict[str, Any], key: str = "payload_json") -> dict[str, Any]:
     try:
@@ -189,14 +191,103 @@ def materialize_intelligence(root: Path | None = None, *, lookback_hours: int = 
         )
         created_signals += 1
 
+    recommendation_count = _materialize_recommendations(db)
     return {
         "events_considered": len(events),
         "open_incidents": len(db.incidents(500, "OPEN")),
         "active_signals": len(db.signals(500, "ACTIVE")),
         "signals_materialized_this_pass": created_signals,
+        "recommendations_materialized_this_pass": recommendation_count,
         "lookback_hours": lookback_hours,
         "adapters": adapter_results,
     }
+
+
+def _materialize_recommendations(db: PlatformDB) -> int:
+    """Convert active signals into governed, explainable next-step proposals.
+
+    Recommendations never execute an action. A blocked recommendation remains
+    visible so operators can see both the opportunity and the policy reason
+    that prevented it from progressing.
+    """
+    signals = db.signals(2000, "ACTIVE")
+    created = 0
+    active_keys: set[str] = set()
+    for signal in signals:
+        signal_type = str(signal.get("signal_type") or "")
+        subject_type = str(signal.get("subject_type") or "unknown")
+        subject_id = str(signal.get("subject_id") or "unknown")
+        score = float(signal.get("score") or 0)
+        confidence = float(signal.get("confidence") or 0)
+        evidence = _payload(signal, "evidence_json")
+
+        if signal_type == "relationship_activity_opportunity":
+            key = f"recommendation:relationship_activity:{subject_id}"
+            blocked = bool(evidence.get("suppressed"))
+            db.upsert_recommendation(
+                key, "relationship_review",
+                "Review the linked dormant contacts and prepare a human-approved outreach plan.",
+                "Relationship dormancy and elevated activity coincide in the same chat."
+                + (" Elevated guard risk blocks outreach." if blocked else ""),
+                rule_id="relationship_activity_review", rule_version=RECOMMENDATION_RULE_VERSION,
+                subject_type=subject_type, subject_id=subject_id,
+                priority=score, confidence=confidence,
+                status="BLOCKED" if blocked else "PROPOSED",
+                evidence={
+                    "supporting_signal_id": signal["id"],
+                    "supporting_signal_ids": evidence.get("supporting_signal_ids", []),
+                    "contact_ids": evidence.get("contact_ids", []),
+                    "guard_risk_score": evidence.get("guard_risk_score", 0),
+                    "automatic_execution": False,
+                },
+            )
+        elif signal_type == "delivery_risk" and score >= 70:
+            key = f"recommendation:delivery_reconciliation:{subject_id}"
+            db.upsert_recommendation(
+                key, "delivery_reconciliation",
+                "Run the existing safe delivery-reconciliation preview; do not retry uncertain jobs automatically.",
+                "Shared evidence reports elevated or uncertain delivery risk for this destination.",
+                rule_id="delivery_risk_reconciliation", rule_version=RECOMMENDATION_RULE_VERSION,
+                subject_type=subject_type, subject_id=subject_id,
+                priority=score, confidence=confidence, status="PROPOSED",
+                evidence={
+                    "supporting_signal_id": signal["id"],
+                    "automatic_retry": False,
+                    "automatic_execution": False,
+                },
+            )
+        elif signal_type == "guard_risk_elevated" and score >= 60:
+            key = f"recommendation:guard_review:{subject_id}"
+            db.upsert_recommendation(
+                key, "guard_review",
+                "Review VM Guard evidence before allowing campaign or relationship actions in this chat.",
+                "VM Guard reports risk at or above the shared safety threshold.",
+                rule_id="guard_risk_review", rule_version=RECOMMENDATION_RULE_VERSION,
+                subject_type=subject_type, subject_id=subject_id,
+                priority=score, confidence=confidence, status="PROPOSED",
+                evidence={"supporting_signal_id": signal["id"], "automatic_execution": False},
+            )
+        else:
+            continue
+        active_keys.add(key)
+        created += 1
+
+    # Recommendations that no longer have active evidence expire, while human
+    # decisions and completed records remain immutable audit history.
+    with db.connect() as con:
+        rows = con.execute(
+            "SELECT recommendation_key FROM intelligence_recommendations "
+            "WHERE status IN ('PROPOSED','BLOCKED')"
+        ).fetchall()
+        stale = [str(row[0]) for row in rows if str(row[0]) not in active_keys]
+        if stale:
+            placeholders = ",".join("?" for _ in stale)
+            con.execute(
+                f"UPDATE intelligence_recommendations SET status='EXPIRED',updated_at_utc=? "
+                f"WHERE recommendation_key IN ({placeholders})",
+                (datetime.now(timezone.utc).isoformat(), *stale),
+            )
+    return created
 
 
 def intelligence_summary(root: Path | None = None, *, refresh: bool = True) -> dict[str, Any]:
@@ -206,6 +297,7 @@ def intelligence_summary(root: Path | None = None, *, refresh: bool = True) -> d
     materialization = materialize_intelligence(root) if refresh else None
     incidents = db.incidents(20, "OPEN")
     signals = db.signals(20, "ACTIVE")
+    recommendations = db.recommendations(20)
     health = run_health(root)
     healthy = sum(1 for h in health if str(h.get("status", "")).upper() in {"OK", "HEALTHY", "RUNNING", "ONLINE", "READY"})
     return {
@@ -216,6 +308,7 @@ def intelligence_summary(root: Path | None = None, *, refresh: bool = True) -> d
         },
         "open_incidents": incidents,
         "active_signals": signals,
+        "recommendations": recommendations,
         "recent_events": db.events(20),
         "materialization": materialization,
     }
@@ -225,11 +318,13 @@ def format_intelligence_summary(summary: dict[str, Any]) -> str:
     h = summary["platform_health"]
     incidents = summary.get("open_incidents", [])
     signals = summary.get("active_signals", [])
+    recommendations = summary.get("recommendations", [])
     lines = [
         "VM INTELLIGENCE",
         f"Services healthy: {h['healthy_services']}/{h['total_services']}",
         f"Open incidents: {len(incidents)}",
         f"Active signals: {len(signals)}",
+        f"Recommendations: {len(recommendations)}",
     ]
     materialization = summary.get("materialization") or {}
     adapters = materialization.get("adapters") or {}
@@ -256,6 +351,10 @@ def format_intelligence_summary(summary: dict[str, Any]) -> str:
         lines.append("\nSIGNALS")
         for row in signals[:8]:
             lines.append(f"{int(row['score']):>3}/100 {row['signal_type']} - {row['rationale']}")
-    if not incidents and not signals:
+    if recommendations:
+        lines.append("\nRECOMMENDATIONS")
+        for row in recommendations[:8]:
+            lines.append(f"{row['status']:<9} {int(row['priority']):>3}/100 {row['action']}")
+    if not incidents and not signals and not recommendations:
         lines.append("\nNo cross-bot incidents or intelligence signals currently require attention.")
     return "\n".join(lines)
