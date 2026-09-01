@@ -89,3 +89,23 @@ class BotEventPublisher:
             subject_id=subject_id,
             evidence=evidence or {},
         )
+
+    def action(self, action_type: str, *, actor_id: str | int | None = None,
+               target_type: str | None = None, target_id: str | int | None = None,
+               mutating: bool = False, outcome: str = "accepted", **details: Any) -> int | None:
+        """Publish a compact audit event for an administrative action.
+
+        Raw command text is intentionally not recorded because future commands
+        may carry sensitive arguments. Store only normalized action/target data.
+        """
+        return self._publish(
+            f"admin.{action_type}",
+            {
+                "actor_id": str(actor_id) if actor_id is not None else None,
+                "mutating": bool(mutating),
+                "outcome": outcome,
+                **details,
+            },
+            subject_type=target_type or "service",
+            subject_id=target_id if target_id is not None else self.source,
+        )
