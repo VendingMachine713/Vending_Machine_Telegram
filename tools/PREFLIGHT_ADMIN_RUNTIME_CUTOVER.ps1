@@ -18,17 +18,21 @@ function Safe-Role([string]$CommandLine) {
 }
 
 function Get-Descendants([int]$RootProcessId, $All) {
-    $found = New-Object System.Collections.Generic.List[object]
-    $queue = New-Object System.Collections.Generic.Queue[int]
-    $queue.Enqueue($RootProcessId)
+    $found = @()
+    $queue = @($RootProcessId)
     while ($queue.Count -gt 0) {
-        $parent = $queue.Dequeue()
-        foreach ($child in @($All | Where-Object { $_.ParentProcessId -eq $parent })) {
-            $found.Add($child)
-            $queue.Enqueue([int]$child.ProcessId)
+        $parent = [int]$queue[0]
+        if ($queue.Count -gt 1) {
+            $queue = @($queue[1..($queue.Count - 1)])
+        } else {
+            $queue = @()
+        }
+        foreach ($child in @($All | Where-Object { [int]$_.ParentProcessId -eq $parent })) {
+            $found += $child
+            $queue += [int]$child.ProcessId
         }
     }
-    return @($found)
+    return $found
 }
 
 function Invoke-PosterReadOnly([string[]]$Args) {
@@ -83,7 +87,7 @@ if ($roots.Count -eq 0) {
         $seen[[int]$r.ProcessId] = $true
         $role = Safe-Role $r.CommandLine
         Write-Host ("ROOT PID {0,-7} PPID {1,-7} {2,-22} {3}" -f $r.ProcessId,$r.ParentProcessId,$role,$r.Name)
-        foreach ($d in Get-Descendants ([int]$r.ProcessId) $all) {
+        foreach ($d in @(Get-Descendants ([int]$r.ProcessId) $all)) {
             if ($seen.ContainsKey([int]$d.ProcessId)) { continue }
             $seen[[int]$d.ProcessId] = $true
             $drole = Safe-Role ($d.CommandLine + '')
