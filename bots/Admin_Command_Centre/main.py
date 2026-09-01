@@ -9,6 +9,7 @@ if str(ROOT) not in sys.path: sys.path.insert(0,str(ROOT))
 from shared.vm_core.publisher import BotEventPublisher
 publisher=BotEventPublisher("Admin_Command_Centre",ROOT)
 
+MUTATING_COMMANDS={'backup','support','start','stop','restart','supervise','poster_start','poster_stop','poster_restart'}
 API='https://api.telegram.org/bot{token}/{method}'
 def api_call(token,method,payload=None,timeout=60):
     data=urllib.parse.urlencode(payload or {}).encode(); req=urllib.request.Request(API.format(token=token,method=method),data=data)
@@ -35,8 +36,20 @@ def main():
                 if not text.startswith('/'): continue
                 uid=int((msg.get('from') or {}).get('id',0)); chat=int((msg.get('chat') or {}).get('id',0)); cmd,args=parse_command(text)
                 if claim_code and cmd=='claim' and len(args)==1 and args[0].upper()==claim_code and (msg.get('chat') or {}).get('type')=='private':
-                    claim_admin(uid); cfg=config(); claim_code=None; send_message(cfg['token'],chat,'Admin access claimed successfully. Mutating commands remain disabled. Use /vm to begin.'); print('[CLAIMED] Admin Telegram user ID stored locally.'); continue
-                send_message(cfg['token'],chat,handle_command(uid,text,cfg))
+                    claim_admin(uid); cfg=config(); claim_code=None
+                    publisher.action('claim',actor_id=uid,target_type='service',target_id='Admin_Command_Centre',mutating=True,outcome='success')
+                    send_message(cfg['token'],chat,'Admin access claimed successfully. Mutating commands remain disabled. Use /vm to begin.'); print('[CLAIMED] Admin Telegram user ID stored locally.'); continue
+                response=handle_command(uid,text,cfg)
+                target_id=args[0] if args and cmd in {'start','stop','restart'} else ('Smart_Auto_Poster_V2' if cmd.startswith('poster_') else 'Admin_Command_Centre')
+                publisher.action(
+                    cmd or 'unknown',
+                    actor_id=uid,
+                    target_type='service',
+                    target_id=target_id,
+                    mutating=cmd in MUTATING_COMMANDS,
+                    outcome='denied' if response=='Access denied.' else ('blocked' if 'Mutating commands are disabled' in response else 'handled'),
+                )
+                send_message(cfg['token'],chat,response)
             backoff=2
         except KeyboardInterrupt:
             publisher.stopped('keyboard_interrupt')
