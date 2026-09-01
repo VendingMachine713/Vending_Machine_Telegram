@@ -35,7 +35,7 @@ function Get-Descendants([int]$RootProcessId, $All) {
     return $found
 }
 
-function Invoke-PosterReadOnly([string[]]$Args) {
+function Invoke-PosterReadOnly([string[]]$CliArgs) {
     $app = Join-Path $poster 'app.py'
     if (-not (Test-Path -LiteralPath $app -PathType Leaf)) {
         return [pscustomobject]@{ Ran=$false; ExitCode=$null; Output='app.py not found' }
@@ -46,7 +46,7 @@ function Invoke-PosterReadOnly([string[]]$Args) {
     $stdout = Join-Path $env:TEMP ('vm-poster-preflight-out-' + [guid]::NewGuid().ToString('N') + '.txt')
     $stderr = Join-Path $env:TEMP ('vm-poster-preflight-err-' + [guid]::NewGuid().ToString('N') + '.txt')
     try {
-        $argList = @('-3.12', 'app.py') + $Args
+        $argList = @('-3.12', 'app.py') + $CliArgs
         $p = Start-Process -FilePath $py -ArgumentList $argList -WorkingDirectory $poster -NoNewWindow -PassThru -Wait -RedirectStandardOutput $stdout -RedirectStandardError $stderr
         $out = ''
         if (Test-Path $stdout) { $out += (Get-Content $stdout -Raw -ErrorAction SilentlyContinue) }
