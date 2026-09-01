@@ -28,7 +28,8 @@ jobs:
         run: |
           $files = @(
             'tools/PREFLIGHT_ADMIN_RUNTIME_CUTOVER.ps1',
-            'tools/CUTOVER_ADMIN_RUNTIME.ps1'
+            'tools/CUTOVER_ADMIN_RUNTIME.ps1',
+            'tools/RECOVER_ADMIN_COMMAND_CENTRE.ps1'
           )
           foreach ($file in $files) {
             $tokens = $null
