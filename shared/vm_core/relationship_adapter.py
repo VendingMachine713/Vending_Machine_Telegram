@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-import sqlite3
 from typing import Any
 
 from .db import PlatformDB
 from .paths import project_root
-from .adapters import _env_value, _connect_readonly, _resolve_bot_path, _tables
+from .adapters import _connect_readonly, _resolve_bot_path, _tables
 
 
 def collect_relationship_presence(root: Path | None = None) -> dict[str, Any]:
