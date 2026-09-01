@@ -1,4 +1,4 @@
-
+﻿
 import tempfile, unittest
 from pathlib import Path
 from core import Store, parse_query, looks_like_ad

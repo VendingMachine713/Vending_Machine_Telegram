@@ -1,6 +1,6 @@
 [project]
 name = "vending-machine-telegram-platform"
-version = "1.2.0"
+version = "1.4.0"
 description = "Shared platform and operational tooling for the Vending Machine Telegram ecosystem"
 requires-python = ">=3.11"
 

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 
 def duplicate_authorized_account_ids(auth: dict[str, dict]) -> list[tuple[str, str, int]]:

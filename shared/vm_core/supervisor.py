@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 from pathlib import Path
 import json
 import time
@@ -38,7 +38,7 @@ def supervise_once(root: Path | None = None, apply: bool = False) -> list[dict[s
         alive = bool(state.get("process_alive"))
         desired = policy["auto_start"] or policy["auto_restart"]
         if desired and not alive:
-            result = start_service(bot.folder, root, dry_run=not apply)
+            result = start_service(bot.folder, root, dry_run=not apply, background=True)
             actions.append({"service": bot.folder, "action": "restart" if policy["auto_restart"] else "start", "result": result})
             emit("supervisor.recovery_requested", "supervisor", {"service": bot.folder, "applied": apply}, root)
             log_event("supervisor_recovery", level="WARN", data={"service": bot.folder, "applied": apply}, root=root)

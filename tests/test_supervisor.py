@@ -1,4 +1,4 @@
-import json,tempfile,unittest
+﻿import json,tempfile,unittest
 from pathlib import Path
 from shared.vm_core.manifests import create_missing_bot_manifests
 from shared.vm_core.supervisor import supervise_once

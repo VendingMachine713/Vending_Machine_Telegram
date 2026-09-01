@@ -1,145 +1,200 @@
-# Smart Auto Poster V3.0.3
+﻿# Smart Auto Poster V6.0.0 - Self-Managing Production Control Plane
 
-## Admin credential loading hotfix
-- Project-local `.env` now overrides inherited Windows environment variables for Smart Auto Poster settings.
-- Settings are reloaded from the project `.env` on each `Settings.load()` call.
-- Invalid/revoked Telegram Admin Bot tokens now return a concise operator error instead of a full traceback.
-- Admin status reports which `.env` file is authoritative without exposing the token.
-- Added regression coverage for stale environment-variable override and invalid-token handling.
+- Added V6 destination intelligence with reliability, timing-risk, format-confidence and preferred-account scoring.
+- Added explainable delivery-confidence materialisation; UNCERTAIN outcomes remain explicitly non-confirmed and never auto-retry.
+- Added predictive destination timing holds that reuse the same queue row and avoid contacting Telegram before learned safe windows.
+- Added V6 production objectives, health scoring, predictive routing plan and recovery recommendations.
+- Added `v6-control`, `v6-intelligence`, `v6-confidence`, `v6-plan` and `v6-recovery` CLI surfaces.
+- Added Telegram Admin Bot `/v6` / `/control` view and V6 Control button.
+- Added recovery safety logic that will not recommend automatic runtime restart while a send is in flight.
+- Added schema v20 tables for destination intelligence, delivery confidence, recovery incidents and production objectives.
+- Fixed duplicate legacy destination migration map that could omit protection/last-seen columns on very old upgrade paths.
+- Preserves V5 evidence-safe queue hygiene, per-account routing, one-post/group guards, multi-pass deferral, history scanning and fail-closed production gate.
+- Main production activation is not performed by the release installer.
 
-# Changelog
+# Smart Auto Poster V5.0.3 - Evidence Recovery Hardening
 
-## 3.0.0 — Production Platform Release
+- Infer legacy missing account keys from delivery-attempt and phase history before Telegram evidence scans.
+- When no durable account is known, scan every authorised Telegram account and require a unique exact match across all candidates before automatic SENT reconciliation.
+- Add a broader 120-minute diagnostic-only history window to surface nearby outgoing history without granting it automatic reconciliation authority.
+- Preserve the strict bounded exact-match window as the only automated SENT authority; absence still never means NOT_SENT.
+- Report account source, account candidates, broader-window candidate counts, nearest-message distance, and scan errors for evidence review.
 
-### Platform and targeting
-- Additive database schema v6 with preservation of legacy campaigns, destinations, queue history and content references.
-- Added reusable dynamic destination collections with include/exclude tags, account-access filters, photo/text filters, forum-only filters and explicit protected-destination inclusion.
-- Campaigns can target normal tags, reusable collections, or the union of both. Hard `NEVER_AUTO_POST` remains authoritative.
-- Added campaign categories, maximum cycle limits and completed-cycle accounting. Cycle-limited campaigns stop scheduling at the limit and archive only after their active queue drains.
-- Added a central destination automation-rules engine for safe operational settings such as minimum intervals, quiet hours, tags, protection and valid account affinity. Rules cannot silently auto-enable destinations still awaiting review.
+# Smart Auto Poster V5.0.2 - Telegram Evidence Reconciliation
 
-### Intelligence and reporting
-- Added persistent, reviewable recommendations generated from real queue/error history rather than opaque autonomous marketing decisions.
-- Recommendations cover uncertain sends, destination review, recurring reliability problems, repeated slow-mode pressure, account-load imbalance and variant distribution.
-- Only narrowly safe/reversible recommendation actions can be applied automatically from the UI; other recommendations remain decision support.
-- Expanded analytics with queue-state totals, global/campaign/account/destination success rates, content-variant usage, error categories and UTC time-of-day distribution.
-- Fixed the legacy weekly-report queue-status mismatch and added V3 daily/weekly report output.
+- Adds `uncertain-scan` using the existing authorized Telegram sessions.
+- Searches a bounded history window around UNCERTAIN delivery attempts.
+- Auto-reconciles SENT only for one unique exact outgoing payload match.
+- Photo evidence requires the expected caption and exact media-group item count.
+- Ambiguous/missing history remains UNCERTAIN; NOT_SENT is never inferred automatically.
+- Designed to run while the managed runtime is stopped to avoid Telethon session contention.
 
-### Account routing and autonomy
-- Destinations explicitly configured for dual-account use can be balanced by authorization, cooldown/pacing, health score and least-recent account usage. Explicit Primary/Secondary affinity is still respected.
-- Retained duplicate Telegram-user detection, FloodWait/SlowMode backoff, reconnect recovery, circuit breaker, watchdog, runtime lock, destination quarantine and uncertain-send duplicate protection.
-- Automatic rescans can optionally evaluate user-created destination rules after synchronization; this remains off by default.
+# Smart Auto Poster V5.0.1 - Queue Guard Live Hotfix
 
-### Telegram and local control centres
-- Telegram Admin Control Centre supports separate full-control and read-only allowlists. Read-only admins can inspect dashboards/reports but cannot mutate posting state.
-- Added Telegram views for collections, recommendations and daily/weekly reports, plus safe recommendation apply/dismiss controls.
-- Campaign wizard now includes collection targeting, category and cycle limits.
-- Expanded Windows Control Panel with V3 collection management, campaign V3 configuration, rule management/preview/apply, recommendations, daily/weekly reports and a one-action release-verification suite.
+- Fixes V5 launch failure when multiple historical UNCERTAIN rows exist for the same group.
+- Explicitly classifies multiple UNCERTAIN rows as review-required delivery evidence.
+- Adds read-only unresolved-group conflict inventory before SQLite UNIQUE guard installation.
+- If historical ambiguous evidence prevents the database guard, V5 continues in degraded safe mode with application-level admission/worker guards active.
+- SQLite guard installation now catches late uniqueness races and reports them safely instead of aborting the runtime launch.
+- No UNCERTAIN, SENDING, Telegram message IDs, or ambiguous attempt history are mutated by this hotfix.
 
-### Updates, rollback and diagnostics
-- Master updater manifest format v3 validates safe bot targets, exact payload membership and per-file SHA-256 hashes before modifying the installed bot.
-- Same/older update packages are rejected; downgrade is handled only through rollback.
-- Updater now performs a consistent SQLite online backup alongside source backups before migrations. Failed post-update verification restores both source and database automatically.
-- Explicit `ROLLBACK_LAST_UPDATE.ps1` also restores the corresponding database snapshot when available.
-- Safe diagnostics continue to exclude `.env`, Telegram sessions, database credentials, bot tokens and login secrets.
+# Smart Auto Poster V5.0.0 - Autonomous Production Controller
 
-### Validation
-- Expanded automated regression suite to **117 tests**: the original 71 V2.4 tests plus 46 V3/control-panel/release checks.
-- Reconstructed V2.2.3 exactly from its historical bootstrap + delta packages, seeded a live-shaped legacy database, upgraded directly from schema v3 → v6, and preserved an active campaign and sent queue-history/message-ID record.
-- Post-migration compile/tests/preflight/SQLite integrity all pass.
-- Final live Telegram validation remains a controlled `LIVE_TEST` on the user's own authenticated sessions.
+## Queue integrity and anti-spam
+- Adds evidence-aware queue hygiene that suppresses only provably-unsent redundant rows.
+- UNCERTAIN, SENDING and ambiguous delivery-attempt evidence are never silently rewritten.
+- Installs a SQLite partial UNIQUE guard after safe cleanup so concurrent paths cannot create two unresolved obligations for one Telegram group.
+- Startup automatically performs the same narrow safe cleanup and reports any evidence that still needs review.
 
-## 2.3.0-alpha — Production Campaign Rollout
+## Routing and timing intelligence
+- Stores text/photo capability per Telegram account and destination.
+- Account-specific format rejection fails over to another capable account before changing the destination-wide delivery mode.
+- Learns SlowMode/FloodWait timing profiles and next-safe timestamps for operational visibility and pacing intelligence.
 
-### Campaigns and content
-- Added multi-content campaigns with queue-level content selection.
-- Added rotation modes: `sequential`, `random`, `least_recent`, and `weighted`.
-- Added per-destination content history so successful sends influence the next variant choice.
-- Added minimum content reuse windows and protection against immediate same-variant repetition.
-- Added campaign include + exclude tags.
-- Added campaign cloning; clones remain disabled until explicitly activated.
-- Added campaign preview with destination/account/mode counts and skipped-reason totals.
-- Added interactive campaign creation wizard.
-- Added content inbox workflow: drop a folder containing `caption.txt` and media into `content/inbox`, then import it into the permanent content library.
-- Added campaign-content management for adding/removing/listing variants and setting weight/position.
+## Production control
+- Adds a persistent production-run ledger and V5 production gate.
+- Gate blocks production on UNCERTAIN evidence, in-flight sends, unsafe queue overlap, unresolved delivery modes, or database-integrity failure.
+- Mission Control distinguishes overlap groups from safely suppressible unsent rows and evidence/review rows.
+- Telegram Admin Bot adds `/gate` and `/hygiene` read-only production safety views.
 
-### Destination safety and smart lists
-- Added hard `protected` destination state; campaigns skip protected destinations unless explicitly configured to allow them.
-- Added hard `never_auto_post` destination state that cannot be bypassed by campaign tags.
-- Added automatic system tags after live scans: `auto_primary_only`, `auto_secondary_only`, `auto_both_accounts`, `auto_photo`, `auto_text`, `auto_forum`, `auto_review`, `auto_protected`, and `auto_never_post`.
-- Retained V2.2.3 live account-routing reconciliation.
+## Release safety
+- Existing queue IDs, SENT/UNCERTAIN evidence, schedules, sessions, credentials and campaign state are preserved.
+- No generic UNCERTAIN retry. No automatic production activation during upgrade.
 
-### Scheduling and conflict management
-- Added queue conflict spacing per destination. New campaign jobs can be automatically spaced behind already-pending work for the same destination.
-- Existing per-destination and campaign minimum intervals remain enforced and participate in spacing calculations.
-- Added non-mutating schedule simulation for future windows (default 24 hours).
-- Added `Post Now` that still routes through normal campaign targeting, queue, duplicate, safety, and account rules.
+# Smart Auto Poster V4.0.1 - Windows Console Safety Hotfix
 
-### Operations and unattended running
-- Added automatic Telegram destination re-scan while the long-running service is active (`AUTO_RESCAN_MINUTES`, default 360).
-- Added automatic daily operational summary event/output.
-- Added queue/failure dashboard and bulk failed-job retry.
-- Added optional Windows logon auto-start installer/remover. Installing auto-start does not immediately start the service.
-- Added hidden service runner that writes to daily log files.
-- Expanded Control Panel to include campaign/content operations, simulation, summaries, Post Now, and auto-start controls.
+- Prevents Mission Control, progress and post-timeline commands from crashing on Windows PowerShell 5.1 legacy console encodings when Telegram destination names contain unsupported Unicode symbols.
+- Adds one centralized console-safety boundary: UTF-8 consoles preserve Unicode; legacy consoles replace only characters they cannot encode.
+- Telegram Admin Bot rendering remains Unicode-rich and unchanged.
+- Adds CP1252, ASCII and UTF-8 regression coverage.
+- No queue, campaign, schedule, delivery-evidence or reconciliation semantics changed.
 
-### Database and compatibility
-- Additive schema migration to version 4; existing V2 queue history, campaigns, destinations, and runtime data remain usable.
-- Legacy one-content campaigns are normalized into the new campaign-content relationship automatically.
-- Existing pre-V2.3 queue jobs inherit their campaign's legacy content reference during migration.
-- Queue jobs now store the exact selected `content_id`, making retries deterministic.
+# Smart Auto Poster V4.0.0 - Round Engine, Adaptive Routing & Mission Control
 
-### Validation
-- Expanded automated suite to 33 tests.
-- Added regression coverage for multi-content rotation, worker-selected content, usage history, protected/never-post destinations, exclude tags, conflict spacing, content inbox import, cloning, smart tags, schedule simulation, and fail-closed destination synchronization.
-- Full non-Telegram CLI integration flow passed.
+## Production model
+- Enforces one unresolved post per Telegram group globally across campaigns and scheduled cycles; new runs skip an already-unresolved group instead of stacking another post.
+- Reuses the same queue row for retry/defer work. SlowMode, FloodWait, quiet hours, account cooldowns and other retry-safe waits move that row into a later pass; they never create a duplicate post.
+- Implements a pass barrier: all untouched Pass 1 destinations are attempted before Pass 2 retry/deferred work from the same run can be claimed.
+- A definitive successful send suppresses legacy pre-send duplicate rows as `duplicate_suppressed`, protecting upgrades that already contain stacked queue entries.
+- Any existing `SENDING` or `UNCERTAIN` row blocks other work for that group. Ambiguous Telegram delivery remains fail-closed and never auto-retries.
 
-## 2.2.3-alpha
-- Added live routing-preference reconciliation after every Telegram destination scan.
-- If an old config prefers Secondary but only Primary currently has access, the destination is automatically moved to Primary; the reverse is also repaired.
-- Destinations visible to both accounts keep their chosen preference.
-- Validation detects stale impossible account preferences before unattended operation.
+## Mixed text/photo delivery
+- Campaign content is selected against each destination's delivery mode: text groups receive caption-compatible content; photo groups require valid 1..10-media content.
+- Telegram scans now infer conservative text/photo permissions where Telegram exposes them, merge observations across both accounts, and automatically align a destination when only one format is supported.
+- If Telegram definitively rejects the current format, the same queue row can switch to the opposite compatible format in the next pass.
+- If neither format is allowed the destination is disabled for review; if the campaign lacks the required fallback format, the job becomes terminal `no_compatible_fallback` rather than looping retries.
 
-## 2.2.2-alpha
-- Fixed the Secondary reset/re-login path missing `datetime`/`timezone` imports.
-- Added a regression test that exercises session backup/reset without a live Telegram connection.
+## Live per-post pipeline
+- Durable queue phase history records destination validation, timing checks, content validation, account selection, payload preparation, Telegram request boundary, upload progress, acknowledgement and final outcome.
+- Photo uploads expose byte-level progress in throttled 5% buckets without changing queue semantics.
+- `progress` shows overall run progress, current pass, first-pass remaining, ETA, stuck detection, outcome counts and one bar per group.
+- `job-timeline <id>` shows the selected post's current bar, current-pass checklist, durable phase history and delivery attempts.
+- ASCII-safe local rendering avoids Windows console mojibake; Telegram retains rich buttons/emoji.
 
-## 2.2.1-alpha
-- Added Telegram user ID to live authorization state.
-- Added duplicate-account guard so scan/worker/service refuse to run when Primary and Secondary authenticate as the same Telegram user.
-- Added live account identity check and safe Secondary re-login with session backup.
+## Mission Control & reliability
+- `mission-control` combines current run, queue, accounts, schedule, destination modes, attention jobs and global anti-spam overlap detection.
+- Telegram Admin Bot exposes `/mission`, `/progress` and `/post <id>` with refresh/navigation buttons.
+- Control Panel adds Mission Control and per-post timeline views.
+- Circuit-breaker recovery releases stale automatic holds when the rolling risky-send window has genuinely recovered; manual pauses are never auto-cleared.
+- Expected timing/back-pressure continues to stay out of breaker failure counts, while uncertain acknowledgements remain breaker-relevant.
+- V3.5.1 five-minute Windows self-healing and duplicate-runtime suppression are retained.
 
-## 2.2.0-alpha
-- Added single-instance Telegram runtime lock.
-- Added persistent manual pause/resume safety state and automatic circuit breaker.
-- Added periodic Telegram account authorization refresh.
-- Added WAL-safe online SQLite backups and automatic backup retention.
-- Added account pacing and safety/runtime health reporting.
+## Database
+- Schema v13 adds round/pass metadata, persistent phase/transfer progress and lifecycle history using additive migrations.
+- Existing queue rows are migrated conservatively without changing SENT/UNCERTAIN delivery evidence.
+- No live post is created by the update itself.
 
-## 2.1.0-alpha
-- Added organised bot-local runtime/config/data folders.
-- Added recurring interval and daily/day-of-week schedules.
-- Added combined scheduler + queue service.
-- Added persistent queue idempotency, quiet hours, account cooldown/pacing, routing, backups, exports, and Windows Control Panel.
+# Smart Auto Poster V3.5.2 - Live Auto-Post Progress
 
-## 3.0.1 - Windows runtime-lock hotfix
+- Added a read-only per-run progress engine with an overall processing bar and one stage line per destination.
+- Per-post stages now expose QUEUED, DEFERRED, RETRY, SENDING, SENT, VERIFY/UNCERTAIN, FAILED, QUARANTINED, CANCELLED and EXPIRED states.
+- Deferred/retry rows show the next due time and the relevant timing/error reason; active/sent rows show the selected Telegram account when known.
+- Added `py .\app.py progress` plus `--campaign`, `--run-key`, `--json-only`, and live `--watch --interval` modes.
+- Telegram Admin Bot adds `/progress`, a Progress home button, a refresh button, and latest-run progress on `/status` and `/queue`.
+- Control Panel adds option 89 for a live five-second progress/stage view.
+- Progress reporting is derived from the existing queue and delivery-attempt ledger and performs no enqueue, retry, reconciliation, campaign-state or scheduling mutation.
+- Cumulative v3.5.2 release retains all v3.5.1 circuit-breaker and Windows self-healing fixes so a v3.5.0 installation needs only one update.
 
-- Replaced the exclusive runtime lock file with an atomic lock directory to avoid
-  interrupted Windows file handles blocking temporary-directory cleanup.
-- Added native Windows PID liveness probing instead of relying on `os.kill(pid, 0)`.
-- Preserved compatibility with stale V3.0 lock files.
-- Added fail-closed grace handling for a lock directory whose owner metadata is
-  still being written.
-- Added regression coverage for stale legacy lock files, fresh incomplete locks,
-  old incomplete locks, duplicate runtime blocking, and deterministic cleanup.
+# Smart Auto Poster V3.5.1 - Runtime Safety / Self-Heal Hotfix
 
+- Fixed false global circuit-breaker trips caused by expected SlowMode, FloodWait and short worker-busy timing events being recorded as `send_failure`.
+- Timing/back-pressure events now retain specific event types and do not count as failed sends.
+- Ambiguous Telegram acknowledgement events now contribute to the breaker risk count while remaining permanently blocked from generic retry.
+- Added a five-minute Windows Scheduled Task liveness trigger with `MultipleInstances=IgnoreNew` so external process termination recovers automatically without duplicate runtimes.
+- Autostart status now exposes trigger count, repetition interval, next run and multiple-instance policy for incident diagnosis.
+- Preserves existing queue, schedule, reconciliation ledger and fail-closed UNCERTAIN behaviour.
 
-## 3.0.2 - Master updater parser repair
-- Replaced fragile parent-traversal regex checks with segment-based path validation safe on Windows PowerShell.
-- Includes the 3.0.1 atomic runtime-lock hotfix.
-- Adds direct repair installer path so this update does not depend on the broken V3.0 updater.
+# Smart Auto Poster V3.5.0 - Auditable Delivery Reconciliation
 
-## 3.0.4
-- Fixed a Windows-sensitive release-verification test for deterministic campaign spread windows.
-- The test now freezes the scheduler reference clock, so it validates the deterministic spread offset itself instead of failing when two equivalent enqueue calls cross a one-second wall-clock boundary.
-- Carries forward the V3.0.1 Windows runtime-lock repair, V3.0.2 master-updater repair, and V3.0.3 project-local `.env` precedence/admin-token diagnostics.
+- Added schema v8 `delivery_reconciliations` ledger with queue, actor, outcome, evidence and resulting-state history.
+- Added `uncertain-list`, `uncertain-reconcile` and `reconciliation-history` commands.
+- UNCERTAIN jobs can no longer use generic Retry or Mark Sent operations.
+- Confirmed delivery requires `TELEGRAM_HISTORY_CONFIRMED_SENT`; confirmed absence requires `TELEGRAM_HISTORY_CONFIRMED_NOT_SENT` before one job can re-enter retry.
+- Unresolved reviews record evidence without mutating or retrying the job.
+- Telegram Admin Bot removes the dangerous generic Retry button from UNCERTAIN jobs.
+- Control Panel adds read-only uncertain listing and guided evidence-backed reconciliation.
+- Includes the v3.4.1 battery-safe autostart and network-aware runtime verifier.
+
+# Smart Auto Poster V3.4.1 - Runtime Readiness Hotfix
+
+- Windows autostart now starts on battery and remains running after switching to battery.
+- Added `VERIFY_RUNTIME.ps1`, which waits for the lock and fresh core heartbeats instead of treating lock creation alone as readiness.
+- Confirmed Telegram/network outages now produce a safe degraded result while the worker remains paused and queue state is preserved.
+- Admin Bot staleness during a confirmed network outage no longer misclassifies a successful update as a code/startup failure.
+- Task metadata now accurately declares managed autostart and bounded automatic restart.
+
+# Smart Auto Poster V3.4.0 - Delivery Intelligence
+
+## Goal
+Turn retry and uncertain queue states into durable, explainable operational data while keeping ambiguous Telegram deliveries fail-closed.
+
+## Changes
+- Added schema v7 `delivery_attempts` history with outcome, account, error kind, retry time, duration and Telegram message IDs.
+- Successful, retry, failed, quarantined and uncertain send outcomes now retain per-attempt evidence instead of only the latest queue error.
+- Added an actionable failure taxonomy: uncertain, timing, account, permanent destination, transient and terminal/retry other.
+- Added `delivery-intelligence` for read-only campaign/destination diagnosis and machine-safe JSON output.
+- Added `delivery-recovery`, which previews every action by default and requires `--apply` before closing impossible or exhausted retries.
+- UNCERTAIN deliveries remain permanently excluded from automatic retry and are explicitly held for Telegram-history reconciliation.
+- Added migration, worker-history, diagnosis and recovery safety regression coverage.
+
+## Commands
+```powershell
+py .\app.py delivery-intelligence --campaign main_production_01
+py .\app.py delivery-intelligence --campaign main_production_01 --json-only
+py .\app.py delivery-recovery --campaign main_production_01
+py .\app.py delivery-recovery --campaign main_production_01 --apply
+```
+
+# Smart Auto Poster V3.3.0 - Fast Pass Production
+
+## Goal
+Post to healthy production destinations as quickly as Telegram safely allows, while moving slow/error destinations out of the clean first pass instead of letting one problem hold up the whole cycle.
+
+## Changes
+- Production campaign spread defaults to **0 minutes** instead of 20 minutes.
+- Queue claim order is now **pending first**, then deferred/retry problem work.
+- Successful sends use the configured `MIN_SEND_GAP_SECONDS` (default **3 seconds**) as an intentional inter-send pace rather than causing the next healthy destination to be deferred for pacing.
+- Added `SEND_TIMEOUT_SECONDS` (default **45 seconds**). If Telegram does not return a conclusive acknowledgement inside the bound, the job becomes `UNCERTAIN` and the worker continues with untouched destinations.
+- Send-timeout uncertainty never auto-retries and does not penalize destination/account health.
+- Existing FloodWait, SlowMode, ambiguous acknowledgement, quarantine, circuit-breaker and authorization protections remain active.
+- Production bootstrap and `SETUP_MAIN_PRODUCTION.ps1` now use zero spread by default.
+
+## Operating behavior
+A normal cycle is queued immediately. Healthy destinations are attempted one after another with a few seconds of pacing. Slow mode, cooldown, retry, deferred or ambiguous destinations leave the clean fast lane and are handled after untouched destinations according to their safe due times.
+
+### V6.0.0 REV2 - Command Prompt Live Dashboard
+- Replaced the watch-mode progress report with a terminal-width-aware live dashboard.
+- Added high-resolution ASCII overall/pass/current-post progress bars safe for Windows cmd.exe and PowerShell.
+- Added focused current-post stage, next destinations, ETA, remaining count, and outcome summary.
+- Added compact destination pipeline rows with DEFERRED/RETRY/UNCERTAIN reasons and due times.
+- Added stable refresh presentation while preserving JSON and Telegram progress renderers.
+
+## 6.0.1 - Full Coverage Live Run Controller
+- Added `live-coverage-run` for an explicit one-post-per-eligible-destination live qualification run.
+- Added durable per-destination coverage ledger and JSON/CSV result reports.
+- SlowMode/FloodWait/quiet-hour destinations are deferred to later passes rather than skipped.
+- Retry-safe failures retain the same queue obligation and remain visible until resolved.
+- Existing historical UNCERTAIN/SENDING evidence is never blindly retried or deleted.
+- Normal campaign scheduling is disabled during the one-shot run and restored afterwards.
+- Added focused troubleshooting reasons for failed/blocked destinations.
+- Added `live-coverage-status` terminal dashboard/report export.

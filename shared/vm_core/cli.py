@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
@@ -10,21 +10,30 @@ from .doctor import run_doctor, write_diagnostics
 from .inspect import write_structure_report
 from .dependencies import environment_report, requirements_inventory, pip_check, setup_dependencies
 from .db import PlatformDB
-from .services import service_status, start_service, stop_service, restart_service
+from .services import service_status, start_service, stop_service, restart_service, start_managed
 from .health import run_health
 from .backup import create_backup, list_backups, rollback
 from .registry import sync_accounts, sync_destinations, registry_summary
 from .jobs import enqueue, run_one
 from .events import emit
 from .simulate import run_scenario, SCENARIOS
-from .support import create_support_bundle
-from .checks import run_tests, lint, format_check, full_check
+from .support import create_support_bundle, create_support_text
+from .checks import run_tests, run_all_tests, lint, format_check, full_check
 from .release import set_baseline, build_delta
 from .logging_setup import tail_logs
 from .supervisor import supervise_once, supervise_loop
 from .duplicates import write_duplicate_report
 from .validation import run_full_validation
 from .devtools import install as install_devtools, git_status
+from .search_index import SearchIndex
+from .guard_engine import guard_pass
+from .runtime_snapshot import write_report as write_runtime_report, verify as verify_runtime
+from .autostart import status as autostart_status
+from .relationship_cleanup import plan as relationship_cleanup_plan, apply as apply_relationship_cleanup
+from .legacy_recovery import recover as recover_legacy, write_report as write_legacy_recovery_report
+from .git_audit import audit as git_audit
+from .storage_audit import audit as storage_audit
+
 
 def _json(obj): print(json.dumps(obj,indent=2,ensure_ascii=False,default=str))
 
@@ -46,8 +55,12 @@ def cmd_dashboard(root):
     bots=discover_bots(root)
     runnable=sum(1 for b in bots if b.classification=="CANONICAL")
     planned=sum(1 for b in bots if b.classification=="PLACEHOLDER")
+    alert_count=len(db.alerts(100))
+    try: search_docs=SearchIndex(root).stats()["documents"]
+    except Exception: search_docs=0
     print(f"Destinations: {reg['destinations']} | Accounts: {reg['accounts']} | Recent jobs: {len(jobs)} | Recent events: {len(events)}")
     print(f"Bots: {len(bots)} total | {runnable} runnable | {planned} planned")
+    print(f"Open alerts: {alert_count} | Search documents: {search_docs}")
     return 0
 
 def build_parser():
@@ -59,8 +72,8 @@ def build_parser():
         ("doctor","Run diagnostics."),("inspect","Write safe structure report."),
         ("inventory","Refresh machine-readable inventory."),("health","Run service health checks."),
         ("env","Show environment/developer tools."),("deps","Show dependency inventory."),
-        ("test","Run platform self-tests."),("check","Run release pre-flight checks."),
-        ("support","Create safe support bundle."),("registry","Sync/show shared registries."),
+        ("test","Run platform self-tests."),("test-all","Run platform and all bot test suites."),("check","Run release pre-flight checks."),
+        ("support","Create safe support bundle."),("support-text","Create one safe readable support text file."),("registry","Sync/show shared registries."),
         ("jobs","Manage platform jobs."),("events","Manage platform events."),
         ("simulate","Run safe simulated scenarios."),("backup","Create/list backups."),
         ("rollback","Preview/apply rollback."),("logs","Show structured logs."),
@@ -71,15 +84,35 @@ def build_parser():
         ("validate-all","Run the complete platform validation and create one rich support bundle."),
         ("dev-tools","Preview/install Ruff and uv developer tools."),
         ("git-status","Show safe local Git repository status."),
+        ("git-audit","Audit Git tracked files for sensitive/runtime data."),
+        ("storage","Show project/disk storage usage without deleting anything."),
+        ("search","Search the local Universal Search index."),
+        ("search-refresh","Rebuild the local Universal Search index."),
+        ("alerts","Show open VM Guard alerts."),
+        ("guard","Run one VM Guard pass."),
+        ("start-managed","Start services whose manifests opt into auto_start."),
+        ("runtime","Write/show the live runtime snapshot."),
+        ("autostart-status","Show Windows logon autostart state."),
+        ("relationship-cleanup","Preview or apply safe nested Relationship Manager cleanup."),
+        ("legacy-recovery","Preview/apply recovery of pre-v1.3 Search/Guard Telegram components."),
+        ("runtime-check","Verify managed services/components and optional autostart."),
         ("init","Initialise platform folders/database."),
     ]: s.add_parser(name,help=help_text)
     m=s.add_parser("manifests",help="Preview/create/refresh bot manifests."); m.add_argument("--write",action="store_true"); m.add_argument("--refresh",action="store_true")
     s.choices["dev-tools"].add_argument("--apply",action="store_true")
+    s.choices["search"].add_argument("query",nargs="+")
+    s.choices["search"].add_argument("--limit",type=int,default=20)
+    s.choices["start-managed"].add_argument("--apply",action="store_true")
+    s.choices["start-managed"].add_argument("--foreground",action="store_true")
+    s.choices["relationship-cleanup"].add_argument("--apply",action="store_true")
+    s.choices["legacy-recovery"].add_argument("--apply",action="store_true")
+    s.choices["runtime-check"].add_argument("--require-autostart",action="store_true")
+    s.choices["runtime-check"].add_argument("--require-legacy-components",action="store_true")
     setup=s.add_parser("setup",help="Preview/install bot dependencies."); setup.add_argument("--apply",action="store_true")
     lintp=s.add_parser("lint",help="Run Ruff when available."); lintp.add_argument("--fix",action="store_true")
     fmt=s.add_parser("format-check",help="Check formatting with Ruff.")
     for action in ("start","stop","restart"):
-        q=s.add_parser(action,help=f"{action.title()} a VM service."); q.add_argument("service"); q.add_argument("--apply",action="store_true"); q.add_argument("--force",action="store_true")
+        q=s.add_parser(action,help=f"{action.title()} a VM service."); q.add_argument("service"); q.add_argument("--apply",action="store_true"); q.add_argument("--force",action="store_true"); q.add_argument("--background",action="store_true")
     s.choices["logs"].add_argument("service",nargs="?",default="platform"); s.choices["logs"].add_argument("--lines",type=int,default=50); s.choices["logs"].add_argument("--errors",action="store_true")
     s.choices["registry"].add_argument("action",choices=["summary","sync"],nargs="?",default="summary")
     s.choices["jobs"].add_argument("action",choices=["list","enqueue","run-one"],nargs="?",default="list"); s.choices["jobs"].add_argument("job_type",nargs="?")
@@ -119,6 +152,8 @@ def main(argv=None):
     if c=="setup":
         _json(setup_dependencies(root,apply=args.apply)); return 0
     if c=="test": return run_tests(root)
+    if c=="test-all":
+        result=run_all_tests(root); _json(result); return 0 if result["ok"] else 2
     if c=="lint":
         result=lint(root,args.fix); _json(result); return 0 if result["ok"] else 2
     if c=="format-check":
@@ -129,9 +164,9 @@ def main(argv=None):
         names=[b.folder for b in discover_bots(root)] if args.service.lower()=="all" else [args.service]
         results=[]
         for name in names:
-            if c=="start": results.append(start_service(name,root,dry_run=not args.apply,force=args.force))
+            if c=="start": results.append(start_service(name,root,dry_run=not args.apply,force=args.force,background=args.background))
             elif c=="stop": results.append(stop_service(name,root,dry_run=not args.apply))
-            else: results.append(restart_service(name,root,dry_run=not args.apply,force=args.force))
+            else: results.append(restart_service(name,root,dry_run=not args.apply,force=args.force,background=args.background))
         _json(results if len(results)>1 else results[0]); return 0
     if c=="backup":
         if args.action=="list": _json([str(p) for p in list_backups(root)])
@@ -168,20 +203,49 @@ def main(argv=None):
         lines=tail_logs(args.service,args.lines,args.errors,root)
         print("\n".join(lines) if lines else "No matching logs."); return 0
     if c=="support": print(create_support_bundle(root)); return 0
+    if c=="support-text": print(create_support_text(root)); return 0
     if c=="release-baseline": print(set_baseline(args.service,root)); return 0
     if c=="release": _json(build_delta(args.service,root)); return 0
     if c=="supervise": _json(supervise_once(root,apply=args.apply)); return 0
     if c=="supervise-loop": supervise_loop(root,apply=args.apply,interval_seconds=args.interval); return 0
     if c=="duplicates":
-        jp,tp=write_duplicate_report(root); print(f"TEXT: {tp}\nJSON: {jp}"); return 0
+        jp,tp,dp=write_duplicate_report(root); print(f"TEXT: {tp}\nJSON: {jp}\nDIFF: {dp}"); return 0
     if c=="validate-all":
         summary=run_full_validation(root, backup_first=True)
         _json(summary)
         print("\nSupport bundle:")
         print(create_support_bundle(root))
-        return 0 if summary["platform_tests_ok"] and summary["doctor_summary"]["FAIL"]==0 else 2
+        return 0 if summary["critical_tests_ok"] and summary["doctor_summary"]["FAIL"]==0 else 2
     if c=="dev-tools": _json(install_devtools(apply=args.apply)); return 0
     if c=="git-status": _json(git_status(root)); return 0
+    if c=="git-audit":
+        result=git_audit(root); _json(result); return 0 if result.get("ok",True) else 2
+    if c=="storage": _json(storage_audit(root)); return 0
+    if c=="search":
+        _json(SearchIndex(root).search(" ".join(args.query),args.limit)); return 0
+    if c=="search-refresh":
+        _json(SearchIndex(root).rebuild()); return 0
+    if c=="alerts":
+        _json(PlatformDB(root=root).alerts(50)); return 0
+    if c=="guard":
+        _json(guard_pass(root)); return 0
+    if c=="start-managed":
+        _json(start_managed(root,dry_run=not args.apply,background=not args.foreground)); return 0
+    if c=="runtime":
+        jp,tp=write_runtime_report(root); print(tp.read_text(encoding="utf-8")); print(f"JSON: {jp}"); return 0
+    if c=="autostart-status":
+        _json(autostart_status(root)); return 0
+    if c=="relationship-cleanup":
+        result=apply_relationship_cleanup(root) if args.apply else relationship_cleanup_plan(root)
+        _json(result); return 0 if (not args.apply or result.get("ok")) else 2
+    if c=="legacy-recovery":
+        result=recover_legacy(root,apply=args.apply)
+        write_legacy_recovery_report(root,apply=False)
+        _json(result); return 0 if result.get("ok",True) else 2
+    if c=="runtime-check":
+        result=verify_runtime(root,require_autostart=args.require_autostart,
+                              require_legacy_components=args.require_legacy_components)
+        _json(result); return 0 if result.get("ok") else 2
     return 1
 
 if __name__=="__main__": raise SystemExit(main())

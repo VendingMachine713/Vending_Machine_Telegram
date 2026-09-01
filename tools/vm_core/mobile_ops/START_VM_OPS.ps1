@@ -1,4 +1,4 @@
-$ErrorActionPreference="Stop"
+﻿$ErrorActionPreference="Stop"
 $Here=Split-Path -Parent $MyInvocation.MyCommand.Path
 $EnvFile=Join-Path $Here ".env"
 if(!(Test-Path $EnvFile)){ exit 0 }

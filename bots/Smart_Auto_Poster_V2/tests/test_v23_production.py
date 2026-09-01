@@ -1,4 +1,4 @@
-import tempfile
+﻿import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,7 +40,7 @@ class V23ProductionTests(unittest.TestCase):
 
     def test_schema_v4_tables_and_columns(self):
         with self.db.connect() as con:
-            self.assertEqual(con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0], "6")
+            self.assertEqual(con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0], "20")
             tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertIn("campaign_content", tables)
             self.assertIn("content_usage", tables)
@@ -49,8 +49,12 @@ class V23ProductionTests(unittest.TestCase):
 
     def test_sequential_rotation_uses_different_variant(self):
         a = enqueue_campaign(self.db, "camp", run_key="one")
-        b = enqueue_campaign(self.db, "camp", run_key="two")
         self.assertEqual(a["inserted"], 1)
+        with self.db.connect() as con:
+            first = con.execute("SELECT id,content_id FROM queue WHERE run_key='one'").fetchone()
+            con.execute("UPDATE queue SET status='sent',resolved_at=?,updated_at=? WHERE id=?", (utcnow(), utcnow(), first["id"]))
+        record_content_sent(self.db, "camp", -1001, first["content_id"])
+        b = enqueue_campaign(self.db, "camp", run_key="two")
         self.assertEqual(b["inserted"], 1)
         with self.db.connect() as con:
             rows = con.execute("SELECT content_id FROM queue ORDER BY id").fetchall()
@@ -82,15 +86,14 @@ class V23ProductionTests(unittest.TestCase):
         self.assertEqual(p["selected"], 0)
         self.assertEqual(p["skipped"]["exclude_tags"], 1)
 
-    def test_conflict_gap_spaces_pending_jobs(self):
+    def test_conflict_gap_does_not_stack_unresolved_jobs(self):
         with self.db.connect() as con:
             con.execute("UPDATE campaigns SET conflict_gap_seconds=3600 WHERE campaign_id='camp'")
-        enqueue_campaign(self.db, "camp", run_key="one")
-        enqueue_campaign(self.db, "camp", run_key="two")
-        with self.db.connect() as con:
-            rows = con.execute("SELECT due_at FROM queue ORDER BY id").fetchall()
-        a = datetime.fromisoformat(rows[0][0]); b = datetime.fromisoformat(rows[1][0])
-        self.assertGreaterEqual((b-a).total_seconds(), 3600)
+        first = enqueue_campaign(self.db, "camp", run_key="one")
+        second = enqueue_campaign(self.db, "camp", run_key="two")
+        self.assertEqual(first["inserted"], 1)
+        self.assertEqual(second["inserted"], 0)
+        self.assertEqual(second["overlap_locked"], 1)
 
     def test_content_inbox_import(self):
         inbox = self.root / "content" / "inbox" / "Fresh Ad"

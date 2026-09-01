@@ -1,33 +1,35 @@
 {
-  "schema_version": 3,
-  "name": "Universal_Search",
-  "version": "1.0.0",
-  "status": "existing",
   "classification": "CANONICAL",
+  "databases": [
+    "Universal_Search\\Universal_Search\\data\\universal_search.db"
+  ],
   "entrypoint": "main.py",
   "entrypoint_confidence": "high",
-  "launchers": [
-    "START.ps1"
-  ],
-  "requirements": "requirements.txt",
+  "launchers": [],
+  "lifecycle": {
+    "auto_restart": true,
+    "auto_start": true,
+    "managed_by_vm": true
+  },
+  "name": "Universal_Search",
   "pyproject": null,
-  "databases": [],
+  "requirements": null,
+  "runtime_bridge": {
+    "canonical_runtime_dir": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots\\Universal_Search\\Universal_Search\\Universal_Search",
+    "canonical_target": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots\\Universal_Search\\Universal_Search\\Universal_Search\\main.py",
+    "policy_source": "outer_manifest_positive_policy",
+    "updated_at_utc": "2026-09-01T07:54:00.201188+00:00",
+    "version": "3.0.7"
+  },
+  "schema_version": 3,
+  "status": "existing",
   "tests": [
-    "tests\\test_core.py"
+    "Universal_Search\\Universal_Search\\tests\\test_core.py",
+    "Universal_Search\\Universal_Search\\tests\\test_search_service.py"
   ],
+  "version": "unknown",
   "vm_core": {
     "compatible": true,
-    "minimum_version": "1.1.0"
-  },
-  "runtime_requirements": {
-    "env": [
-      "BOT_TOKEN"
-    ],
-    "optional_env": []
-  },
-  "lifecycle": {
-    "managed_by_vm": true,
-    "auto_start": false,
-    "auto_restart": false
+    "minimum_version": "1.4.0"
   }
 }

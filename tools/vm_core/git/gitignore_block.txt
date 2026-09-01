@@ -1,4 +1,4 @@
-# ===== VM PLATFORM SECURITY / RUNTIME =====
+﻿# ===== VM PLATFORM SECURITY / RUNTIME =====
 # Secrets
 .env
 .env.*

@@ -1,36 +1,32 @@
 {
-  "schema_version": 3,
-  "name": "Admin_Command_Centre",
-  "version": "0.2.0",
-  "status": "existing",
   "classification": "CANONICAL",
+  "databases": [],
   "entrypoint": "main.py",
   "entrypoint_confidence": "high",
-  "launchers": [
-    "START_ADMIN_COMMAND_CENTRE.bat"
-  ],
-  "requirements": "requirements.txt",
+  "launchers": [],
+  "lifecycle": {
+    "auto_restart": true,
+    "auto_start": true,
+    "managed_by_vm": true
+  },
+  "name": "Admin_Command_Centre",
   "pyproject": null,
-  "databases": [],
+  "requirements": null,
+  "runtime_bridge": {
+    "canonical_runtime_dir": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots\\Admin_Command_Centre\\Admin_Command_Centre\\Admin_Command_Centre",
+    "canonical_target": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots\\Admin_Command_Centre\\Admin_Command_Centre\\Admin_Command_Centre\\main.py",
+    "policy_source": "outer_manifest_positive_policy",
+    "updated_at_utc": "2026-09-01T07:54:00.075493+00:00",
+    "version": "3.0.7"
+  },
+  "schema_version": 3,
+  "status": "existing",
   "tests": [
-    "tests\\test_admin_core.py"
+    "Admin_Command_Centre\\Admin_Command_Centre\\tests\\test_admin_core.py"
   ],
+  "version": "unknown",
   "vm_core": {
     "compatible": true,
-    "minimum_version": "1.1.0"
-  },
-  "runtime_requirements": {
-    "env": [
-      "VM_ADMIN_BOT_TOKEN"
-    ],
-    "optional_env": [
-      "VM_ADMIN_USER_IDS",
-      "VM_ADMIN_ALLOW_MUTATIONS"
-    ]
-  },
-  "lifecycle": {
-    "managed_by_vm": true,
-    "auto_start": false,
-    "auto_restart": false
+    "minimum_version": "1.4.0"
   }
 }

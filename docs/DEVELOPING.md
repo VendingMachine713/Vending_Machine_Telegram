@@ -1,4 +1,4 @@
-# VM Development Workflow
+﻿# VM Development Workflow
 
 1. Make changes inside the permanent bot folder.
 2. Prefer shared VM Core for genuinely cross-bot infrastructure.

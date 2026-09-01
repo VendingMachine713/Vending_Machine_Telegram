@@ -1,10 +1,16 @@
-SMART AUTO POSTER V3.0.4 BUILD REPORT
-
-Regression tests: 123/123 PASS
-Python compile: PASS
-Admin credential precedence: PASS
-Invalid token handling: PASS
-
-This hotfix contains no .env, Telegram session, database, login code, phone number, API hash, or live bot token.
-
-Spread-window regression: PASS
+﻿SMART AUTO POSTER V6.0.1 - FULL COVERAGE LIVE RUN CONTROLLER
+============================================================
+Full regression suite: 269/269 PASS (segmented)
+Compileall: PASS
+Validate: PASS
+SQLite integrity + foreign keys: PASS
+Live coverage controller tests: PASS
+Safety invariants:
+- no blind UNCERTAIN retry
+- no SENDING/PROCESSING retirement
+- old retry-safe rows retired only from same campaign
+- other campaigns never mutated by coverage cleanup
+- scheduler disabled during explicit coverage run and restored afterwards
+- same-row SlowMode/FloodWait deferral
+- every eligible target retained in coverage ledger
+- JSON + CSV troubleshooting reports

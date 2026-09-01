@@ -1,1 +1,11 @@
 ﻿{"status":"failed","package":"Smart_Auto_Poster_V3_Update_3.0.1.zip","error":"parsing \"(^|\\)\\.\\.(\\|$)\" - Not enough )\u0027s.","at":"2026-08-28T23:58:57.5533387+09:30"}
+{"status":"applied","bot":"Smart_Auto_Poster","version":"3.4.0","previous_version":"3.3.0","package":"Smart_Auto_Poster_V3_Update_3.4.0.zip","at":"2026-09-01T09:02:28.1937521+09:30"}
+{"status":"applied","bot":"Smart_Auto_Poster","version":"3.5.0","previous_version":"3.4.0","package":"Smart_Auto_Poster_V3_Update_3.5.0.zip","at":"2026-09-01T10:59:25.3292478+09:30"}
+{"status":"applied","bot":"Smart_Auto_Poster","version":"3.5.2","previous_version":"3.5.0","package":"Smart_Auto_Poster_V3_Update_3.5.2.zip","at":"2026-09-01T13:00:40.5864493+09:30"}
+{"status":"applied","bot":"Smart_Auto_Poster","version":"4.0.0","previous_version":"3.5.2","package":"Smart_Auto_Poster_V4_Update_4.0.0.zip","at":"2026-09-01T14:21:46.6013139+09:30"}
+{"status":"applied","bot":"Smart_Auto_Poster","version":"4.0.1","previous_version":"4.0.0","package":"Smart_Auto_Poster_V4_Update_4.0.1.zip","at":"2026-09-01T14:48:16.0441727+09:30"}
+{"status":"applied","bot":"Smart_Auto_Poster","version":"5.0.0","previous_version":"4.0.1","package":"Smart_Auto_Poster_V5_Update_5.0.0.zip","at":"2026-09-01T15:18:03.0896311+09:30"}
+{"status":"applied","bot":"Smart_Auto_Poster","version":"5.0.1","previous_version":"5.0.0","package":"Smart_Auto_Poster_V5_Update_5.0.1.zip","at":"2026-09-01T15:27:05.2592167+09:30"}
+{"status":"applied","bot":"Smart_Auto_Poster","version":"5.0.2","previous_version":"5.0.1","package":"Smart_Auto_Poster_V5_Update_5.0.2.zip","at":"2026-09-01T15:55:54.7256080+09:30"}
+{"status":"applied","bot":"Smart_Auto_Poster","version":"6.0.0","previous_version":"5.0.2","package":"Smart_Auto_Poster_V6_Update_6.0.0.zip","at":"2026-09-01T16:57:59.0408272+09:30"}
+{"status":"applied","bot":"Smart_Auto_Poster","version":"6.0.1","previous_version":"6.0.0","package":"Smart_Auto_Poster_V6_Update_6.0.1_FULL_COVERAGE.zip","at":"2026-09-01T18:16:00.0111254+09:30"}

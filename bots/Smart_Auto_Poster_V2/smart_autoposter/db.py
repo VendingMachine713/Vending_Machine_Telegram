@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import sqlite3
 from contextlib import contextmanager
@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .redaction import redact_text
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 20
 
 SCHEMA = r'''
 PRAGMA journal_mode=WAL;
@@ -59,6 +59,33 @@ CREATE TABLE IF NOT EXISTS destinations (
     consecutive_failures INTEGER NOT NULL DEFAULT 0,
     quarantine_until TEXT,
     notes TEXT,
+    text_allowed INTEGER,
+    photo_allowed INTEGER,
+    capability_source TEXT,
+    capability_updated_at TEXT,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS destination_account_capabilities (
+    group_id INTEGER NOT NULL REFERENCES destinations(group_id) ON DELETE CASCADE,
+    account_key TEXT NOT NULL,
+    text_allowed INTEGER,
+    photo_allowed INTEGER,
+    source TEXT,
+    observed_at TEXT NOT NULL,
+    PRIMARY KEY(group_id, account_key)
+);
+CREATE INDEX IF NOT EXISTS idx_dest_account_caps_account ON destination_account_capabilities(account_key,group_id);
+
+CREATE TABLE IF NOT EXISTS destination_timing_profiles (
+    group_id INTEGER PRIMARY KEY REFERENCES destinations(group_id) ON DELETE CASCADE,
+    slow_mode_events INTEGER NOT NULL DEFAULT 0,
+    flood_wait_events INTEGER NOT NULL DEFAULT 0,
+    transient_events INTEGER NOT NULL DEFAULT 0,
+    last_wait_seconds INTEGER,
+    max_wait_seconds INTEGER NOT NULL DEFAULT 0,
+    observed_min_interval_seconds INTEGER NOT NULL DEFAULT 0,
+    next_safe_at TEXT,
     updated_at TEXT NOT NULL
 );
 
@@ -182,6 +209,15 @@ CREATE TABLE IF NOT EXISTS queue (
     last_error TEXT,
     telegram_message_ids TEXT,
     resolved_at TEXT,
+    pass_no INTEGER NOT NULL DEFAULT 1,
+    phase TEXT NOT NULL DEFAULT 'queued',
+    phase_percent INTEGER NOT NULL DEFAULT 5,
+    phase_detail TEXT,
+    phase_updated_at TEXT,
+    deferral_count INTEGER NOT NULL DEFAULT 0,
+    progress_current INTEGER,
+    progress_total INTEGER,
+    progress_unit TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -189,6 +225,94 @@ CREATE INDEX IF NOT EXISTS idx_queue_due ON queue(status, due_at);
 CREATE INDEX IF NOT EXISTS idx_queue_campaign ON queue(campaign_id, status);
 CREATE INDEX IF NOT EXISTS idx_queue_group_due ON queue(group_id, status, due_at);
 CREATE INDEX IF NOT EXISTS idx_queue_account_status ON queue(account_key, status);
+
+CREATE TABLE IF NOT EXISTS queue_stage_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    queue_id INTEGER NOT NULL REFERENCES queue(id) ON DELETE CASCADE,
+    run_key TEXT,
+    campaign_id TEXT NOT NULL,
+    group_id INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    account_key TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    due_at TEXT,
+    error_kind TEXT,
+    message TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_queue_stage_history_queue ON queue_stage_history(queue_id,id);
+CREATE INDEX IF NOT EXISTS idx_queue_stage_history_run ON queue_stage_history(run_key,id);
+CREATE INDEX IF NOT EXISTS idx_queue_stage_history_campaign ON queue_stage_history(campaign_id,id);
+
+CREATE TABLE IF NOT EXISTS queue_phase_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    queue_id INTEGER NOT NULL REFERENCES queue(id) ON DELETE CASCADE,
+    run_key TEXT,
+    campaign_id TEXT NOT NULL,
+    group_id INTEGER NOT NULL,
+    pass_no INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    phase_percent INTEGER NOT NULL DEFAULT 0,
+    account_key TEXT,
+    progress_current INTEGER,
+    progress_total INTEGER,
+    progress_unit TEXT,
+    detail TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_queue_phase_history_queue ON queue_phase_history(queue_id,id);
+CREATE INDEX IF NOT EXISTS idx_queue_phase_history_run ON queue_phase_history(run_key,id);
+
+CREATE TRIGGER IF NOT EXISTS trg_queue_stage_insert
+AFTER INSERT ON queue
+BEGIN
+    INSERT INTO queue_stage_history(created_at,queue_id,run_key,campaign_id,group_id,status,account_key,attempts,due_at,error_kind,message)
+    VALUES(NEW.updated_at,NEW.id,NEW.run_key,NEW.campaign_id,NEW.group_id,NEW.status,NEW.account_key,NEW.attempts,NEW.due_at,NEW.error_kind,NEW.last_error);
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_queue_stage_update
+AFTER UPDATE OF status ON queue
+WHEN OLD.status IS NOT NEW.status
+BEGIN
+    INSERT INTO queue_stage_history(created_at,queue_id,run_key,campaign_id,group_id,status,account_key,attempts,due_at,error_kind,message)
+    VALUES(NEW.updated_at,NEW.id,NEW.run_key,NEW.campaign_id,NEW.group_id,NEW.status,NEW.account_key,NEW.attempts,NEW.due_at,NEW.error_kind,NEW.last_error);
+END;
+
+
+CREATE TABLE IF NOT EXISTS delivery_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    queue_id INTEGER NOT NULL REFERENCES queue(id) ON DELETE CASCADE,
+    run_key TEXT,
+    campaign_id TEXT NOT NULL,
+    group_id INTEGER NOT NULL,
+    account_key TEXT,
+    attempt_number INTEGER NOT NULL DEFAULT 0,
+    outcome TEXT NOT NULL,
+    error_kind TEXT,
+    retry_at TEXT,
+    duration_ms INTEGER,
+    telegram_message_ids TEXT,
+    details TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_delivery_attempts_queue ON delivery_attempts(queue_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_delivery_attempts_kind ON delivery_attempts(error_kind,created_at);
+CREATE INDEX IF NOT EXISTS idx_delivery_attempts_group ON delivery_attempts(group_id,created_at);
+
+CREATE TABLE IF NOT EXISTS delivery_reconciliations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    queue_id INTEGER NOT NULL REFERENCES queue(id) ON DELETE CASCADE,
+    previous_status TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    evidence TEXT NOT NULL,
+    confirmation_token TEXT,
+    resulting_status TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_delivery_reconciliations_queue ON delivery_reconciliations(queue_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_delivery_reconciliations_outcome ON delivery_reconciliations(outcome,created_at);
 
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -284,6 +408,71 @@ CREATE TABLE IF NOT EXISTS recommendations (
 );
 CREATE INDEX IF NOT EXISTS idx_recommendations_status_created ON recommendations(status, created_at);
 
+CREATE TABLE IF NOT EXISTS production_runs (
+    run_key TEXT NOT NULL,
+    campaign_id TEXT NOT NULL REFERENCES campaigns(campaign_id) ON DELETE CASCADE,
+    state TEXT NOT NULL DEFAULT 'open',
+    target_count INTEGER NOT NULL DEFAULT 0,
+    inserted_count INTEGER NOT NULL DEFAULT 0,
+    overlap_locked INTEGER NOT NULL DEFAULT 0,
+    incompatible_count INTEGER NOT NULL DEFAULT 0,
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(run_key,campaign_id)
+);
+CREATE INDEX IF NOT EXISTS idx_production_runs_campaign ON production_runs(campaign_id,started_at);
+
+
+CREATE TABLE IF NOT EXISTS destination_intelligence (
+    group_id INTEGER PRIMARY KEY REFERENCES destinations(group_id) ON DELETE CASCADE,
+    reliability_score INTEGER NOT NULL DEFAULT 100,
+    delivery_risk_score INTEGER NOT NULL DEFAULT 0,
+    timing_risk_score INTEGER NOT NULL DEFAULT 0,
+    format_confidence INTEGER NOT NULL DEFAULT 0,
+    preferred_account TEXT,
+    preferred_mode TEXT,
+    predicted_next_safe_at TEXT,
+    sent_count INTEGER NOT NULL DEFAULT 0,
+    uncertain_count INTEGER NOT NULL DEFAULT 0,
+    failed_count INTEGER NOT NULL DEFAULT 0,
+    deferred_count INTEGER NOT NULL DEFAULT 0,
+    evaluated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_destination_intelligence_risk ON destination_intelligence(delivery_risk_score,timing_risk_score);
+
+CREATE TABLE IF NOT EXISTS delivery_confidence (
+    queue_id INTEGER PRIMARY KEY REFERENCES queue(id) ON DELETE CASCADE,
+    confidence INTEGER NOT NULL DEFAULT 0,
+    verdict TEXT NOT NULL DEFAULT 'unknown',
+    evidence_kind TEXT,
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS recovery_incidents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    component TEXT NOT NULL,
+    incident_kind TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'open',
+    details TEXT,
+    recovered_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_recovery_incidents_state ON recovery_incidents(state,created_at);
+
+CREATE TABLE IF NOT EXISTS production_objectives (
+    campaign_id TEXT PRIMARY KEY REFERENCES campaigns(campaign_id) ON DELETE CASCADE,
+    objective TEXT NOT NULL DEFAULT 'one_safe_delivery_per_group_per_cycle',
+    max_uncertain INTEGER NOT NULL DEFAULT 0,
+    max_in_flight INTEGER NOT NULL DEFAULT 1,
+    min_account_health INTEGER NOT NULL DEFAULT 50,
+    require_database_guard INTEGER NOT NULL DEFAULT 0,
+    admin_by_exception INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS update_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
@@ -355,11 +544,29 @@ class Database:
                 "max_cycles": "INTEGER NOT NULL DEFAULT 0",
                 "completed_cycles": "INTEGER NOT NULL DEFAULT 0",
             },
+            "destinations": {
+                "protected": "INTEGER NOT NULL DEFAULT 0",
+                "never_auto_post": "INTEGER NOT NULL DEFAULT 0",
+                "last_seen_at": "TEXT",
+                "text_allowed": "INTEGER",
+                "photo_allowed": "INTEGER",
+                "capability_source": "TEXT",
+                "capability_updated_at": "TEXT",
+            },
             "queue": {
                 "run_key": "TEXT",
                 "content_id": "TEXT",
                 "error_kind": "TEXT",
                 "resolved_at": "TEXT",
+                "pass_no": "INTEGER NOT NULL DEFAULT 1",
+                "phase": "TEXT NOT NULL DEFAULT 'queued'",
+                "phase_percent": "INTEGER NOT NULL DEFAULT 5",
+                "phase_detail": "TEXT",
+                "phase_updated_at": "TEXT",
+                "deferral_count": "INTEGER NOT NULL DEFAULT 0",
+                "progress_current": "INTEGER",
+                "progress_total": "INTEGER",
+                "progress_unit": "TEXT",
             },
         }
         for table, columns in additions.items():
@@ -367,6 +574,41 @@ class Database:
             for name, sql_type in columns.items():
                 if name not in existing:
                     con.execute(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}")
+
+        # V4 progress-history columns are additive too, which keeps upgrades from
+        # early V4 development snapshots safe and idempotent.
+        phase_existing = self._columns(con, "queue_phase_history")
+        for name, sql_type in {
+            "progress_current": "INTEGER",
+            "progress_total": "INTEGER",
+            "progress_unit": "TEXT",
+        }.items():
+            if name not in phase_existing:
+                con.execute(f"ALTER TABLE queue_phase_history ADD COLUMN {name} {sql_type}")
+
+        # Indexes/triggers that reference additive V4 columns must be installed
+        # only after legacy queue tables have been ALTERed above.
+        con.execute("CREATE INDEX IF NOT EXISTS idx_queue_run_pass ON queue(run_key,campaign_id,pass_no,status,due_at)")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_queue_campaign_group_active ON queue(campaign_id,group_id,status)")
+        con.executescript('''
+        DROP TRIGGER IF EXISTS trg_queue_phase_insert;
+        DROP TRIGGER IF EXISTS trg_queue_phase_update;
+        CREATE TRIGGER trg_queue_phase_insert
+        AFTER INSERT ON queue
+        BEGIN
+            INSERT INTO queue_phase_history(created_at,queue_id,run_key,campaign_id,group_id,pass_no,status,phase,phase_percent,account_key,progress_current,progress_total,progress_unit,detail)
+            VALUES(COALESCE(NEW.phase_updated_at,NEW.updated_at),NEW.id,NEW.run_key,NEW.campaign_id,NEW.group_id,NEW.pass_no,NEW.status,NEW.phase,NEW.phase_percent,NEW.account_key,NEW.progress_current,NEW.progress_total,NEW.progress_unit,NEW.phase_detail);
+        END;
+        CREATE TRIGGER trg_queue_phase_update
+        AFTER UPDATE OF phase,phase_percent,progress_current,progress_total ON queue
+        WHEN OLD.phase IS NOT NEW.phase OR OLD.phase_percent IS NOT NEW.phase_percent
+             OR COALESCE(OLD.progress_current,-1) <> COALESCE(NEW.progress_current,-1)
+             OR COALESCE(OLD.progress_total,-1) <> COALESCE(NEW.progress_total,-1)
+        BEGIN
+            INSERT INTO queue_phase_history(created_at,queue_id,run_key,campaign_id,group_id,pass_no,status,phase,phase_percent,account_key,progress_current,progress_total,progress_unit,detail)
+            VALUES(COALESCE(NEW.phase_updated_at,NEW.updated_at),NEW.id,NEW.run_key,NEW.campaign_id,NEW.group_id,NEW.pass_no,NEW.status,NEW.phase,NEW.phase_percent,NEW.account_key,NEW.progress_current,NEW.progress_total,NEW.progress_unit,NEW.phase_detail);
+        END;
+        ''')
 
         # V2.3 normalized old one-content campaigns into campaign_content.
         con.execute('''INSERT OR IGNORE INTO campaign_content(campaign_id,content_id,position,weight,enabled,added_at)
@@ -381,6 +623,49 @@ class Database:
         con.execute("UPDATE content SET lifecycle_state=CASE WHEN enabled=1 THEN 'ready' ELSE 'disabled' END WHERE lifecycle_state IS NULL OR lifecycle_state=''")
         # Index depends on the V2.4 fingerprint column, so create it only after additive ALTERs.
         con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_content_fingerprint ON content(fingerprint) WHERE fingerprint IS NOT NULL AND fingerprint<>''")
+
+        # V3.6 durable lifecycle telemetry: snapshot the current state of legacy queue
+        # rows exactly once so pre-upgrade jobs (including a pending canary) have a
+        # history baseline without mutating their queue status. Future transitions
+        # are captured automatically by SQLite triggers.
+        con.execute('''INSERT INTO queue_stage_history(created_at,queue_id,run_key,campaign_id,group_id,status,account_key,attempts,due_at,error_kind,message)
+                       SELECT COALESCE(q.updated_at,q.created_at,?),q.id,q.run_key,q.campaign_id,q.group_id,q.status,q.account_key,q.attempts,q.due_at,q.error_kind,q.last_error
+                       FROM queue q
+                       WHERE NOT EXISTS (SELECT 1 FROM queue_stage_history h WHERE h.queue_id=q.id)''', (utcnow(),))
+
+        # V4 durable phase telemetry. Existing rows receive a conservative phase
+        # derived from their queue status without changing delivery semantics.
+        con.execute("""UPDATE queue SET
+            phase=CASE status
+                WHEN 'sent' THEN 'sent'
+                WHEN 'sending' THEN 'sending'
+                WHEN 'deferred' THEN 'deferred'
+                WHEN 'retry' THEN 'retry_wait'
+                WHEN 'uncertain' THEN 'uncertain'
+                WHEN 'failed' THEN 'failed'
+                WHEN 'quarantined' THEN 'quarantined'
+                WHEN 'cancelled' THEN 'cancelled'
+                WHEN 'expired' THEN 'expired'
+                ELSE COALESCE(NULLIF(phase,''),'queued') END,
+            phase_percent=CASE status
+                WHEN 'sent' THEN 100
+                WHEN 'sending' THEN MAX(COALESCE(phase_percent,0),65)
+                WHEN 'deferred' THEN MAX(COALESCE(phase_percent,0),35)
+                WHEN 'retry' THEN MAX(COALESCE(phase_percent,0),35)
+                WHEN 'uncertain' THEN 95
+                WHEN 'failed' THEN 100
+                WHEN 'quarantined' THEN 100
+                WHEN 'cancelled' THEN 100
+                WHEN 'expired' THEN 100
+                ELSE MAX(COALESCE(phase_percent,0),5) END,
+            phase_updated_at=COALESCE(phase_updated_at,updated_at),
+            pass_no=MAX(COALESCE(pass_no,1),1),
+            deferral_count=MAX(COALESCE(deferral_count,0),0)""")
+        con.execute('''INSERT INTO queue_phase_history(created_at,queue_id,run_key,campaign_id,group_id,pass_no,status,phase,phase_percent,account_key,progress_current,progress_total,progress_unit,detail)
+                       SELECT COALESCE(q.phase_updated_at,q.updated_at,q.created_at,?),q.id,q.run_key,q.campaign_id,q.group_id,
+                              q.pass_no,q.status,q.phase,q.phase_percent,q.account_key,q.progress_current,q.progress_total,q.progress_unit,q.phase_detail
+                       FROM queue q
+                       WHERE NOT EXISTS (SELECT 1 FROM queue_phase_history h WHERE h.queue_id=q.id)''', (utcnow(),))
 
     def init(self):
         with self.connect() as con:

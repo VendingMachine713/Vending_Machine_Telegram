@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 import json
@@ -15,24 +15,15 @@ from .registry import sync_accounts, sync_destinations, registry_summary
 from .health import run_health
 from .doctor import run_doctor, write_diagnostics
 from .dependencies import environment_report
-from .checks import full_check
+from .checks import full_check, run_all_tests
 from .supervisor import supervise_once
+from .services import managed_services
 
 def _write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False, default=str) + "\n", encoding="utf-8")
 
 def _run_platform_tests(root: Path) -> dict[str, Any]:
-    r = subprocess.run(
-        [sys.executable, "-m", "unittest", "discover", "-s", str(root / "tests"), "-p", "test_*.py", "-v"],
-        cwd=root,
-        text=True,
-        capture_output=True,
-    )
-    return {
-        "ok": r.returncode == 0,
-        "code": r.returncode,
-        "output": (r.stdout + r.stderr)[-30000:],
-    }
+    return run_all_tests(root)
 
 def run_full_validation(root: Path | None = None, *, backup_first: bool = True) -> dict[str, Any]:
     root = root or project_root()
@@ -44,7 +35,7 @@ def run_full_validation(root: Path | None = None, *, backup_first: bool = True) 
     refresh = refresh_bot_manifests(root, write=True)
     inventory_path = str(write_inventory(root))
     structure_json, structure_txt = write_structure_report(root)
-    duplicate_json, duplicate_txt = write_duplicate_report(root)
+    duplicate_json, duplicate_txt, duplicate_diff = write_duplicate_report(root)
 
     registry_result = {
         "accounts_synced": sync_accounts(root),
@@ -54,6 +45,20 @@ def run_full_validation(root: Path | None = None, *, backup_first: bool = True) 
     _write_json(diag / "registry_report.json", registry_result)
 
     tests = _run_platform_tests(root)
+    critical_suites = {"platform", *managed_services(root)}
+    critical_tests_ok = all(
+        suite.get("ok", False)
+        for suite in tests.get("suites", [])
+        if suite.get("suite") in critical_suites
+    )
+    advisory_failed_suites = [
+        suite.get("suite")
+        for suite in tests.get("suites", [])
+        if not suite.get("ok", False) and suite.get("suite") not in critical_suites
+    ]
+    tests["critical_suites"] = sorted(critical_suites)
+    tests["critical_tests_ok"] = critical_tests_ok
+    tests["advisory_failed_suites"] = advisory_failed_suites
     _write_json(diag / "platform_tests_report.json", tests)
 
     health = run_health(root)
@@ -65,7 +70,7 @@ def run_full_validation(root: Path | None = None, *, backup_first: bool = True) 
     env = environment_report(root)
     _write_json(diag / "environment_report.json", env)
 
-    preflight = full_check(root, test_code=0 if tests["ok"] else 1)
+    preflight = full_check(root, test_code=0 if critical_tests_ok else 1)
     _write_json(diag / "preflight_report.json", preflight)
 
     supervisor = supervise_once(root, apply=False)
@@ -76,7 +81,7 @@ def run_full_validation(root: Path | None = None, *, backup_first: bool = True) 
 
     summary = {
         "schema_version": 1,
-        "vm_core_version": "1.2.0",
+        "vm_core_version": "1.4.0",
         "started_at_utc": started,
         "completed_at_utc": datetime.now(timezone.utc).isoformat(),
         "backup": backup_path,
@@ -84,7 +89,11 @@ def run_full_validation(root: Path | None = None, *, backup_first: bool = True) 
         "bots_runnable": inv["runnable_count"],
         "bots_planned": inv["planned_count"],
         "manifest_refresh": refresh,
-        "platform_tests_ok": tests["ok"],
+        "all_test_suites_ok": tests["ok"],
+        "critical_tests_ok": critical_tests_ok,
+        "test_suite_count": tests.get("suite_count",len(tests.get("suites",[]))),
+        "failed_test_suites": [x["suite"] for x in tests.get("suites",[]) if not x.get("ok")],
+        "advisory_failed_test_suites": advisory_failed_suites,
         "health": {item["service"]: item["status"] for item in health},
         "doctor_summary": doctor["summary"],
         "invalid_json_files": doctor.get("invalid_json_files", []),
@@ -96,6 +105,7 @@ def run_full_validation(root: Path | None = None, *, backup_first: bool = True) 
             "inventory": inventory_path,
             "structure": str(structure_txt),
             "duplicates": str(duplicate_txt),
+            "duplicate_diff": str(duplicate_diff),
         },
     }
     _write_json(diag / "full_validation.json", summary)
@@ -104,9 +114,12 @@ def run_full_validation(root: Path | None = None, *, backup_first: bool = True) 
         "=" * 72,
         "VM FULL PLATFORM VALIDATION",
         "=" * 72,
-        f"VM Core:          1.2.0",
+        f"VM Core:          1.4.0",
         f"Bots:             {summary['bots_total']} total | {summary['bots_runnable']} runnable | {summary['bots_planned']} planned",
-        f"Platform tests:   {'PASS' if summary['platform_tests_ok'] else 'FAIL'}",
+        f"All test suites:  {'PASS' if summary['all_test_suites_ok'] else 'REVIEW'}",
+        f"Critical suites:   {'PASS' if summary['critical_tests_ok'] else 'FAIL'}",
+        f"Failed suites:     {', '.join(summary['failed_test_suites']) if summary['failed_test_suites'] else 'none'}",
+        f"Advisory failed:   {', '.join(summary['advisory_failed_test_suites']) if summary['advisory_failed_test_suites'] else 'none'}",
         f"Pre-flight:       {'PASS' if summary['preflight_ok'] else 'REVIEW'}",
         f"Doctor failures:  {summary['doctor_summary']['FAIL']}",
         f"Doctor warnings:  {summary['doctor_summary']['WARN']}",

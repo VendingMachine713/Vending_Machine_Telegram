@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Position=0)]
     [ValidateSet("status","start","stop","restart-failed","doctor","backup","test","inspect","help")]
     [string]$Command = "help"

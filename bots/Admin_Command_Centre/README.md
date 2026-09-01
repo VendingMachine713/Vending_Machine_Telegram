@@ -1,4 +1,4 @@
-# VM Admin Command Centre v0.2.0
+﻿# VM Admin Command Centre v0.2.0
 
 1. Copy `.env.example` to `.env`.
 2. Add only `VM_ADMIN_BOT_TOKEN`.

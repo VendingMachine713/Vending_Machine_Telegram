@@ -1,4 +1,4 @@
-import tempfile
+﻿import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -77,7 +77,7 @@ class RecoveryAndLifecycleTests(unittest.TestCase):
             q = con.execute("SELECT status,error_kind FROM queue WHERE job_key='j1'").fetchone()
             d = con.execute("SELECT consecutive_failures FROM destinations WHERE group_id=-1001").fetchone()[0]
             a = con.execute("SELECT cooldown_until,health_score FROM accounts WHERE account_key='primary'").fetchone()
-        self.assertEqual(tuple(q), ("retry", "flood_wait"))
+        self.assertEqual(tuple(q), ("deferred", "flood_wait"))
         self.assertEqual(d, 0)
         self.assertEqual(a[0], retry)
         self.assertLess(a[1], 100)
@@ -90,7 +90,7 @@ class RecoveryAndLifecycleTests(unittest.TestCase):
             q = con.execute("SELECT status,error_kind FROM queue WHERE job_key='j1'").fetchone()
         self.assertEqual(d[0], retry)
         self.assertEqual(d[1], 0)
-        self.assertEqual(tuple(q), ("retry", "slow_mode"))
+        self.assertEqual(tuple(q), ("deferred", "slow_mode"))
 
     def test_network_error_does_not_quarantine_destination(self):
         self.worker.finish_error(self.job(), "network: down", account="primary", kind="network")

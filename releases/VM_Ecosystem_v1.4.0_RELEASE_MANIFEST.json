@@ -1,0 +1,43 @@
+﻿{
+  "release": "VM_Ecosystem_v1.4.0",
+  "platform_version": "1.4.0",
+  "release_type": "recovery_reliability_delta",
+  "managed_services": {
+    "Admin_Command_Centre": "0.4.0",
+    "Universal_Search": "1.1.0",
+    "VM_Guard": "1.1.0"
+  },
+  "preserves_existing_bot_source": [
+    "bots/Smart_Auto_Poster_V2",
+    "bots/VM_Relationship_Manager"
+  ],
+  "legacy_recovery": {
+    "source": "backups/pre_v1_3_ecosystem_*",
+    "targets": [
+      "Universal_Search",
+      "VM_Guard"
+    ],
+    "restored_as": "legacy_main.py",
+    "secret_scan_required": true,
+    "unknown_core_files_rewritten": false
+  },
+  "relationship_cleanup": {
+    "installer_mode": "preview_only",
+    "automatic_delete": false,
+    "archive_before_apply": true
+  },
+  "installer": {
+    "preinstall_snapshot": true,
+    "rollback_on_critical_failure": true,
+    "post_start_runtime_check": true,
+    "runtime_recovery_retry": true,
+    "readable_support_handoff": true
+  },
+  "security": {
+    "touches_env_values": false,
+    "touches_session_contents": false,
+    "git_tracked_file_audit": true,
+    "hardcoded_secret_recovery_gate": true
+  },
+  "manual_emergency_rollback": "ROLLBACK_VM_v1.4.bat"
+}

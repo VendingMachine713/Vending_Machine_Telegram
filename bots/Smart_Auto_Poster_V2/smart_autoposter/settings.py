@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 from dataclasses import dataclass
@@ -12,6 +12,12 @@ except ImportError:
 PROJECT_ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 
 def _load_project_env() -> None:
+    # Unit/integration tests can explicitly disable project .env loading so a
+    # real production .env cannot overwrite temporary DATABASE_PATH/content
+    # fixtures.  Production behavior remains unchanged unless this opt-in test
+    # flag is set.
+    if os.getenv("SMART_AUTOPOSTER_DISABLE_DOTENV", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return
     # The project-local .env is authoritative for this bot.  override=True
     # prevents stale Windows/user environment variables from shadowing edits.
     load_dotenv(dotenv_path=PROJECT_ENV_PATH, override=True)
@@ -51,6 +57,7 @@ class Settings:
     backup_dir: Path
     log_dir: Path
     min_send_gap_seconds: int
+    send_timeout_seconds: int
     runtime_lock_path: Path
     auth_refresh_seconds: int
     circuit_breaker_failures: int
@@ -68,6 +75,7 @@ class Settings:
     admin_user_ids: tuple[int, ...]
     admin_readonly_user_ids: tuple[int, ...]
     admin_bot_session: str
+    admin_bot_persist_session: bool
     admin_notifications_min_severity: str
     watchdog_seconds: int
     heartbeat_stale_seconds: int
@@ -109,6 +117,7 @@ class Settings:
             backup_dir=_path("BACKUP_DIR", "backups"),
             log_dir=_path("LOG_DIR", "logs"),
             min_send_gap_seconds=max(0, int(os.getenv("MIN_SEND_GAP_SECONDS", "3"))),
+            send_timeout_seconds=max(15, int(os.getenv("SEND_TIMEOUT_SECONDS", "45"))),
             runtime_lock_path=_path("RUNTIME_LOCK_PATH", "runtime/telegram_runtime.lock"),
             auth_refresh_seconds=max(30, int(os.getenv("AUTH_REFRESH_SECONDS", "300"))),
             circuit_breaker_failures=max(1, int(os.getenv("CIRCUIT_BREAKER_FAILURES", "10"))),
@@ -125,6 +134,7 @@ class Settings:
             admin_user_ids=_csv_ints("ADMIN_USER_IDS"),
             admin_readonly_user_ids=_csv_ints("ADMIN_READONLY_USER_IDS"),
             admin_bot_session=os.getenv("ADMIN_BOT_SESSION", "runtime/admin_bot").strip(),
+            admin_bot_persist_session=os.getenv("ADMIN_BOT_PERSIST_SESSION", "0").strip().lower() in {"1","true","yes","on"},
             admin_notifications_min_severity=os.getenv("ADMIN_NOTIFICATIONS_MIN_SEVERITY", "IMPORTANT").strip().upper(),
             watchdog_seconds=max(5, int(os.getenv("WATCHDOG_SECONDS", "30"))),
             heartbeat_stale_seconds=max(30, int(os.getenv("HEARTBEAT_STALE_SECONDS", "180"))),

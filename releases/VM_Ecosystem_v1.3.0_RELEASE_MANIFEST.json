@@ -1,0 +1,19 @@
+﻿{
+  "release": "VM_Ecosystem_v1.3.0",
+  "platform_version": "1.3.0",
+  "services": {
+    "Admin_Command_Centre": "0.3.0",
+    "Universal_Search": "1.0.0",
+    "VM_Guard": "1.0.0"
+  },
+  "preserves": [
+    "bots/Smart_Auto_Poster_V2",
+    "bots/VM_Relationship_Manager"
+  ],
+  "adds_windows_logon_task": true,
+  "autostart_task_name": "VendingMachineTelegram",
+  "reversible_autostart": true,
+  "touches_env_values": false,
+  "touches_session_contents": false,
+  "relationship_nested_folder_deleted": false
+}

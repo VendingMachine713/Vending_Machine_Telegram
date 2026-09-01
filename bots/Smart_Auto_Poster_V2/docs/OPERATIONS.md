@@ -1,4 +1,4 @@
-# V2.4 Operations Summary
+﻿# V2.4 Operations Summary
 
 Routine operation should use the Telegram Admin Control Centre once configured. The Windows Control Panel remains the recovery/maintenance interface.
 

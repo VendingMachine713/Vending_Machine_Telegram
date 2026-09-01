@@ -1,4 +1,4 @@
-$ErrorActionPreference="Stop"
+﻿$ErrorActionPreference="Stop"
 $Root="C:\Users\cherr\OneDrive\Desktop\Vending_Machine_Telegram"
 $Guard=Join-Path $Root "tools\vm_core\git\git_guard.py"
 $Block=Join-Path $Root "tools\vm_core\git\gitignore_block.txt"

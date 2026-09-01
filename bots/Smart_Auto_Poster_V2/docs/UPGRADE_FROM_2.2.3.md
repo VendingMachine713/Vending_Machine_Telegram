@@ -1,4 +1,4 @@
-# Direct upgrade: V2.2.3+ to V3.0
+﻿# Direct upgrade: V2.2.3+ to V3.0
 
 Smart Auto Poster V3.0 is a consolidated upgrade. V2.3/V2.4 do not need to be installed first.
 
@@ -12,7 +12,7 @@ The release package contains source, tests, docs and update tooling only. It int
 4. V3.0 migrates the database additively to schema v6.
 5. Post-update verification compiles the code, runs the full test suite, runs local validation and checks SQLite integrity.
 6. If verification fails, source files **and the database snapshot** are restored automatically.
-7. After success, use the Control Panel: Health → Validate → Account Identities → `LIVE_TEST` dry-run/one controlled send.
+7. After success, use the Control Panel: Health â†’ Validate â†’ Account Identities â†’ `LIVE_TEST` dry-run/one controlled send.
 8. Only after the canary succeeds should unattended production be resumed.
 
 ## Preservation regression test

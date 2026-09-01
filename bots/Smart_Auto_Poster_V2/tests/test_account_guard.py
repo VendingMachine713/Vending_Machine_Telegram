@@ -1,4 +1,4 @@
-import unittest
+﻿import unittest
 from smart_autoposter.account_guard import duplicate_authorized_account_ids, assert_distinct_authorized_accounts
 
 

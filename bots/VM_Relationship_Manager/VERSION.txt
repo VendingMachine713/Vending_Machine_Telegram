@@ -1,3 +1,4 @@
-VM Relationship Manager
-Build: 1.2.0
-Updated: 2026-08-27
+﻿VM Relationship Manager
+Build: 6.0.0
+Release: Passive Autonomy and Operations
+Updated: 2026-09-01

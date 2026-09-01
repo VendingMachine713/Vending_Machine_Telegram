@@ -1,4 +1,4 @@
-# VM Platform v1.0 Architecture
+﻿# VM Platform v1.0 Architecture
 
 The platform keeps each bot independently runnable while providing shared infrastructure.
 

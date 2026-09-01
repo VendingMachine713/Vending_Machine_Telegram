@@ -1,14 +1,30 @@
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+﻿$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location -LiteralPath $Root
+$Version = if (Test-Path (Join-Path $Root 'VERSION.txt')) { (Get-Content (Join-Path $Root 'VERSION.txt') -Raw).Trim() } else { '3.x' }
 function Pause-VM { Write-Host ''; Read-Host 'Press Enter to continue' | Out-Null }
+
+function Run-ChildScript {
+    param([string]$Path,[string[]]$ScriptArgs=@())
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Path @ScriptArgs
+    $code=$LASTEXITCODE
+    if($code -ne 0){ Write-Host "[ERROR] Child script exited with code $code: $Path" -ForegroundColor Red }
+    return $code
+}
 function Run-Cmd([string]$Command) { Write-Host ''; Write-Host "> $Command" -ForegroundColor DarkGray; Invoke-Expression $Command; Pause-VM }
 function Ask-Campaign { return (Read-Host 'Campaign ID').Trim() }
 function Ask-Content { return (Read-Host 'Content ID').Trim() }
+function Normalize-ChoiceValue([string]$Value,[string]$Default,[string[]]$Allowed) {
+    $v = if([string]::IsNullOrWhiteSpace($Value)){$Default}else{$Value.Trim()}
+    if($v.Contains(':')){$v=($v -split ':')[-1].Trim()}
+    $v=$v.ToLowerInvariant()
+    if($Allowed -notcontains $v){ Write-Host "Invalid choice '$v'. Allowed: $($Allowed -join ', ')" -ForegroundColor Red; return $null }
+    return $v
+}
 
 while ($true) {
     Clear-Host
     Write-Host '============================================================' -ForegroundColor Cyan
-    Write-Host ' SMART AUTO POSTER V3.0 - PRODUCTION CONTROL CENTRE' -ForegroundColor Cyan
+    Write-Host " SMART AUTO POSTER V$Version - PRODUCTION CONTROL CENTRE" -ForegroundColor Cyan
     Write-Host '============================================================' -ForegroundColor Cyan
     Write-Host ''
     Write-Host ' CORE / LIVE'
@@ -21,7 +37,7 @@ while ($true) {
     Write-Host ' 7. Show campaigns'
     Write-Host ' 8. Show queue'
     Write-Host ' 9. Run one queue job (controlled test)'
-    Write-Host '10. START Smart Auto Poster V3.0 service'
+    Write-Host "10. START Smart Auto Poster V$Version service"
     Write-Host ''
     Write-Host ' SAFETY / MAINTENANCE'
     Write-Host '11. Backup database/config/cache'
@@ -52,14 +68,14 @@ while ($true) {
     Write-Host '34. Post Now (preview + confirm)'
     Write-Host '35. Clone a campaign'
     Write-Host ''
-    Write-Host ' V3.0 AUTONOMOUS / CONTROL CENTRE'
+    Write-Host " V$Version AUTONOMOUS / CONTROL CENTRE"
     Write-Host '36. Set campaign lifecycle (draft/ready/active/paused/archived)'
     Write-Host '37. List campaign templates'
     Write-Host '38. Create campaign from template'
     Write-Host '39. Configure schedule (interval/daily/one-off/off)'
     Write-Host '40. Cross-campaign minimum-gap rule'
     Write-Host '41. Bulk destination action by tag'
-    Write-Host '42. Queue job manager (retry/cancel/defer/mark-sent)'
+    Write-Host '42. Queue job manager (UNCERTAIN retry/mark-sent blocked)'
     Write-Host '43. Cancel pending jobs for a campaign'
     Write-Host '44. Queue capacity / guardrails'
     Write-Host '45. Analytics report (7 days)'
@@ -80,7 +96,7 @@ while ($true) {
     Write-Host '60. Content tags'
     Write-Host '61. Update history'
     Write-Host ''
-    Write-Host ' V3.0 COLLECTIONS / RULES / INTELLIGENCE'
+    Write-Host " V$Version COLLECTIONS / RULES / INTELLIGENCE"
     Write-Host '62. List destination collections + previews'
     Write-Host '63. Create/update destination collection'
     Write-Host '64. Configure campaign V3 category/collections/cycle limit'
@@ -91,7 +107,29 @@ while ($true) {
     Write-Host '69. Apply/dismiss recommendation'
     Write-Host '70. Daily V3 report'
     Write-Host '71. Weekly V3 report'
-    Write-Host '72. V3 release verification (tests + validate + integrity)'
+    Write-Host '72. V4 release verification (tests + validate + integrity)'
+    Write-Host '73. SAFE production bootstrap (READY only - no send)'
+    Write-Host '74. Production readiness report'
+    Write-Host '75. Run album canary (explicit SEND required)'
+    Write-Host '76. Content library audit'
+    Write-Host '77. Resume/schedule existing album canary retry'
+    Write-Host '78. Album delivery plan (read-only)'
+    Write-Host '79. Prepare ALL selected production destinations for album delivery (explicit APPLY)'
+    Write-Host '80. Activate main production (explicit policy + ACTIVATE)'
+    Write-Host '81. Guarded production go-live / optional auto-start'
+    Write-Host '82. Recovery doctor (read-only)'
+    Write-Host '83. Confirm SENT album canary visually (explicit ALBUM_OK)'
+    Write-Host '84. Reconcile visually confirmed ambiguous canary (NO SEND)'
+    Write-Host '85. Strict final go-live readiness (read-only)'
+    Write-Host '86. Re-arm main production schedule from now (NO SEND)'
+    Write-Host '87. List UNCERTAIN jobs (read-only)'
+    Write-Host '88. Reconcile one UNCERTAIN job from Telegram history'
+    Write-Host '89. Auto-post progress + per-destination stages (read-only)'
+    Write-Host '90. V4 Mission Control (read-only)'
+    Write-Host '91. Inspect one post pipeline / step history (read-only)'
+    Write-Host '92. V5 queue hygiene plan (read-only)'
+    Write-Host '93. V5 production gate / readiness (read-only)'
+    Write-Host '94. V5 apply SAFE queue hygiene (provably-unsent rows only)'
     Write-Host ' 0. Exit'
     Write-Host ''
     $choice = Read-Host 'Choose'
@@ -105,7 +143,7 @@ while ($true) {
         '7'  { Run-Cmd 'py .\app.py campaigns' }
         '8'  { Run-Cmd 'py .\app.py queue --limit 50' }
         '9'  { Run-Cmd 'py .\app.py worker --once' }
-        '10' { Write-Host ''; Write-Host 'Starting V3.0 scheduler + worker + watchdog + recovery + optional Admin Bot. Ctrl+C stops cleanly.' -ForegroundColor Yellow; py .\app.py run; Pause-VM }
+        '10' { Write-Host ''; Write-Host "Starting V$Version scheduler + worker + watchdog + recovery + optional Admin Bot. Ctrl+C stops cleanly." -ForegroundColor Yellow; py .\app.py run; Pause-VM }
         '11' { Run-Cmd 'py .\app.py backup' }
         '12' { Run-Cmd 'py .\app.py export-destinations' }
         '13' { Run-Cmd 'py -m unittest discover -s tests -v' }
@@ -128,7 +166,7 @@ while ($true) {
         '30' { Run-Cmd 'py .\app.py daily-summary --hours 24' }
         '31' { Start-Process explorer.exe (Join-Path $Root 'content\inbox') }
         '32' { & (Join-Path $Root 'INSTALL_AUTOSTART.ps1'); Pause-VM }
-        '33' { & (Join-Path $Root 'REMOVE_AUTOSTART.ps1'); Pause-VM }
+        '33' { Run-ChildScript (Join-Path $Root 'REMOVE_AUTOSTART.ps1') | Out-Null; Pause-VM }
         '34' { $c=Ask-Campaign; if($c){ py .\app.py post-now $c --dry-run; $confirm=Read-Host 'Type SEND to enqueue now'; if($confirm -eq 'SEND'){Run-Cmd "py .\app.py post-now `"$c`""}else{Pause-VM} } }
         '35' { $src=Read-Host 'Source campaign ID'; $dst=Read-Host 'New campaign ID'; if($src -and $dst){Run-Cmd "py .\app.py clone-campaign `"$src`" `"$dst`""} }
         '36' { $c=Ask-Campaign; $st=Read-Host 'State: draft/ready/active/paused/archived'; if($c -and $st){Run-Cmd "py .\app.py campaign-state `"$c`" `"$st`""} }
@@ -150,10 +188,10 @@ while ($true) {
         '52' { py .\app.py admin-status; Write-Host ''; Write-Host 'Configure ADMIN_BOT_TOKEN + ADMIN_USER_IDS locally in .env. Never paste the token into chat.' -ForegroundColor Yellow; $open=Read-Host 'Open .env in Notepad? y/N'; if($open -match '^[Yy]'){Start-Process notepad.exe (Join-Path $Root '.env')}; Pause-VM }
         '53' { Write-Host 'This starts ONLY the private Telegram admin bot. Ctrl+C stops it.' -ForegroundColor Yellow; py .\app.py admin-bot; Pause-VM }
         '54' { & (Join-Path $Root 'INSTALL_MASTER_UPDATER.ps1'); Pause-VM }
-        '55' { $master=(Resolve-Path (Join-Path $Root '..\..')).Path; $rb=Join-Path $master 'ROLLBACK_LAST_UPDATE.ps1'; if(Test-Path $rb){& $rb}else{Write-Host 'Rollback script not installed. Run option 54 first.' -ForegroundColor Yellow}; Pause-VM }
+        '55' { $master=(Resolve-Path (Join-Path $Root '..\..')).Path; $rb=Join-Path $master 'ROLLBACK_LAST_UPDATE.ps1'; if(Test-Path $rb){Run-ChildScript $rb | Out-Null}else{Write-Host 'Rollback script not installed. Run option 54 first.' -ForegroundColor Yellow}; Pause-VM }
         '56' { Run-Cmd 'py .\app.py audit-log --limit 50' }
         '57' { Run-Cmd 'py .\app.py maintenance' }
-        '58' { & (Join-Path $Root 'AUTOSTART_STATUS.ps1'); Pause-VM }
+        '58' { Run-ChildScript (Join-Path $Root 'AUTOSTART_STATUS.ps1') | Out-Null; Pause-VM }
         '59' { $c=Ask-Content; $st=Read-Host 'State: ready/disabled/archived/rejected'; if($c -and $st){Run-Cmd "py .\app.py content-state `"$c`" `"$st`""} }
         '60' { $c=Ask-Content; $add=Read-Host 'Tag to add (blank none)'; $remove=Read-Host 'Tag to remove (blank none)'; $flags=''; if($add){$flags += " --add-tag `"$add`""}; if($remove){$flags += " --remove-tag `"$remove`""}; Run-Cmd "py .\app.py content-tags `"$c`" $flags" }
         '61' { Run-Cmd 'py .\app.py update-history --limit 50' }
@@ -161,8 +199,8 @@ while ($true) {
         '63' {
             $id=(Read-Host 'Collection ID').Trim(); if(-not $id){Pause-VM; continue}
             $name=Read-Host 'Display name (blank = ID)'; $inc=Read-Host 'Include tags comma-separated (blank = any)'; $exc=Read-Host 'Exclude tags comma-separated';
-            $access=Read-Host 'Access any/primary/secondary/both [any]'; if(-not $access){$access='any'}
-            $mode=Read-Host 'Mode any/photo/text [any]'; if(-not $mode){$mode='any'}
+            $access=Normalize-ChoiceValue (Read-Host 'Access any/primary/secondary/both [any]') 'any' @('any','primary','secondary','both'); if(-not $access){Pause-VM; continue}
+            $mode=Normalize-ChoiceValue (Read-Host 'Mode any/photo/text [any]') 'any' @('any','photo','text'); if(-not $mode){Pause-VM; continue}
             $forum=Read-Host 'Forum only? y/N'; $prot=Read-Host 'Allow protected destinations? y/N'
             $flags=''; if($name){$flags += " --name `"$name`""}; if($inc){$flags += " --include-tags `"$inc`""}; if($exc){$flags += " --exclude-tags `"$exc`""};
             $flags += " --access $access --mode $mode"; if($forum -match '^[Yy]'){$flags += ' --forum-only'}; if($prot -match '^[Yy]'){$flags += ' --include-protected'}
@@ -187,7 +225,35 @@ while ($true) {
         }
         '70' { Run-Cmd 'py .\app.py report' }
         '71' { Run-Cmd 'py .\app.py report --weekly' }
-        '72' { Write-Host ''; Write-Host 'Running V3.0 release verification...' -ForegroundColor Yellow; py -m compileall -q .; if($LASTEXITCODE -eq 0){py -m unittest discover -s tests -q}; if($LASTEXITCODE -eq 0){py .\app.py validate}; if($LASTEXITCODE -eq 0){py .\app.py integrity}; Pause-VM }
+        '72' { Write-Host ''; Write-Host "Running V$Version release verification..." -ForegroundColor Yellow; py -m compileall -q .; if($LASTEXITCODE -eq 0){py -m unittest discover -s tests -q}; if($LASTEXITCODE -eq 0){py .\app.py validate}; if($LASTEXITCODE -eq 0){py .\app.py integrity}; Pause-VM }
+        '73' { Run-Cmd 'py .\app.py production-bootstrap' }
+        '74' { $c=Read-Host 'Campaign ID [main_production_01]'; if(-not $c){$c='main_production_01'}; Run-Cmd "py .\app.py production-readiness `"$c`" --collection all_approved" }
+        '75' { Run-ChildScript (Join-Path $Root 'RUN_ALBUM_CANARY.ps1') | Out-Null; Pause-VM }
+        '76' { Run-Cmd 'py .\app.py content-audit' }
+        '77' { Run-ChildScript (Join-Path $Root 'RESUME_ALBUM_CANARY.ps1') @('AUTO') | Out-Null; Pause-VM }
+        '78' { Run-Cmd 'py .\app.py album-delivery-plan --campaign-id main_production_01' }
+        '79' { Run-ChildScript (Join-Path $Root 'PREPARE_ALL_ALBUM_DELIVERY.ps1') | Out-Null; Pause-VM }
+        '80' { Run-ChildScript (Join-Path $Root 'ACTIVATE_MAIN_PRODUCTION.ps1') | Out-Null; Pause-VM }
+        '81' { Run-ChildScript (Join-Path $Root 'GO_LIVE.ps1') | Out-Null; Pause-VM }
+        '82' { Run-ChildScript (Join-Path $Root 'RECOVERY_DOCTOR.ps1') | Out-Null; Pause-VM }
+        '83' { Run-ChildScript (Join-Path $Root 'CONFIRM_ALBUM_CANARY.ps1') | Out-Null; Pause-VM }
+        '84' { Run-ChildScript (Join-Path $Root 'RECONCILE_ALBUM_CANARY_VISUAL.ps1') | Out-Null; Pause-VM }
+        '85' { Run-Cmd 'py .\app.py go-live-readiness main_production_01 --collection all_approved --expected-destinations 32 --expected-variants 5 --require-album-items 10 --expected-interval-minutes 240' }
+        '86' { Run-Cmd 'py .\app.py schedule-rearm main_production_01' }
+        '87' { Run-Cmd 'py .\app.py uncertain-list --limit 100' }
+        '88' {
+            $id=Read-Host 'UNCERTAIN queue job ID'; if(-not $id){Pause-VM; continue}
+            $outcome=Normalize-ChoiceValue (Read-Host 'Telegram history result: sent / not_sent / unresolved') '' @('sent','not_sent','unresolved'); if(-not $outcome){Pause-VM; continue}
+            $evidence=Read-Host 'Evidence/observation (required)'; if(-not $evidence){Write-Host 'Evidence is required.' -ForegroundColor Red; Pause-VM; continue}
+            $confirm=''; if($outcome -eq 'sent'){$confirm=' --confirmation TELEGRAM_HISTORY_CONFIRMED_SENT'}elseif($outcome -eq 'not_sent'){$confirm=' --confirmation TELEGRAM_HISTORY_CONFIRMED_NOT_SENT'}
+            Run-Cmd "py .\app.py uncertain-reconcile $id $outcome --evidence `"$evidence`"$confirm"
+        }
+        '89' { $c=Read-Host 'Campaign ID (blank = latest run)'; Write-Host 'Live view refreshes every 5 seconds; press Ctrl+C to stop.' -ForegroundColor Yellow; if($c){Run-Cmd "py .\app.py progress --campaign `"$c`" --limit 50 --watch --interval 5"}else{Run-Cmd 'py .\app.py progress --limit 50 --watch --interval 5'} }
+        '90' { $c=Read-Host 'Campaign ID [main_production_01]'; if(-not $c){$c='main_production_01'}; Run-Cmd "py .\app.py mission-control --campaign `"$c`" --limit 20" }
+        '91' { $id=Read-Host 'Queue job ID'; if($id){Run-Cmd "py .\app.py job-timeline $id --limit 100"} }
+        '92' { Run-Cmd 'py .\app.py queue-hygiene' }
+        '93' { Run-Cmd 'py .\app.py v5-readiness --campaign main_production_01' }
+        '94' { $go=Read-Host 'Type APPLY_SAFE_HYGIENE to suppress only provably-unsent redundant rows'; if($go -eq 'APPLY_SAFE_HYGIENE'){Run-Cmd 'py .\app.py queue-hygiene --apply'} }
         '0' { return }
         default { Start-Sleep -Seconds 1 }
     }

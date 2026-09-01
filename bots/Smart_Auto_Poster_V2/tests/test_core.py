@@ -1,4 +1,4 @@
-import json
+﻿import json
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -34,7 +34,7 @@ class CoreTests(unittest.TestCase):
     def test_schema_and_validation(self):
         self.assertEqual(validate(self.db), [])
         with self.db.connect() as con:
-            self.assertEqual(con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0], "6")
+            self.assertEqual(con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0], "20")
 
     def test_enqueue_duplicate_guard_per_run(self):
         a = enqueue_campaign(self.db, "C1", run_key="test-run")
@@ -42,7 +42,13 @@ class CoreTests(unittest.TestCase):
         c = enqueue_campaign(self.db, "C1", run_key="next-run")
         self.assertEqual(a["inserted"], 1)
         self.assertEqual(b["duplicates"], 1)
-        self.assertEqual(c["inserted"], 1)
+        # V4 anti-spam: a new cycle cannot stack a second unresolved post for the same group.
+        self.assertEqual(c["inserted"], 0)
+        self.assertEqual(c["overlap_locked"], 1)
+        with self.db.connect() as con:
+            con.execute("UPDATE queue SET status='sent',resolved_at=?,updated_at=? WHERE run_key='test-run'", (utcnow(), utcnow()))
+        d = enqueue_campaign(self.db, "C1", run_key="after-resolved")
+        self.assertEqual(d["inserted"], 1)
 
     def test_scheduler_enqueues_due_interval(self):
         configure_interval(self.db, "C1", 3600, "Australia/Adelaide", start_in_seconds=0)

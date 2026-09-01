@@ -1,5 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
+from . import __version__
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -14,26 +15,33 @@ from .operations import (
     operational_summary,
     set_campaign_state,
     set_content_state,
+    retry_failed_safely,
 )
 from .safety import SafetyController
 from .scheduler import configure_daily, configure_interval, configure_once
 from .collections import list_collections, collection_preview
 from .recommendations import generate_recommendations, list_recommendations, apply_recommendation, dismiss_recommendation
 from .reports import daily_report_text, weekly_report_text
+from .progress import progress_snapshot, render_progress_text, progress_bar, post_pipeline_snapshot, render_post_pipeline
+from .mission_control import mission_snapshot, render_mission_control
+from .lifecycle import queue_phase_history
+from .queue_hygiene import queue_hygiene_plan
+from .v5_controller import production_gate
+from .v6_controller import v6_readiness, render_v6_control
 
 
 def _short(value, n=40):
     value = str(value or "").replace("\n", " ")
-    return value if len(value) <= n else value[: n - 1] + "…"
+    return value if len(value) <= n else value[: n - 1] + "â€¦"
 
 
 def dashboard_text(db: Database) -> str:
     summary = operational_summary(db, 24)
     q = summary["queue_status"]
     accounts = summary["accounts"]
-    lines = ["🤖 SMART AUTO POSTER V3.0", "", "SYSTEM"]
+    lines = [f"ðŸ¤– SMART AUTO POSTER V{__version__}", "", "SYSTEM"]
     for a in accounts:
-        icon = "🟢" if a.get("authorized") and not a.get("cooldown_until") else ("🟡" if a.get("authorized") else "🔴")
+        icon = "ðŸŸ¢" if a.get("authorized") and not a.get("cooldown_until") else ("ðŸŸ¡" if a.get("authorized") else "ðŸ”´")
         lines.append(f"{icon} {a['account_key'].title()}: {_short(a.get('identity') or 'unknown', 24)} | health {a.get('health_score',100)}")
     lines += ["", "CAMPAIGNS"]
     states = summary["campaigns"]
@@ -41,6 +49,9 @@ def dashboard_text(db: Database) -> str:
     d = summary["destinations"]
     lines += ["", "DESTINATIONS", f"Enabled {d.get('enabled',0)} | Review {d.get('review',0)} | Quarantined {d.get('quarantined',0)}"]
     lines += ["", "QUEUE", f"Pending {q.get('pending',0)} | Deferred {q.get('deferred',0)} | Failed {q.get('failed',0)} | Uncertain {q.get('uncertain',0)}"]
+    latest = progress_snapshot(db, limit=1)
+    if latest.get("found"):
+        lines.append(f"Latest run {progress_bar(latest['progress_percent'], 16)} {latest['progress_percent']}% | sent {latest['sent']}/{latest['total']} | deferred {latest['deferred']}")
     lines.append(f"24h success rate: {summary['success_rate']:.2f}%")
     return "\n".join(lines)
 
@@ -57,10 +68,10 @@ def campaigns_text(db: Database, limit: int = 12) -> str:
         ).fetchall()
     if not rows:
         return "No campaigns yet."
-    lines = ["📣 CAMPAIGNS"]
+    lines = ["ðŸ“£ CAMPAIGNS"]
     for r in rows:
-        icon = "🟢" if r["lifecycle_state"] == "active" else ("⏸" if r["lifecycle_state"] == "paused" else "⚪")
-        lines.append(f"{icon} {r['campaign_id']} — {_short(r['name'],24)} | {r['variants']} variant(s) | {r['schedule_mode'] or 'manual'} | cycles {r['completed_cycles']}/{r['max_cycles'] or '∞'}")
+        icon = "ðŸŸ¢" if r["lifecycle_state"] == "active" else ("â¸" if r["lifecycle_state"] == "paused" else "âšª")
+        lines.append(f"{icon} {r['campaign_id']} â€” {_short(r['name'],24)} | {r['variants']} variant(s) | {r['schedule_mode'] or 'manual'} | cycles {r['completed_cycles']}/{r['max_cycles'] or 'âˆž'}")
     return "\n".join(lines)
 
 
@@ -74,9 +85,9 @@ def content_text(db: Database, limit: int = 15) -> str:
         ).fetchall()
     if not rows:
         return "No content registered yet."
-    lines = ["🗂 CONTENT LIBRARY"]
+    lines = ["ðŸ—‚ CONTENT LIBRARY"]
     for r in rows:
-        icon = "🟢" if r["lifecycle_state"] == "ready" else "⚪"
+        icon = "ðŸŸ¢" if r["lifecycle_state"] == "ready" else "âšª"
         lines.append(f"{icon} {r['content_id']} | {r['lifecycle_state']} | campaigns {r['campaigns']} | caption {r['caption_chars']} chars")
     return "\n".join(lines)
 
@@ -84,11 +95,11 @@ def content_text(db: Database, limit: int = 15) -> str:
 def accounts_text(db: Database) -> str:
     with db.connect() as con:
         rows = con.execute("SELECT * FROM accounts ORDER BY account_key").fetchall()
-    lines = ["👥 TELEGRAM ACCOUNTS"]
+    lines = ["ðŸ‘¥ TELEGRAM ACCOUNTS"]
     for r in rows:
-        icon = "🟢" if r["authorized"] else "🔴"
+        icon = "ðŸŸ¢" if r["authorized"] else "ðŸ”´"
         lines.append(
-            f"{icon} {r['account_key'].title()} — {_short(r['identity'] or 'unknown',30)}\n"
+            f"{icon} {r['account_key'].title()} â€” {_short(r['identity'] or 'unknown',30)}\n"
             f"ID {r['telegram_user_id'] or '?'} | health {r['health_score']} | cooldown {r['cooldown_until'] or 'none'}"
         )
     return "\n".join(lines)
@@ -101,11 +112,42 @@ def queue_text(db: Database) -> str:
             '''SELECT q.id,q.status,q.campaign_id,q.due_at,d.group_name FROM queue q JOIN destinations d ON d.group_id=q.group_id
                WHERE q.status IN ('pending','retry','deferred') ORDER BY q.due_at LIMIT 8'''
         ).fetchall()
-    lines = ["📬 QUEUE"] + [f"{r['status']}: {r['n']}" for r in rows]
+    lines = ["ðŸ“¬ QUEUE"] + [f"{r['status']}: {r['n']}" for r in rows]
+    latest = progress_snapshot(db, limit=1)
+    if latest.get("found"):
+        lines += ["", "LATEST RUN", f"{progress_bar(latest['progress_percent'], 16)} {latest['progress_percent']}% | {latest['finalised']}/{latest['total']} finalised | sent {latest['sent']} | deferred {latest['deferred']}"]
     if next_rows:
         lines.append("\nNEXT")
         for r in next_rows:
-            lines.append(f"#{r['id']} {r['campaign_id']} → {_short(r['group_name'],25)} [{r['status']}]")
+            lines.append(f"#{r['id']} {r['campaign_id']} â†’ {_short(r['group_name'],25)} [{r['status']}]")
+    return "\n".join(lines)
+
+
+def progress_text(db: Database, timezone_name: str = "Australia/Adelaide", limit: int = 40) -> str:
+    snap = progress_snapshot(db, limit=limit)
+    return render_progress_text(snap, timezone_name=timezone_name, emoji=True, bar_width=16, compact=True)
+
+
+def mission_text(db: Database, limit: int = 10) -> str:
+    return render_mission_control(mission_snapshot(db, campaign_id="main_production_01", limit=limit), emoji=True)
+
+
+def hygiene_text(db: Database) -> str:
+    x=queue_hygiene_plan(db)
+    return ("ðŸ§¹ V5 QUEUE HYGIENE\n"
+            f"Active rows {x['active_rows']} | groups {x['active_groups']}\n"
+            f"Safe suppressions {x['safe_suppressions']} | review {x['review_count']}\n"
+            "UNCERTAIN rows are evidence and are never auto-retried/reconciled.")
+
+
+def gate_text(db: Database) -> str:
+    x=production_gate(db)
+    lines=["ðŸ›¡ V5 PRODUCTION GATE", f"Ready: {'YES' if x['ready'] else 'NO'}",
+           f"UNCERTAIN {x['uncertain']} | in-flight {x['in_flight']}",
+           f"Safe overlap cleanup {x['queue_hygiene']['safe_suppressions']} | review {x['queue_hygiene']['review_count']}"]
+    if x['blockers']:
+        lines.append("BLOCKERS")
+        lines.extend(f"â€¢ {v}" for v in x['blockers'][:8])
     return "\n".join(lines)
 
 
@@ -118,10 +160,10 @@ def errors_text(db: Database, limit: int = 12) -> str:
             (limit,),
         ).fetchall()
     if not rows:
-        return "✅ No failed/uncertain queue jobs."
-    lines = ["⚠️ NEEDS ATTENTION"]
+        return "âœ… No failed/uncertain queue jobs."
+    lines = ["âš ï¸ NEEDS ATTENTION"]
     for r in rows:
-        lines.append(f"#{r['id']} {r['status']} | {r['campaign_id']} → {_short(r['group_name'],22)}\n{_short(r['error_kind'] or r['last_error'],70)}")
+        lines.append(f"#{r['id']} {r['status']} | {r['campaign_id']} â†’ {_short(r['group_name'],22)}\n{_short(r['error_kind'] or r['last_error'],70)}")
     return "\n".join(lines)
 
 
@@ -132,8 +174,8 @@ def review_text(db: Database, limit: int = 12) -> str:
             (limit,),
         ).fetchall()
     if not rows:
-        return "✅ No destinations waiting for review."
-    lines = ["🆕 DESTINATION REVIEW"]
+        return "âœ… No destinations waiting for review."
+    lines = ["ðŸ†• DESTINATION REVIEW"]
     for r in rows:
         lines.append(f"{r['group_id']} | {_short(r['group_name'],32)} | P/S {r['primary_access']}/{r['secondary_access']} | {r['mode']}")
     return "\n".join(lines)
@@ -153,7 +195,7 @@ def search_destinations_text(db: Database, term: str, limit: int = 12) -> str:
         ).fetchall()
     if not rows:
         return f"No destinations matched: {term}"
-    lines = [f"🔎 DESTINATIONS: {term}"]
+    lines = [f"ðŸ”Ž DESTINATIONS: {term}"]
     for r in rows:
         lines.append(f"{r['group_id']} | {_short(r['group_name'],30)} | {'ON' if r['enabled'] else 'OFF'} | P/S {r['primary_access']}/{r['secondary_access']} | {r['mode']}")
     return "\n".join(lines)
@@ -163,11 +205,11 @@ def collections_text(db: Database, limit: int = 15) -> str:
     rows=list_collections(db, enabled_only=False)[:limit]
     if not rows:
         return "No destination collections configured."
-    lines=["🧭 DESTINATION COLLECTIONS"]
+    lines=["ðŸ§­ DESTINATION COLLECTIONS"]
     for r in rows:
         try: n=collection_preview(db,r["collection_id"])["selected"]
         except Exception: n=0
-        lines.append(f"{'🟢' if r['enabled'] else '⚪'} {r['collection_id']} — {_short(r['name'],26)} | {n} destination(s)")
+        lines.append(f"{'ðŸŸ¢' if r['enabled'] else 'âšª'} {r['collection_id']} â€” {_short(r['name'],26)} | {n} destination(s)")
     return "\n".join(lines)
 
 
@@ -175,10 +217,10 @@ def recommendations_text(db: Database, limit: int = 10) -> str:
     generate_recommendations(db,168)
     rows=list_recommendations(db,'open',limit)
     if not rows:
-        return "✅ No open recommendations."
-    lines=["💡 RECOMMENDATIONS"]
+        return "âœ… No open recommendations."
+    lines=["ðŸ’¡ RECOMMENDATIONS"]
     for r in rows:
-        icon={'CRITICAL':'🚨','IMPORTANT':'⚠️','WARNING':'🟡'}.get(r['severity'],'ℹ️')
+        icon={'CRITICAL':'ðŸš¨','IMPORTANT':'âš ï¸','WARNING':'ðŸŸ¡'}.get(r['severity'],'â„¹ï¸')
         lines.append(f"{icon} {r['recommendation_id']} | {_short(r['title'],55)}")
     return "\n".join(lines)
 
@@ -200,6 +242,8 @@ class TelegramAdminController:
         self.client = None
         self._wizard: dict[int, WizardState] = {}
         self.stop_requested = False
+        self.ready_event = asyncio.Event()
+        self.startup_error = None
 
     def role(self, user_id: int | None) -> str | None:
         if not user_id:
@@ -227,8 +271,12 @@ class TelegramAdminController:
     async def _build_client(self):
         from telethon import Button, TelegramClient, events
 
+        # Bot-token sessions do not need a persistent Telethon SQLite session.
+        # Memory mode is the unattended default because it avoids stale/locked
+        # admin_bot.session files blocking managed service startup.
+        session_arg = self.settings.admin_bot_session if getattr(self.settings, "admin_bot_persist_session", False) else None
         client = TelegramClient(
-            self.settings.admin_bot_session,
+            session_arg,
             self.settings.api_id,
             self.settings.api_hash,
             flood_sleep_threshold=0,
@@ -282,6 +330,26 @@ class TelegramAdminController:
                 await event.respond(accounts_text(self.db), buttons=self._home_buttons(Button))
             elif cmd == "/queue":
                 await event.respond(queue_text(self.db), buttons=self._queue_buttons(Button))
+            elif cmd == "/progress":
+                await event.respond(progress_text(self.db, self.settings.timezone), buttons=self._progress_buttons(Button))
+            elif cmd in {"/mission", "/missioncontrol"}:
+                await event.respond(mission_text(self.db), buttons=self._mission_buttons(Button))
+            elif cmd in {"/gate", "/readiness"}:
+                await event.respond(gate_text(self.db), buttons=self._mission_buttons(Button))
+            elif cmd in {"/v6", "/control"}:
+                await event.respond(v6_text(self.db), buttons=self._mission_buttons(Button))
+            elif cmd == "/hygiene":
+                await event.respond(hygiene_text(self.db), buttons=self._mission_buttons(Button))
+            elif cmd == "/post":
+                if len(parts) < 2:
+                    await event.respond("Usage: /post <job_id>")
+                else:
+                    try:
+                        jid = int(parts[1].strip().split()[0])
+                    except ValueError:
+                        await event.respond("Usage: /post <numeric job_id>")
+                    else:
+                        await event.respond(render_post_pipeline(post_pipeline_snapshot(self.db, jid), timezone_name=self.settings.timezone, emoji=True), buttons=self._home_buttons(Button))
             elif cmd == "/errors":
                 await event.respond(errors_text(self.db), buttons=self._error_buttons(Button))
             elif cmd == "/review":
@@ -304,15 +372,15 @@ class TelegramAdminController:
                     source, new_id = parts[1], parts[2].strip().split()[0]
                     clone_campaign(self.db, source, new_id)
                     audit(self.db, f"telegram:{sender}", "campaign_clone", "campaign", new_id, source=source)
-                    await event.respond(f"✅ Cloned {source} → {new_id} as DRAFT.", buttons=self._campaign_buttons(Button))
+                    await event.respond(f"âœ… Cloned {source} â†’ {new_id} as DRAFT.", buttons=self._campaign_buttons(Button))
             elif cmd == "/pause":
                 self.safety.pause("Telegram admin emergency pause", manual=True)
                 audit(self.db, f"telegram:{sender}", "pause_all")
-                await event.respond("⏸ Outbound posting paused.", buttons=self._home_buttons(Button))
+                await event.respond("â¸ Outbound posting paused.", buttons=self._home_buttons(Button))
             elif cmd == "/resume":
                 self.safety.resume("Telegram admin resume")
                 audit(self.db, f"telegram:{sender}", "resume_all")
-                await event.respond("▶️ Outbound posting resumed.", buttons=self._home_buttons(Button))
+                await event.respond("â–¶ï¸ Outbound posting resumed.", buttons=self._home_buttons(Button))
             elif cmd == "/newcampaign":
                 self._wizard[sender] = WizardState()
                 await event.respond("Campaign wizard started. Send a short campaign ID (letters/numbers/_). Send /cancel to stop.")
@@ -321,7 +389,7 @@ class TelegramAdminController:
                 await event.respond("Cancelled.")
             elif cmd == "/help":
                 await event.respond(
-                    "/status /campaigns /content /accounts /queue /errors /review /collections /recommendations /report /weekly /find <name> /clone <source> <new> /newcampaign /pause /resume /cancel"
+                    "/status /campaigns /content /accounts /queue /progress /post <id> /mission /gate /v6 /hygiene /errors /review /collections /recommendations /report /weekly /find <name> /clone <source> <new> /newcampaign /pause /resume /cancel"
                 )
             else:
                 await event.respond("Use /status or /help.", buttons=self._home_buttons(Button))
@@ -344,53 +412,73 @@ class TelegramAdminController:
     @staticmethod
     def _home_buttons(Button):
         return [
-            [Button.inline("📣 Campaigns", b"campaigns"), Button.inline("📬 Queue", b"queue")],
-            [Button.inline("🗂 Content", b"content"), Button.inline("👥 Accounts", b"accounts")],
-            [Button.inline("🆕 Review", b"review"), Button.inline("⚠️ Errors", b"errors")],
-            [Button.inline("🧭 Collections", b"collections"), Button.inline("💡 Recommendations", b"recommendations")],
-            [Button.inline("⏸ Pause", b"pause"), Button.inline("▶ Resume", b"resume")],
-            [Button.inline("🔄 Refresh", b"home")],
+            [Button.inline("ðŸ“£ Campaigns", b"campaigns"), Button.inline("ðŸ“Š Progress", b"progress")],
+            [Button.inline("ðŸ§­ Mission Control", b"mission")],
+            [Button.inline("ðŸ“¬ Queue", b"queue"), Button.inline("ðŸ‘¥ Accounts", b"accounts")],
+            [Button.inline("ðŸ—‚ Content", b"content")],
+            [Button.inline("ðŸ†• Review", b"review"), Button.inline("âš ï¸ Errors", b"errors")],
+            [Button.inline("ðŸ§­ Collections", b"collections"), Button.inline("ðŸ’¡ Recommendations", b"recommendations")],
+            [Button.inline("â¸ Pause", b"pause"), Button.inline("â–¶ Resume", b"resume")],
+            [Button.inline("ðŸ”„ Refresh", b"home")],
         ]
 
     def _campaign_buttons(self, Button):
         with self.db.connect() as con:
             rows = con.execute("SELECT campaign_id,lifecycle_state FROM campaigns ORDER BY enabled DESC,priority DESC LIMIT 8").fetchall()
-        buttons = [[Button.inline(("🟢 " if r["lifecycle_state"] == "active" else "⚪ ") + _short(r["campaign_id"], 35), f"camp:{r['campaign_id']}".encode())] for r in rows]
-        buttons.append([Button.inline("🏠 Home", b"home")])
+        buttons = [[Button.inline(("ðŸŸ¢ " if r["lifecycle_state"] == "active" else "âšª ") + _short(r["campaign_id"], 35), f"camp:{r['campaign_id']}".encode())] for r in rows]
+        buttons.append([Button.inline("ðŸ  Home", b"home")])
         return buttons
 
     def _content_buttons(self, Button):
         with self.db.connect() as con:
             rows = con.execute("SELECT content_id,lifecycle_state FROM content ORDER BY enabled DESC,updated_at DESC LIMIT 8").fetchall()
-        buttons = [[Button.inline(("🟢 " if r["lifecycle_state"] == "ready" else "⚪ ") + _short(r["content_id"], 35), f"contentitem:{r['content_id']}".encode())] for r in rows]
-        buttons.append([Button.inline("🏠 Home", b"home")])
+        buttons = [[Button.inline(("ðŸŸ¢ " if r["lifecycle_state"] == "ready" else "âšª ") + _short(r["content_id"], 35), f"contentitem:{r['content_id']}".encode())] for r in rows]
+        buttons.append([Button.inline("ðŸ  Home", b"home")])
         return buttons
 
     @staticmethod
     def _queue_buttons(Button):
         return [
-            [Button.inline("🔁 Retry failed", b"retry_failed"), Button.inline("⚠️ Errors", b"errors")],
-            [Button.inline("🏠 Home", b"home")],
+            [Button.inline("ðŸ“Š Progress", b"progress"), Button.inline("âš ï¸ Errors", b"errors")],
+            [Button.inline("ðŸ” Retry failed", b"retry_failed")],
+            [Button.inline("ðŸ  Home", b"home")],
+        ]
+
+    @staticmethod
+    def _progress_buttons(Button):
+        return [
+            [Button.inline("ðŸ”„ Refresh progress", b"progress"), Button.inline("ðŸ§­ Mission", b"mission")],
+            [Button.inline("ðŸ“¬ Queue", b"queue")],
+            [Button.inline("ðŸ  Home", b"home")],
+        ]
+
+    @staticmethod
+    def _mission_buttons(Button):
+        return [
+            [Button.inline("ðŸ”„ Refresh mission", b"mission"), Button.inline("ðŸ§  V6 Control", b"v6")],
+            [Button.inline("ðŸ“Š Progress", b"progress")],
+            [Button.inline("âš ï¸ Errors", b"errors"), Button.inline("ðŸ“¬ Queue", b"queue")],
+            [Button.inline("ðŸ  Home", b"home")],
         ]
 
     def _error_buttons(self, Button):
         with self.db.connect() as con:
             rows = con.execute("SELECT id,status FROM queue WHERE status IN ('failed','uncertain','quarantined') ORDER BY updated_at DESC LIMIT 6").fetchall()
         out = [[Button.inline(f"Job #{r['id']} [{r['status']}]", f"job:{r['id']}".encode())] for r in rows]
-        out.append([Button.inline("🔁 Retry failed", b"retry_failed"), Button.inline("🏠 Home", b"home")])
+        out.append([Button.inline("ðŸ” Retry failed", b"retry_failed"), Button.inline("ðŸ  Home", b"home")])
         return out
 
     def _recommendation_buttons(self, Button):
         rows=list_recommendations(self.db,'open',6)
         out=[[Button.inline(_short(r['title'],28), f"rec:{r['recommendation_id']}".encode())] for r in rows]
-        out.append([Button.inline("🏠 Home", b"home")])
+        out.append([Button.inline("ðŸ  Home", b"home")])
         return out
 
     def _review_buttons(self, Button):
         with self.db.connect() as con:
             rows = con.execute("SELECT group_id,group_name FROM destinations WHERE needs_review=1 ORDER BY updated_at DESC LIMIT 6").fetchall()
         out = [[Button.inline("Review " + _short(r["group_name"], 24), f"dest:{r['group_id']}".encode())] for r in rows]
-        out.append([Button.inline("🏠 Home", b"home")])
+        out.append([Button.inline("ðŸ  Home", b"home")])
         return out
 
     async def _callback(self, event, data: str, Button, sender: int):
@@ -411,6 +499,12 @@ class TelegramAdminController:
             await event.edit(accounts_text(self.db), buttons=self._home_buttons(Button))
         elif data == "queue":
             await event.edit(queue_text(self.db), buttons=self._queue_buttons(Button))
+        elif data == "progress":
+            await event.edit(progress_text(self.db, self.settings.timezone), buttons=self._progress_buttons(Button))
+        elif data == "mission":
+            await event.edit(mission_text(self.db), buttons=self._mission_buttons(Button))
+        elif data == "v6":
+            await event.edit(v6_text(self.db), buttons=self._mission_buttons(Button))
         elif data == "errors":
             await event.edit(errors_text(self.db), buttons=self._error_buttons(Button))
         elif data == "review":
@@ -422,20 +516,20 @@ class TelegramAdminController:
         elif data == "pause":
             self.safety.pause("Telegram admin emergency pause", manual=True)
             audit(self.db, actor, "pause_all")
-            await event.edit("⏸ Outbound posting paused.", buttons=self._home_buttons(Button))
+            await event.edit("â¸ Outbound posting paused.", buttons=self._home_buttons(Button))
         elif data == "resume":
             self.safety.resume("Telegram admin resume")
             audit(self.db, actor, "resume_all")
-            await event.edit("▶️ Outbound posting resumed.", buttons=self._home_buttons(Button))
+            await event.edit("â–¶ï¸ Outbound posting resumed.", buttons=self._home_buttons(Button))
         elif data == "retry_failed":
-            with self.db.connect() as con:
-                cur = con.execute(
-                    "UPDATE queue SET status='retry',due_at=?,last_error='Telegram admin bulk retry',error_kind=NULL,resolved_at=NULL,updated_at=? WHERE status='failed'",
-                    (utcnow(), utcnow()),
-                )
-                n = cur.rowcount
-            audit(self.db, actor, "retry_failed", jobs=n)
-            await event.edit(f"🔁 Retried {n} failed job(s).", buttons=self._queue_buttons(Button))
+            result = retry_failed_safely(self.db, actor=actor)
+            await event.edit(
+                f"ðŸ” Safely retried {result['retried']} failed job(s).\n"
+                f"Skipped active groups: {result['skipped_active']}\n"
+                f"Older failed rows skipped: {result['skipped_older_failed_rows']}\n"
+                "UNCERTAIN jobs were not retried.",
+                buttons=self._queue_buttons(Button),
+            )
         elif data.startswith("camp:"):
             cid = data.split(":", 1)[1]
             preview = campaign_preview(self.db, cid)
@@ -444,13 +538,13 @@ class TelegramAdminController:
                 c = con.execute("SELECT lifecycle_state,start_at,end_at,category,target_collections,max_cycles,completed_cycles FROM campaigns WHERE campaign_id=?", (cid,)).fetchone()
             state = c["lifecycle_state"] if c else "?"
             text = (
-                f"📣 {cid}\nState: {state}\nVariants: {preview['variant_count']}\nDestinations: {preview['selected']}\n"
-                f"Rotation: {preview['rotation_mode']}\nCategory: {c['category'] or '-'}\nCollections: {c['target_collections'] or '-'}\nCycles: {c['completed_cycles']}/{c['max_cycles'] or '∞'}\nSkipped: {preview['skipped']}\nStart: {c['start_at'] or 'now'}\nEnd: {c['end_at'] or 'none'}"
+                f"ðŸ“£ {cid}\nState: {state}\nVariants: {preview['variant_count']}\nDestinations: {preview['selected']}\n"
+                f"Rotation: {preview['rotation_mode']}\nCategory: {c['category'] or '-'}\nCollections: {c['target_collections'] or '-'}\nCycles: {c['completed_cycles']}/{c['max_cycles'] or 'âˆž'}\nSkipped: {preview['skipped']}\nStart: {c['start_at'] or 'now'}\nEnd: {c['end_at'] or 'none'}"
             )
             buttons = [
-                [Button.inline("▶ Activate", f"campact:{cid}".encode()), Button.inline("⏸ Pause", f"camppause:{cid}".encode())],
-                [Button.inline("🚀 Post Now", f"camppost:{cid}".encode()), Button.inline("🗄 Archive", f"camparchive:{cid}".encode())],
-                [Button.inline("⬅ Campaigns", b"campaigns")],
+                [Button.inline("â–¶ Activate", f"campact:{cid}".encode()), Button.inline("â¸ Pause", f"camppause:{cid}".encode())],
+                [Button.inline("ðŸš€ Post Now", f"camppost:{cid}".encode()), Button.inline("ðŸ—„ Archive", f"camparchive:{cid}".encode())],
+                [Button.inline("â¬… Campaigns", b"campaigns")],
             ]
             await event.edit(text, buttons=buttons)
         elif data.startswith("campact:"):
@@ -477,7 +571,7 @@ class TelegramAdminController:
                 limits=self._queue_limits(),
             )
             audit(self.db, actor, "post_now", "campaign", cid, inserted=result["inserted"])
-            await event.edit(f"🚀 Queued {result['inserted']} job(s) for {cid}.", buttons=self._home_buttons(Button))
+            await event.edit(f"ðŸš€ Queued {result['inserted']} job(s) for {cid}.", buttons=self._home_buttons(Button))
         elif data.startswith("contentitem:"):
             cid = data.split(":", 1)[1]
             with self.db.connect() as con:
@@ -485,10 +579,10 @@ class TelegramAdminController:
                 tags = [r[0] for r in con.execute("SELECT tag FROM content_tags WHERE content_id=? ORDER BY tag", (cid,)).fetchall()]
             if not row:
                 raise RuntimeError("Content not found")
-            text = f"🗂 {cid}\nState: {row['lifecycle_state']}\nCaption: {_short(row['caption'],180)}\nTags: {', '.join(tags) or '-'}"
+            text = f"ðŸ—‚ {cid}\nState: {row['lifecycle_state']}\nCaption: {_short(row['caption'],180)}\nTags: {', '.join(tags) or '-'}"
             buttons = [
-                [Button.inline("✅ Ready", f"contentready:{cid}".encode()), Button.inline("⏸ Disable", f"contentdisable:{cid}".encode())],
-                [Button.inline("🗄 Archive", f"contentarchive:{cid}".encode()), Button.inline("⬅ Content", b"content")],
+                [Button.inline("âœ… Ready", f"contentready:{cid}".encode()), Button.inline("â¸ Disable", f"contentdisable:{cid}".encode())],
+                [Button.inline("ðŸ—„ Archive", f"contentarchive:{cid}".encode()), Button.inline("â¬… Content", b"content")],
             ]
             await event.edit(text, buttons=buttons)
         elif data.startswith("contentready:"):
@@ -505,15 +599,23 @@ class TelegramAdminController:
             await event.edit(content_text(self.db), buttons=self._content_buttons(Button))
         elif data.startswith("job:"):
             jid = int(data.split(":",1)[1])
-            with self.db.connect() as con:
-                r = con.execute('''SELECT q.*,d.group_name FROM queue q LEFT JOIN destinations d ON d.group_id=q.group_id WHERE q.id=?''',(jid,)).fetchone()
-            if not r:
+            snap = post_pipeline_snapshot(self.db, jid, history_limit=30)
+            if not snap.get("found"):
                 raise RuntimeError("Queue job not found")
-            text = f"📬 Job #{jid}\nStatus: {r['status']}\nCampaign: {r['campaign_id']}\nDestination: {_short(r['group_name'],40)}\nAccount: {r['account_key'] or 'auto'}\nContent: {r['content_id'] or '-'}\nError: {_short(r['last_error'],180)}"
-            await event.edit(text, buttons=[
-                [Button.inline("🔁 Retry", f"jobretry:{jid}".encode()), Button.inline("❌ Cancel", f"jobcancel:{jid}".encode())],
-                [Button.inline("⏰ +30m", f"jobdefer:{jid}".encode()), Button.inline("⬅ Errors", b"errors")],
-            ])
+            r = snap["job"]
+            text = render_post_pipeline(snap, timezone_name=self.settings.timezone, emoji=True)
+            if r["status"] == "uncertain":
+                text += "\n\nðŸ›¡ Retry is blocked until Telegram history is reconciled with recorded evidence."
+                buttons = [
+                    [Button.inline("âŒ Cancel without retry", f"jobcancel:{jid}".encode())],
+                    [Button.inline("â¬… Errors", b"errors")],
+                ]
+            else:
+                buttons = [
+                    [Button.inline("ðŸ” Retry", f"jobretry:{jid}".encode()), Button.inline("âŒ Cancel", f"jobcancel:{jid}".encode())],
+                    [Button.inline("â° +30m", f"jobdefer:{jid}".encode()), Button.inline("â¬… Errors", b"errors")],
+                ]
+            await event.edit(text, buttons=buttons)
         elif data.startswith("jobretry:"):
             jid = int(data.split(":",1)[1]); manage_job(self.db,jid,"retry",actor=actor)
             await event.answer("Retry queued"); await event.edit(errors_text(self.db),buttons=self._error_buttons(Button))
@@ -528,8 +630,8 @@ class TelegramAdminController:
             rows=[r for r in list_recommendations(self.db,'open',200) if r['recommendation_id']==rid]
             if not rows: raise RuntimeError("Recommendation not found")
             r=rows[0]
-            text=f"💡 {r['title']}\nSeverity: {r['severity']}\n\n{_short(r['message'],800)}\n\nSuggested: {r['suggested_action']}"
-            await event.edit(text,buttons=[[Button.inline("✅ Apply safe action",f"recapply:{rid}".encode()),Button.inline("Dismiss",f"recdismiss:{rid}".encode())],[Button.inline("⬅ Recommendations",b"recommendations")]])
+            text=f"ðŸ’¡ {r['title']}\nSeverity: {r['severity']}\n\n{_short(r['message'],800)}\n\nSuggested: {r['suggested_action']}"
+            await event.edit(text,buttons=[[Button.inline("âœ… Apply safe action",f"recapply:{rid}".encode()),Button.inline("Dismiss",f"recdismiss:{rid}".encode())],[Button.inline("â¬… Recommendations",b"recommendations")]])
         elif data.startswith("recapply:"):
             rid=data.split(":",1)[1]
             apply_recommendation(self.db,rid,actor=actor)
@@ -547,10 +649,10 @@ class TelegramAdminController:
                 d = con.execute("SELECT * FROM destinations WHERE group_id=?", (gid,)).fetchone()
             if not d:
                 raise RuntimeError("Destination no longer exists")
-            text = f"🆕 {_short(d['group_name'],45)}\nID: {gid}\nP/S: {d['primary_access']}/{d['secondary_access']}\nMode: {d['mode']}\nReview: {d['needs_review']}\nEnabled: {d['enabled']}\nProtected: {d['protected']}\nNever auto: {d['never_auto_post']}"
+            text = f"ðŸ†• {_short(d['group_name'],45)}\nID: {gid}\nP/S: {d['primary_access']}/{d['secondary_access']}\nMode: {d['mode']}\nReview: {d['needs_review']}\nEnabled: {d['enabled']}\nProtected: {d['protected']}\nNever auto: {d['never_auto_post']}"
             await event.edit(text, buttons=[
-                [Button.inline("✅ Approve", f"destapprove:{gid}".encode()), Button.inline("⛔ Never Auto", f"destnever:{gid}".encode())],
-                [Button.inline("🛡 Protect", f"destprotect:{gid}".encode()), Button.inline("⬅ Review", b"review")],
+                [Button.inline("âœ… Approve", f"destapprove:{gid}".encode()), Button.inline("â›” Never Auto", f"destnever:{gid}".encode())],
+                [Button.inline("ðŸ›¡ Protect", f"destprotect:{gid}".encode()), Button.inline("â¬… Review", b"review")],
             ])
         elif data.startswith("destapprove:"):
             gid = int(data.split(":", 1)[1])
@@ -687,16 +789,17 @@ class TelegramAdminController:
                 mark_campaign_previewed(self.db, cid, actor=f"telegram:{sender}")
                 audit(self.db, f"telegram:{sender}", "campaign_create", "campaign", cid, preview=preview)
                 self._wizard.pop(sender, None)
-                await event.respond(f"✅ Saved as READY. Destinations: {preview['selected']}; variants: {preview['variant_count']}. Activate from /campaigns after reviewing.")
+                await event.respond(f"âœ… Saved as READY. Destinations: {preview['selected']}; variants: {preview['variant_count']}. Activate from /campaigns after reviewing.")
         except Exception as exc:
-            await event.respond(f"⚠️ {exc}\nTry again or /cancel.")
+            await event.respond(f"âš ï¸ {exc}\nTry again or /cancel.")
 
     async def _notification_loop(self):
         while not self.stop_requested:
+            self.db.heartbeat("admin_bot", "ok", "notification loop active")
             if self.client:
                 for item in self.notifier.pending(self.settings.admin_notifications_min_severity, limit=10):
                     try:
-                        text = f"{'🚨' if item.severity == 'CRITICAL' else '⚠️'} {item.title}\n\n{item.message}"
+                        text = f"{'ðŸš¨' if item.severity == 'CRITICAL' else 'âš ï¸'} {item.title}\n\n{item.message}"
                         for uid in self.settings.admin_user_ids:
                             await self.client.send_message(uid, text)
                         self.notifier.mark_sent(item.id)
@@ -706,22 +809,47 @@ class TelegramAdminController:
 
     async def run(self):
         if not self.settings.admin_bot_enabled:
+            self.ready_event.set()
             return
-        client = await self._build_client()
-        self.db.event("INFO", "admin_bot_started", "Telegram admin control bot started")
-        notification_task = asyncio.create_task(self._notification_loop())
+        notification_task = None
+        client = None
         try:
+            client = await self._build_client()
+            self.db.event("INFO", "admin_bot_started", "Telegram admin control bot started")
+            self.db.heartbeat("admin_bot", "ok", "Telegram admin control bot connected")
+            self.ready_event.set()
+            notification_task = asyncio.create_task(self._notification_loop())
             await client.run_until_disconnected()
+        except BaseException as exc:
+            self.startup_error = exc
+            self.ready_event.set()
+            raise
         finally:
             self.stop_requested = True
-            notification_task.cancel()
-            try:
-                await notification_task
-            except BaseException:
-                pass
-            await client.disconnect()
+            if notification_task:
+                notification_task.cancel()
+                try:
+                    await notification_task
+                except BaseException:
+                    pass
+            if client:
+                try:
+                    await client.disconnect()
+                except BaseException:
+                    pass
+            if self.db:
+                self.db.heartbeat("admin_bot", "stopped", "Telegram admin control bot disconnected")
 
     async def start_background(self):
         if not self.settings.admin_bot_enabled:
             return None
         return asyncio.create_task(self.run(), name="telegram-admin-bot")
+
+    async def wait_until_ready(self, timeout_seconds: float = 30.0):
+        try:
+            await asyncio.wait_for(self.ready_event.wait(), timeout=max(1.0, float(timeout_seconds)))
+        except asyncio.TimeoutError as exc:
+            raise RuntimeError("Telegram admin bot did not become ready before startup timeout") from exc
+        if self.startup_error is not None:
+            raise RuntimeError(f"Telegram admin bot startup failed: {self.startup_error}") from self.startup_error
+        return True

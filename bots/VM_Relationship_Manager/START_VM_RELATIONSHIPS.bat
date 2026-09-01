@@ -1,9 +1,13 @@
 @echo off
+setlocal
 cd /d "%~dp0"
-title VM Relationship Manager
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0START_VM_RELATIONSHIPS.ps1"
+set "RC=%ERRORLEVEL%"
 
-echo.
-echo VM Relationship Manager has stopped.
-pause
+if not "%RC%"=="0" (
+    echo.
+    echo [X] VM Relationship Manager stopped with exit code %RC%.
+)
+
+exit /b %RC%

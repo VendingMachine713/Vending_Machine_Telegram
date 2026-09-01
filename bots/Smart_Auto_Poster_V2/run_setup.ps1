@@ -1,8 +1,8 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location -LiteralPath $Root
 
-Write-Host 'Smart Auto Poster V2.4 - setup / upgrade' -ForegroundColor Cyan
+Write-Host 'Smart Auto Poster V3 - setup / upgrade' -ForegroundColor Cyan
 
 @(
  'config','data','data\cache','runtime','runtime\sessions','exports','backups','logs','diagnostics','updates',
@@ -52,4 +52,4 @@ if (Test-Path .\INSTALL_MASTER_UPDATER.ps1) {
     try { & .\INSTALL_MASTER_UPDATER.ps1 } catch { Write-Host "[WARNING] Master updater install skipped: $($_.Exception.Message)" -ForegroundColor Yellow }
 }
 Write-Host ''
-Write-Host 'Setup complete. Open CONTROL_PANEL.ps1 to operate Smart Auto Poster V2.4.' -ForegroundColor Green
+Write-Host 'Setup complete. Open CONTROL_PANEL.ps1 to operate Smart Auto Poster V3.' -ForegroundColor Green

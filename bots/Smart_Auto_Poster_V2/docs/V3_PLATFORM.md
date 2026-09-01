@@ -1,4 +1,4 @@
-# Smart Auto Poster V3.0 platform features
+﻿# Smart Auto Poster V3.0 platform features
 
 ## Destination collections
 Reusable collections dynamically select eligible destinations by tags, account visibility, posting mode and forum status. Example:

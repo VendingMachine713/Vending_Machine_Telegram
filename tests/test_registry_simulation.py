@@ -1,4 +1,4 @@
-import sqlite3,tempfile,unittest
+﻿import sqlite3,tempfile,unittest
 from pathlib import Path
 from shared.vm_core.registry import sync_accounts,sync_destinations,registry_summary
 from shared.vm_core.simulate import run_scenario

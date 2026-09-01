@@ -1,109 +1,195 @@
-$ErrorActionPreference = "Stop"
-Set-Location $PSScriptRoot
+﻿$ErrorActionPreference = "Stop"
+Set-Location -LiteralPath $PSScriptRoot
 
-$displayVersion = "unknown"
-if (Test-Path "VERSION.txt") {
-    $buildLine = Get-Content "VERSION.txt" | Where-Object { $_ -match "^Build:\s*(.+)$" } | Select-Object -First 1
-    if ($buildLine -and $buildLine -match "^Build:\s*(.+)$") {
-        $displayVersion = $Matches[1].Trim()
+function Find-PythonRuntime {
+    foreach ($candidate in @("py", "python", "python3")) {
+        $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
+        if ($null -ne $cmd) { return $candidate }
     }
+    return $null
 }
 
-Write-Host ""
-Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host " VM RELATIONSHIP MANAGER  v$displayVersion" -ForegroundColor Cyan
-Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host ""
+$script:PythonCommand = Find-PythonRuntime
+$script:LastPythonExitCode = 0
 
-if (-not (Test-Path ".env")) {
-    Write-Host "[!] .env does not exist." -ForegroundColor Yellow
-    if (Test-Path ".env.example") {
-        Copy-Item ".env.example" ".env"
-        Write-Host "[+] Created .env from .env.example" -ForegroundColor Green
-        Write-Host "[!] Fill in TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_PHONE, BOT_TOKEN and ADMIN_IDS." -ForegroundColor Yellow
-        notepad ".env"
-    }
-    Read-Host "Press Enter after saving .env"
-}
+function Invoke-Python {
+    param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Args)
 
-Write-Host "[1/4] Checking required Python packages..." -ForegroundColor Cyan
-
-# Native Python commands can write to stderr when a dependency is missing.
-# Temporarily prevent PowerShell from treating that expected stderr as a
-# terminating PowerShell exception so we can inspect $LASTEXITCODE ourselves.
-$previousErrorActionPreference = $ErrorActionPreference
-$ErrorActionPreference = "Continue"
-
-py -c "import telethon, telegram, dotenv; from zoneinfo import ZoneInfo; ZoneInfo('Australia/Adelaide')" *> $null
-$dependencyCheckExitCode = $LASTEXITCODE
-
-$ErrorActionPreference = $previousErrorActionPreference
-
-if ($dependencyCheckExitCode -ne 0) {
-    Write-Host "[!] A dependency or timezone package is missing. Installing/updating requirements..." -ForegroundColor Yellow
-
-    $previousErrorActionPreference = $ErrorActionPreference
+    $oldPreference = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    py -m pip install -r requirements.txt
-    $installExitCode = $LASTEXITCODE
-    $ErrorActionPreference = $previousErrorActionPreference
-
-    if ($installExitCode -ne 0) {
-        Write-Host "[X] Requirements installation failed." -ForegroundColor Red
-        exit $installExitCode
+    try {
+        & $script:PythonCommand @Args
+        $script:LastPythonExitCode = $LASTEXITCODE
+        if ($null -eq $script:LastPythonExitCode) {
+            $script:LastPythonExitCode = 1
+        }
     }
-
-    # Verify again after installation.
-    $previousErrorActionPreference = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    py -c "import telethon, telegram, dotenv; from zoneinfo import ZoneInfo; ZoneInfo('Australia/Adelaide')" *> $null
-    $verifyExitCode = $LASTEXITCODE
-    $ErrorActionPreference = $previousErrorActionPreference
-
-    if ($verifyExitCode -ne 0) {
-        Write-Host "[X] Dependencies installed, but Adelaide timezone support still failed." -ForegroundColor Red
-        Write-Host "Run: py -m pip install --upgrade tzdata" -ForegroundColor Yellow
-        exit $verifyExitCode
+    finally {
+        $ErrorActionPreference = $oldPreference
     }
 }
 
-Write-Host "[+] Requirements and Adelaide timezone data ready." -ForegroundColor Green
+function Invoke-PythonStdin {
+    param([Parameter(Mandatory=$true)][string]$Code)
 
-Write-Host "[2/4] Running configuration pre-flight..." -ForegroundColor Cyan
-$previousErrorActionPreference = $ErrorActionPreference
-$ErrorActionPreference = "Continue"
-py preflight.py
-$preflightExitCode = $LASTEXITCODE
-$ErrorActionPreference = $previousErrorActionPreference
+    $oldPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $Code | & $script:PythonCommand -
+        $script:LastPythonExitCode = $LASTEXITCODE
+        if ($null -eq $script:LastPythonExitCode) {
+            $script:LastPythonExitCode = 1
+        }
+    }
+    finally {
+        $ErrorActionPreference = $oldPreference
+    }
+}
 
-if ($preflightExitCode -ne 0) {
+Write-Host "============================================================"
+Write-Host " VM RELATIONSHIP MANAGER"
+Write-Host "============================================================"
+
+if (Test-Path ".\VERSION.txt") {
     Write-Host ""
-    Write-Host "[X] Pre-flight failed. Fix the item above, then run the launcher again." -ForegroundColor Red
-    exit $preflightExitCode
+    Get-Content ".\VERSION.txt"
 }
-Write-Host "[+] Configuration pre-flight passed." -ForegroundColor Green
 
-Write-Host "[3/4] Running relationship engine smoke test..." -ForegroundColor Cyan
-$previousErrorActionPreference = $ErrorActionPreference
-$ErrorActionPreference = "Continue"
-py smoke_test.py
-$smokeExitCode = $LASTEXITCODE
-$ErrorActionPreference = $previousErrorActionPreference
+Write-Host ""
+Write-Host "[1/4] Checking Python runtime and required packages..."
 
-if ($smokeExitCode -ne 0) {
-    Write-Host "[X] Smoke test failed. Bot was not started." -ForegroundColor Red
-    exit $smokeExitCode
+if ([string]::IsNullOrWhiteSpace($script:PythonCommand)) {
+    Write-Host "[X] No Python runtime command was found (checked: py, python, python3)."
+    exit 10
 }
-Write-Host "[+] Smoke test passed." -ForegroundColor Green
 
-Write-Host "[4/4] Starting VM Relationship Manager..." -ForegroundColor Cyan
-Write-Host "Press Ctrl+C to stop it cleanly." -ForegroundColor DarkGray
+Write-Host "[+] Python command: $script:PythonCommand"
+Invoke-Python "--version"
+if ($script:LastPythonExitCode -ne 0) {
+    Write-Host "[X] Python runtime was found but could not be executed."
+    exit 10
+}
+
+$dependencyProbe = @'
+import importlib.util
+import re
+from importlib.metadata import PackageNotFoundError, version
+
+mods = ["dotenv", "telethon", "telegram", "apscheduler"]
+missing = [m for m in mods if importlib.util.find_spec(m) is None]
+problems = []
+
+if missing:
+    problems.append("missing modules: " + ", ".join(missing))
+
+def numeric(v):
+    parts = [int(x) for x in re.findall(r"\d+", v)[:3]]
+    return tuple(parts + [0] * (3-len(parts)))
+
+checks = {
+    "Telethon": ((1, 44, 0), (2, 0, 0)),
+    "python-telegram-bot": ((22, 8, 0), (23, 0, 0)),
+    "APScheduler": ((3, 10, 0), (4, 0, 0)),
+}
+for package, (minimum, maximum) in checks.items():
+    try:
+        current = numeric(version(package))
+        if current < minimum or current >= maximum:
+            problems.append(f"{package}={version(package)} outside supported range")
+    except PackageNotFoundError:
+        problems.append(f"{package} not installed")
+
+if problems:
+    print("[!] Python runtime repair required: " + "; ".join(problems))
+    raise SystemExit(1)
+
+print("[+] Required Python modules and supported versions detected.")
+'@
+
+Invoke-PythonStdin $dependencyProbe
+$probeCode = $script:LastPythonExitCode
+
+if ($probeCode -ne 0) {
+    Write-Host "[!] Installing/repairing the VM Relationship Manager Python runtime set..."
+    if (Test-Path ".\requirements.txt") {
+        Invoke-Python "-m" "pip" "install" "--disable-pip-version-check" "-r" ".\requirements.txt"
+    }
+    else {
+        Invoke-Python "-m" "pip" "install" "--disable-pip-version-check" `
+            "python-dotenv>=1.0,<2" `
+            "tzdata>=2026.3" `
+            "telethon>=1.44,<2" `
+            "python-telegram-bot>=22.8,<23" `
+            "apscheduler>=3.10,<4"
+    }
+
+    if ($script:LastPythonExitCode -ne 0) {
+        Write-Host "[X] Dependency installation failed."
+        exit 11
+    }
+}
+
+Write-Host "[+] Python runtime ready."
+
+Write-Host ""
+Write-Host "[2/4] Running configuration pre-flight..."
+
+$preflight = @'
+from pathlib import Path
+from config import load_settings
+
+s = load_settings()
+session_file = Path(s.session_name)
+if session_file.suffix != ".session":
+    session_file = Path(str(session_file) + ".session")
+if not s.phone and not session_file.exists():
+    raise RuntimeError("No TELEGRAM_PHONE is configured and the saved Telethon session is missing")
+
+print("[+] PRE-FLIGHT PASSED")
+print(f"[+] Timezone: {s.timezone}")
+print(f"[+] Admin IDs configured: {len(s.admin_ids)}")
+print(f"[+] Session: {s.session_name} ({'present' if session_file.exists() else 'fresh login available'})")
+print(f"[+] Database target: {s.database_path}")
+print(f"[+] Backup target: {s.backup_dir}")
+print(f"[+] Log target: {s.log_dir}")
+print("[+] Telegram secrets detected without displaying them.")
+'@
+
+Invoke-PythonStdin $preflight
+$preflightCode = $script:LastPythonExitCode
+
+if ($preflightCode -ne 0) {
+    Write-Host "[X] Configuration pre-flight failed. Bot was not started."
+    exit 20
+}
+
+Write-Host "[+] Configuration pre-flight passed."
+
+Write-Host ""
+Write-Host "[3/4] Running relationship engine smoke test..."
+
+if (-not (Test-Path ".\smoke_test.py")) {
+    Write-Host "[X] smoke_test.py is missing. Bot was not started."
+    exit 30
+}
+
+Invoke-Python ".\smoke_test.py"
+if ($script:LastPythonExitCode -ne 0) {
+    Write-Host "[X] Smoke test failed. Bot was not started."
+    exit 31
+}
+
+Write-Host "[+] Smoke test passed."
+
+Write-Host ""
+Write-Host "[4/4] Starting VM Relationship Manager..."
+Write-Host "Press Ctrl+C to stop it cleanly."
 Write-Host ""
 
-$previousErrorActionPreference = $ErrorActionPreference
-$ErrorActionPreference = "Continue"
-py main.py
-$botExitCode = $LASTEXITCODE
-$ErrorActionPreference = $previousErrorActionPreference
+if (-not (Test-Path ".\main.py")) {
+    Write-Host "[X] main.py is missing."
+    exit 40
+}
 
-exit $botExitCode
+Invoke-Python ".\main.py"
+exit $script:LastPythonExitCode

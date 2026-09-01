@@ -1,4 +1,4 @@
-# Vending Machine Telegram
+﻿# Vending Machine Telegram
 
 Permanent master project for all Vending Machine Telegram bots, tools, shared runtime data, documentation and archived material.
 

@@ -1,4 +1,4 @@
-# Telegram Admin Control Centre — V3.0
+﻿# Telegram Admin Control Centre â€” V3.0
 
 The Admin Control Centre is optional. Smart Auto Poster can run without it.
 

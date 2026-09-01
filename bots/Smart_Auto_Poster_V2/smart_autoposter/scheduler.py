@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from datetime import datetime, time, timedelta, timezone
@@ -107,6 +107,74 @@ def configure_once(db: Database, campaign_id: str, at_value: str, timezone_name:
                        timezone=excluded.timezone,next_run_at=excluded.next_run_at,last_run_at=NULL,enabled=1,updated_at=excluded.updated_at''',
                     (campaign_id, timezone_name, due.isoformat(timespec="seconds"), utcnow()))
 
+
+
+def rearm_schedule(db: Database, campaign_id: str, *, after_utc: datetime | None = None) -> dict:
+    """Move an existing schedule to its next *future* occurrence without enqueueing anything.
+
+    This is intended for guarded production activation.  A campaign can spend hours or
+    days READY/inactive while its stored ``next_run_at`` ages into the past.  Merely
+    activating it would make the scheduler treat that stale slot as immediately due.
+    Rearming preserves the schedule definition but starts from the activation reference
+    time, preventing an unexpected immediate production burst.
+    """
+    reference = after_utc or datetime.now(timezone.utc)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=timezone.utc)
+    else:
+        reference = reference.astimezone(timezone.utc)
+
+    with db.connect() as con:
+        row = con.execute("SELECT * FROM campaign_schedules WHERE campaign_id=?", (campaign_id,)).fetchone()
+        if not row:
+            raise RuntimeError(f"No schedule configured for campaign: {campaign_id}")
+        mode = str(row["mode"] or "")
+        if not bool(row["enabled"]):
+            raise RuntimeError(f"Schedule is disabled for campaign: {campaign_id}")
+
+        if mode == "interval":
+            seconds = int(row["interval_seconds"] or 0)
+            if seconds < 60:
+                raise RuntimeError(f"Invalid interval schedule for campaign: {campaign_id}")
+            next_run = reference + timedelta(seconds=seconds)
+        elif mode == "daily":
+            times = json.loads(row["daily_times_json"] or "[]")
+            days = json.loads(row["days_json"] or "[]") or list(range(7))
+            if not times:
+                raise RuntimeError(f"Daily schedule has no times for campaign: {campaign_id}")
+            next_run = next_daily_run(reference, times, days, row["timezone"])
+        elif mode == "once":
+            raw = row["next_run_at"]
+            if not raw:
+                raise RuntimeError(f"One-off schedule has no due time for campaign: {campaign_id}")
+            next_run = datetime.fromisoformat(raw)
+            if next_run.tzinfo is None:
+                next_run = next_run.replace(tzinfo=timezone.utc)
+            next_run = next_run.astimezone(timezone.utc)
+            if next_run <= reference:
+                raise RuntimeError(f"One-off schedule is already due/past for campaign: {campaign_id}")
+        else:
+            raise RuntimeError(f"Unsupported schedule mode for rearm: {mode or '-'}")
+
+        next_iso = next_run.isoformat(timespec="seconds")
+        con.execute(
+            "UPDATE campaign_schedules SET next_run_at=?,last_run_at=NULL,updated_at=? WHERE campaign_id=?",
+            (next_iso, utcnow(), campaign_id),
+        )
+
+    db.event(
+        "INFO",
+        "schedule_rearmed",
+        f"Schedule rearmed for guarded activation; next run {next_iso}",
+        campaign_id=campaign_id,
+        details=json.dumps({"mode": mode, "next_run_at": next_iso}),
+    )
+    return {
+        "campaign_id": campaign_id,
+        "mode": mode,
+        "next_run_at": next_iso,
+        "rearmed": True,
+    }
 
 def disable_schedule(db: Database, campaign_id: str):
     with db.connect() as con:
@@ -238,17 +306,31 @@ def schedule_occurrences(row, start_utc: datetime, end_utc: datetime) -> list[da
     return out
 
 
-def simulate_schedules(db: Database, hours: int = 24) -> list[dict]:
+def simulate_schedules(db: Database, hours: int = 24, *, include_inactive: bool = False,
+                       campaign_id: str | None = None) -> list[dict]:
+    """Read-only schedule simulation.
+
+    By default this preserves the original behavior and shows ACTIVE campaigns
+    only. include_inactive=True is intended for pre-activation production
+    validation so READY/DRAFT/PAUSED campaigns can be inspected without being
+    enabled or queueing anything.
+    """
     hours = max(1, min(int(hours), 24 * 31))
     start = datetime.now(timezone.utc)
     end = start + timedelta(hours=hours)
     with db.connect() as con:
-        rows = con.execute('''SELECT s.*,c.name,c.enabled AS campaign_enabled,c.lifecycle_state,c.start_at,c.end_at,c.max_cycles,c.completed_cycles
-                              FROM campaign_schedules s JOIN campaigns c ON c.campaign_id=s.campaign_id
-                              WHERE s.enabled=1 ORDER BY c.priority DESC,c.campaign_id''').fetchall()
+        sql = '''SELECT s.*,c.name,c.enabled AS campaign_enabled,c.lifecycle_state,c.start_at,c.end_at,c.max_cycles,c.completed_cycles
+                 FROM campaign_schedules s JOIN campaigns c ON c.campaign_id=s.campaign_id
+                 WHERE s.enabled=1'''
+        params: list = []
+        if campaign_id:
+            sql += " AND c.campaign_id=?"
+            params.append(campaign_id)
+        sql += " ORDER BY c.priority DESC,c.campaign_id"
+        rows = con.execute(sql, params).fetchall()
     out = []
     for row in rows:
-        if not row["campaign_enabled"] or row["lifecycle_state"] != "active":
+        if not include_inactive and (not row["campaign_enabled"] or row["lifecycle_state"] != "active"):
             continue
         if int(row["max_cycles"] or 0) and int(row["completed_cycles"] or 0) >= int(row["max_cycles"]):
             continue
@@ -258,5 +340,12 @@ def simulate_schedules(db: Database, hours: int = 24) -> list[dict]:
                 continue
             if row["end_at"] and iso > row["end_at"]:
                 continue
-            out.append({"at": iso, "campaign_id": row["campaign_id"], "name": row["name"], "mode": row["mode"]})
+            out.append({
+                "at": iso,
+                "campaign_id": row["campaign_id"],
+                "name": row["name"],
+                "mode": row["mode"],
+                "lifecycle_state": row["lifecycle_state"],
+                "campaign_enabled": bool(row["campaign_enabled"]),
+            })
     return sorted(out, key=lambda x: (x["at"], x["campaign_id"]))

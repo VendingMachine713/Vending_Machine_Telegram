@@ -194,3 +194,34 @@ Thumbs.db
 .DS_Store
 # ===== END VM PLATFORM SECURITY / RUNTIME =====
 *.before_*
+
+# BEGIN VM PLATFORM MANAGED EXCLUSIONS
+.env
+.env.*
+!.env.example
+*.session
+*.session-journal
+*.key
+*.pem
+secrets.json
+credentials.json
+logs/
+diagnostics/
+backups/
+state/*.sqlite3
+state/*.db
+state/pids/
+state/support/
+state/components/
+state/release_baselines/
+*.log
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+media_cache/
+downloads/
+content/private/
+# END VM PLATFORM MANAGED EXCLUSIONS

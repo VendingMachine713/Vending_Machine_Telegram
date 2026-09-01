@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Safe first-run bootstrap for VM Platform Foundation v0.1.0."""
 
 from pathlib import Path

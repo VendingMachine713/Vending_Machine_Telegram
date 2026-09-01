@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 import tempfile
 import unittest
@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+from smart_autoposter import __version__
 from smart_autoposter.admin_bot import TelegramAdminController, accounts_text, content_text, dashboard_text, search_destinations_text
 from smart_autoposter.analytics import analytics_snapshot
 from smart_autoposter.content_library import import_content_inbox
@@ -74,7 +75,7 @@ class V24AutonomousTests(unittest.TestCase):
 
     def test_schema_v5_has_autonomous_tables(self):
         with self.db.connect() as con:
-            self.assertEqual(con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0], "6")
+            self.assertEqual(con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0], "20")
             tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             for name in {"notifications", "heartbeats", "audit_log", "update_history", "campaign_relations", "content_tags"}:
                 self.assertIn(name, tables)
@@ -261,7 +262,7 @@ class V24AutonomousTests(unittest.TestCase):
         controller = TelegramAdminController(self.db, settings, safety)
         self.assertTrue(controller.authorized(123))
         self.assertFalse(controller.authorized(999))
-        self.assertIn("SMART AUTO POSTER V3.0", dashboard_text(self.db))
+        self.assertIn(f"SMART AUTO POSTER V{__version__}", dashboard_text(self.db))
         self.assertIn("Primary", accounts_text(self.db))
         self.assertIn("ad_a", content_text(self.db))
 
@@ -312,6 +313,9 @@ class V24AutonomousTests(unittest.TestCase):
         create_campaign(self.db, "other", "Other", "ad_b", tags="main")
         mark_campaign_previewed(self.db, "other"); set_campaign_state(self.db, "other", "active")
         enqueue_campaign(self.db, "other", run_key="other")
+        with self.db.connect() as con:
+            other = con.execute("SELECT id,due_at FROM queue WHERE campaign_id='other'").fetchone()
+            con.execute("UPDATE queue SET status='sent',resolved_at=?,updated_at=? WHERE id=?", (other["due_at"], other["due_at"], other["id"]))
         set_campaign_gap(self.db, "camp", "other", 90)
         self._preview_activate()
         enqueue_campaign(self.db, "camp", run_key="camp")

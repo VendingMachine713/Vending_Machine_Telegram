@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
 from statistics import median
@@ -6,6 +6,31 @@ import math
 from typing import Optional
 
 from database import Database, utcnow
+from behavior_engine import BehaviorEngine
+from network_engine import NetworkEngine
+from opportunity_engine import OpportunityEngine
+from automation_engine import AutomationEngine
+from privacy_engine import PrivacyEngine
+from integration_engine import IntegrationEngine
+from query_engine import QueryEngine
+from priority_engine import PriorityEngine
+from memory_engine import MemoryEngine
+from group_engine import GroupEngine
+from risk_engine import RiskEngine
+from reporting_engine import ReportingEngine
+from goal_engine import GoalEngine
+from segment_engine import SegmentEngine
+from session_engine import SessionEngine
+from forecast_engine import ForecastEngine
+from data_quality_engine import DataQualityEngine
+from playbook_engine import PlaybookEngine
+from briefing_engine import BriefingEngine
+from classification_engine import ClassificationEngine
+from action_engine import ActionEngine
+from autonomy_engine import AutonomyEngine
+from calibration_engine import CalibrationEngine
+from exception_policy_engine import ExceptionPolicyEngine
+from operations_engine import OperationsEngine
 
 
 RELATIONSHIP_TYPES = {
@@ -18,6 +43,31 @@ VERIFICATION_STATES = {"unknown", "pending", "verified", "trusted", "restricted"
 class RelationshipEngine:
     def __init__(self, db: Database):
         self.db = db
+        self.behavior = BehaviorEngine(db)
+        self.network = NetworkEngine(db)
+        self.opportunities = OpportunityEngine(db)
+        self.automation = AutomationEngine(db)
+        self.privacy = PrivacyEngine(db)
+        self.integration = IntegrationEngine(db)
+        self.query = QueryEngine(db)
+        self.priority = PriorityEngine(db)
+        self.memory = MemoryEngine(db)
+        self.groups = GroupEngine(db)
+        self.risk = RiskEngine(db)
+        self.reporting = ReportingEngine(db)
+        self.goals = GoalEngine(db)
+        self.segments = SegmentEngine(db)
+        self.sessions = SessionEngine(db)
+        self.forecast = ForecastEngine(db)
+        self.quality = DataQualityEngine(db)
+        self.playbooks = PlaybookEngine(db)
+        self.exception_policy = ExceptionPolicyEngine(db)
+        self.briefing = BriefingEngine(db, self.exception_policy)
+        self.autonomy = AutonomyEngine(db)
+        self.calibration = CalibrationEngine(db, self.integration)
+        self.classification = ClassificationEngine(db, self.integration, self.calibration)
+        self.actions = ActionEngine(db, self.integration)
+        self.operations = OperationsEngine(db, integration=self.integration)
 
     def upsert_identity(
         self,
@@ -30,6 +80,8 @@ class RelationshipEngine:
         source: str = "telegram_lookup",
     ):
         """Create/update a contact identity without inventing an interaction count."""
+        if self.privacy.is_excluded(telegram_id):
+            return self.db.one("SELECT * FROM contacts WHERE telegram_id=?", (telegram_id,))
         observed_at = observed_at or datetime.now(timezone.utc)
         observed_iso = observed_at.astimezone(timezone.utc).isoformat()
         existing = self.db.one("SELECT * FROM contacts WHERE telegram_id=?", (telegram_id,))
@@ -125,6 +177,8 @@ class RelationshipEngine:
         chat_title: Optional[str],
         occurred_at: datetime,
     ):
+        if self.privacy.is_excluded(telegram_id):
+            return
         now = occurred_at.astimezone(timezone.utc).isoformat()
         today = occurred_at.astimezone(timezone.utc).date().isoformat()
         existing = self.db.one("SELECT * FROM contacts WHERE telegram_id=?", (telegram_id,))
@@ -177,6 +231,12 @@ class RelationshipEngine:
         )
 
         if chat_id is not None:
+            self.db.execute(
+                """INSERT INTO group_daily_activity(chat_id,activity_date,interaction_count)
+                   VALUES (?,?,1)
+                   ON CONFLICT(chat_id,activity_date) DO UPDATE SET interaction_count=interaction_count+1""",
+                (chat_id,today),
+            )
             row = self.db.one(
                 "SELECT 1 FROM contact_groups WHERE telegram_id=? AND chat_id=?",
                 (telegram_id, chat_id),
@@ -212,6 +272,23 @@ class RelationshipEngine:
         ):
             self.recalculate_contact(telegram_id)
 
+    def record_private_interaction(self, telegram_id: int, chat_id: int, message_id: int, direction: str, occurred_at: datetime):
+        if self.privacy.is_excluded(telegram_id):
+            return
+        self.behavior.record(telegram_id, chat_id, message_id, direction, occurred_at)
+
+    def get_behavior(self, telegram_id: int, refresh: bool = False):
+        return self.behavior.get(telegram_id, refresh=refresh)
+
+    def recalculate_behavior_all(self):
+        self.behavior.compute_all()
+
+    def get_network(self, telegram_id: int, refresh: bool = False):
+        return self.network.get(telegram_id, refresh=refresh)
+
+    def recalculate_network_all(self):
+        self.network.compute_all()
+
     def event(self, telegram_id: int, event_type: str, details: str | None = None):
         self.db.execute(
             """INSERT INTO relationship_events
@@ -219,6 +296,7 @@ class RelationshipEngine:
                VALUES (?, ?, ?, ?)""",
             (telegram_id, event_type, details, utcnow()),
         )
+        self.integration.emit(event_type, telegram_id, {"details": details} if details else {})
 
     def add_note(self, telegram_id: int, author_id: int, note: str):
         self.db.execute(
@@ -247,6 +325,8 @@ class RelationshipEngine:
             (value, utcnow(), telegram_id),
         )
         self.event(telegram_id, "relationship_type_changed", f"{old['relationship_type']} -> {value}")
+        self.classification.record_manual(telegram_id, old['relationship_type'], value, admin_id, 'Manual relationship type change')
+        self.integration.emit('classification_changed', telegram_id, {'old_type': old['relationship_type'], 'new_type': value, 'confidence': 100, 'auto': False})
         self.audit(admin_id, "set_relationship_type", telegram_id, value)
 
     def set_verification(self, telegram_id: int, value: str, admin_id: int, reason: str = ""):
@@ -341,7 +421,7 @@ class RelationshipEngine:
         consistency = min(15, int(c["active_days"] / 3))
         importance = min(10, max(0, int(c["manual_importance"])))
         group_count = self.db.one(
-            "SELECT COUNT(*) AS n FROM contact_groups WHERE telegram_id=?", (telegram_id,)
+            "SELECT COUNT(*) AS n FROM contact_groups WHERE telegram_id=? AND chat_id<0", (telegram_id,)
         )["n"]
         shared_presence = min(5, int(group_count))
         important_events = self.db.one(
@@ -488,6 +568,8 @@ class RelationshipEngine:
             relationship_score,
             intelligence,
         )
+        # Re-rank the contact after relationship/attention state changes.
+        self.priority.compute(telegram_id)
         return intelligence
 
     def _activity_window(self, telegram_id: int, start_date, end_date):
@@ -769,7 +851,7 @@ class RelationshipEngine:
             self._attention(
                 tid, priority, "smart_followup",
                 "Outside normal contact cycle",
-                f"{overdue} day(s) beyond learned activity window · health {health}/100.",
+                f"{overdue} day(s) beyond learned activity window Â· health {health}/100.",
             )
         else:
             self._resolve_attention_category(tid, "smart_followup")
@@ -779,7 +861,7 @@ class RelationshipEngine:
             self._attention(
                 tid, priority, "relationship_slipping",
                 "Relationship health is slipping",
-                f"Health {health}/100 · momentum {momentum}.",
+                f"Health {health}/100 Â· momentum {momentum}.",
             )
         else:
             self._resolve_attention_category(tid, "relationship_slipping")
@@ -790,7 +872,7 @@ class RelationshipEngine:
             self._attention(
                 tid, "blue", "new_contact_triage",
                 "Active contact is still unclassified",
-                f"{interactions} observed interactions · score {score}/100.",
+                f"{interactions} observed interactions Â· score {score}/100.",
             )
         else:
             self._resolve_attention_category(tid, "new_contact_triage")

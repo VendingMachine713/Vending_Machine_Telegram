@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 import asyncio, logging, os, secrets, subprocess, time
 from pathlib import Path
 from telegram import Update
@@ -69,7 +69,7 @@ async def claim(update:Update, context:ContextTypes.DEFAULT_TYPE):
     if supplied==claim_code():
         ADMIN.write_text(str(update.effective_user.id))
         CLAIM.unlink(missing_ok=True)
-        await update.effective_message.reply_text("✅ VM Ops Control claimed.\nUse /status to begin.")
+        await update.effective_message.reply_text("âœ… VM Ops Control claimed.\nUse /status to begin.")
     else:
         await update.effective_message.reply_text("Invalid claim code.")
 
@@ -80,7 +80,7 @@ async def status(update,context):
 async def doctor(update,context):
     if not private_admin(update): return await deny(update)
     out=await asyncio.to_thread(vm,"doctor")
-    await update.effective_message.reply_text(("🩺 VM DOCTOR\n"+out)[-3900:])
+    await update.effective_message.reply_text(("ðŸ©º VM DOCTOR\n"+out)[-3900:])
 
 async def restartfailed(update,context):
     if not private_admin(update): return await deny(update)
@@ -97,7 +97,7 @@ async def startall(update,context):
 async def backup(update,context):
     if not private_admin(update): return await deny(update)
     out=await asyncio.to_thread(vm,"backup",timeout=300)
-    await update.effective_message.reply_text(("💾 BACKUP\n"+out)[-3900:])
+    await update.effective_message.reply_text(("ðŸ’¾ BACKUP\n"+out)[-3900:])
 
 pending={}
 async def restartall(update,context):
@@ -122,14 +122,14 @@ async def confirm_restart(update,context):
 async def help_cmd(update,context):
     if not private_admin(update): return await deny(update)
     await update.effective_message.reply_text(
-        "📱 VM OPS CONTROL\n"
-        "/status — all bots\n"
-        "/restartfailed — recover stopped bots\n"
-        "/startall — start bots\n"
-        "/restartall — confirmed full restart\n"
-        "/doctor — diagnostics\n"
-        "/backup — safe backup\n"
-        "/help — this menu"
+        "ðŸ“± VM OPS CONTROL\n"
+        "/status â€” all bots\n"
+        "/restartfailed â€” recover stopped bots\n"
+        "/startall â€” start bots\n"
+        "/restartall â€” confirmed full restart\n"
+        "/doctor â€” diagnostics\n"
+        "/backup â€” safe backup\n"
+        "/help â€” this menu"
     )
 
 last_alert={}
@@ -149,7 +149,7 @@ async def monitor(app:Application):
                 if remain and aid:
                     key=",".join(sorted(remain))
                     if now-last_alert.get(key,0)>1800:
-                        await app.bot.send_message(aid,"⚠️ VM AUTO-RECOVERY FAILED\n"+", ".join(remain)+" still offline.")
+                        await app.bot.send_message(aid,"âš ï¸ VM AUTO-RECOVERY FAILED\n"+", ".join(remain)+" still offline.")
                         last_alert[key]=now
         except Exception as e:
             log.exception("monitor error")

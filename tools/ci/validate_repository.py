@@ -1,4 +1,4 @@
-"""Fail CI when canonical repository metadata drifts from the checked-in source tree."""
+﻿"""Fail CI when canonical repository metadata drifts from the checked-in source tree."""
 from __future__ import annotations
 
 import json

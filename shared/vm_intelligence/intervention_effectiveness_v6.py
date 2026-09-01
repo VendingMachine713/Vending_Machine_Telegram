@@ -1,0 +1,3 @@
+﻿from .intervention_learning_v6 import InterventionLearning
+InterventionEffectiveness=InterventionLearning
+__all__=['InterventionLearning','InterventionEffectiveness']

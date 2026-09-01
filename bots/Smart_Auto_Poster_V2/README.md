@@ -1,269 +1,159 @@
-# Smart Auto Poster V3.0
+﻿# Smart Auto Poster V6.0.0
 
-Smart Auto Poster V3.0 is the production-platform release for the Vending Machine Telegram ecosystem. It consolidates the live-tested V2 sender/routing core, campaign/content engine and autonomous recovery layer, then adds reusable destination collections, deterministic automation rules, cycle-limited campaigns, reviewable operational recommendations, richer analytics/reporting, dual-account health-aware balancing, read-only Telegram admins and a hardened manifest/hash/database-rollback update system.
+V6 is the self-managing production control-plane release. It keeps the existing one-post-per-group and evidence-preservation rules while adding destination intelligence, predictive timing, explainable delivery confidence, objective-based production health and recovery planning.
 
-The release is designed to upgrade directly from **V2.2.3 or newer** while preserving local sessions, secrets, database history, destination configuration and content.
-
-## V3.0 highlights
-
-- persistent multi-account Telegram sender with account identity guard, pacing, cooldowns and safe dual-access balancing
-- multi-variant campaigns, reusable content library, rotation, schedule simulation, Post Now through the queue, start/end dates and cycle limits
-- dynamic destination collections plus include/exclude tags, protected groups and hard `NEVER_AUTO_POST`
-- deterministic destination rules for quiet hours, minimum intervals, safe account affinity, tags and protection
-- persistent queue, duplicate protection, conflict spacing, capacity limits, retry/defer/cancel/uncertain states
-- FloodWait/SlowMode-aware backoff, network reconnect, quarantine, circuit breaker, runtime lock and watchdog
-- automatic destination scans, routing reconciliation, backups, maintenance and reports
-- private Telegram Admin Control Centre with full-control/read-only roles
-- operational recommendations derived from real queue/error history; no opaque automatic marketing decisions
-- safe diagnostics and admin audit/update history
-- master-folder update system with exact manifest membership, SHA-256 verification, source + SQLite backup and automatic rollback on failed verification
-- schema v6 additive migration and **117-test** regression suite
-
-## Start locally
+Key commands:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File ".\CONTROL_PANEL.ps1"
+py .\app.py v6-control --campaign main_production_01
+py .\app.py v6-intelligence
+py .\app.py v6-confidence --campaign main_production_01
+py .\app.py v6-plan --campaign main_production_01
+py .\app.py v6-recovery
 ```
 
-The V3 Control Panel exposes core status/safety/campaign/content/queue operations plus destination collections, rules, recommendations and release verification. Routine operation can move to the optional Telegram Admin Control Centre after local setup.
+Telegram Admin Bot: `/v6` or `/control`.
 
-See:
+Safety invariants remain unchanged: one unresolved obligation per group, no generic UNCERTAIN retry, no NOT_SENT inference from missing history, and production stays fail-closed while evidence blockers remain.
 
-- `docs\UPGRADE_FROM_2.2.3.md`
-- `docs\V3_PLATFORM.md`
-- `docs\TELEGRAM_ADMIN_SETUP.md`
-- `docs\OPERATIONS.md`
-- `docs\LIVE_TEST_CHECKLIST.md`
-- `docs\RELEASE_3_0_CHECKLIST.md`
+# Smart Auto Poster V5.0.0
 
-## Content inbox workflow
+V5 is the autonomous production-controller milestone. It preserves the V4 round/pass engine and per-post pipeline, then adds evidence-aware legacy queue cleanup, a database-level one-unresolved-post-per-group guard, account-specific format routing, learned destination timing profiles, persistent run ledgers and a strict production gate.
 
-Create a folder per advertisement:
+Core V5 commands:
+
+```powershell
+py .\app.py queue-hygiene
+py .\app.py queue-hygiene --apply
+py .\app.py v5-readiness --campaign main_production_01
+py .\app.py mission-control --campaign main_production_01
+py .\app.py progress --campaign main_production_01 --watch --interval 5
+```
+
+Telegram Admin Bot: `/mission`, `/progress`, `/post <id>`, `/gate`, `/hygiene`.
+
+V5 never generically retries UNCERTAIN sends. Queue hygiene only cancels rows whose local state and attempt ledger prove that no Telegram acknowledgement or ambiguity exists.
+
+# Smart Auto Poster V4.0.1
+
+## One-post-per-group round engine
+
+V4 executes each auto-post cycle as passes. Every selected group receives exactly one queue row for the cycle. Healthy groups move through Pass 1 immediately; SlowMode, FloodWait, account cooldown, quiet-hours and other retry-safe waits defer that **same row** to a later pass so the worker moves on to untouched groups. Pass 2 cannot begin until Pass 1 for that run has drained.
+
+A group cannot accumulate another unresolved post from a later schedule or another campaign. `SENDING` and `UNCERTAIN` states block all other rows for that group until the outcome is resolved. This is the primary anti-spam invariant.
+
+## Mixed text and photo groups
+
+Destination mode is authoritative at send time. A media-bearing ad with a caption can satisfy both modes: photo destinations receive the media group, while text-only destinations receive the caption without media. Telegram scan/failure evidence can learn definitive format restrictions and safely switch future delivery mode without creating another queue row.
+
+## Progress and Mission Control
+
+```powershell
+py .\app.py progress --campaign main_production_01 --watch --interval 5
+py .\app.py mission-control --campaign main_production_01
+py .\app.py job-timeline 36
+```
+
+`progress` provides overall and per-group bars, pass number, due time, account, format, defer/retry reason, ETA and stuck detection. `job-timeline` provides a step checklist and durable history for one post. `mission-control` provides an operational summary plus the global anti-spam overlap check.
+
+Private Telegram Admin Bot commands:
 
 ```text
-content\inbox\South_Ad_01\
-├── caption.txt
-├── 01.jpg
-└── 02.jpg
+/progress
+/mission
+/post <queue_id>
 ```
 
-Then choose **23. Import content inbox**, or run:
+## Safety invariants
+
+- No generic automatic retry for `UNCERTAIN` Telegram delivery.
+- SlowMode/FloodWait do not consume the normal retry budget.
+- Timing waits do not poison the global circuit breaker.
+- Definitive format errors may fall back only when non-delivery is proven and compatible content exists.
+- Permanent permission/content failures do not loop forever.
+- A successful post suppresses legacy unresolved duplicates for that group.
+- Windows managed runtime remains self-healing with duplicate-instance suppression.
+
+# Smart Auto Poster V3.5.2
+
+## Live auto-post progress and stages
+
+V3.5.2 adds a read-only progress view for the latest posting cycle. It shows an overall progress bar plus the current stage of each destination, including explicit SENT and DEFERRED outcomes, account selection, retry/defer due times and safe failure/UNCERTAIN states.
 
 ```powershell
-py .\app.py import-content
+py .\app.py progress
+py .\app.py progress --campaign main_production_01
+py .\app.py progress --campaign main_production_01 --watch --interval 5
 ```
 
-The item is copied into the permanent `content\library\...` folder, registered in SQLite, and removed from the inbox after a successful import. Existing library content is not silently overwritten.
+From the private Telegram Admin Bot use `/progress` or tap **ðŸ“Š Progress**. The progress message includes a **ðŸ”„ Refresh progress** button. `/status` and `/queue` also show the latest run's overall bar.
 
-Supported inbox media extensions include JPG/JPEG, PNG, WEBP, GIF, MP4, MOV, and M4V.
+Progress is observational only: it does not create jobs, retry sends, reconcile UNCERTAIN jobs, change campaign state or modify the production schedule.
 
-## Multi-ad campaigns
+# Smart Auto Poster V3.5.1
 
-A campaign can now contain multiple reusable content items.
+## V3.5.1 runtime safety hotfix
 
-Create a campaign with its first content item:
+V3.5.1 separates expected Telegram timing/back-pressure from true send failures so SlowMode, FloodWait and short worker-busy deferrals cannot falsely trip the global circuit breaker. Ambiguous Telegram acknowledgements now count toward the breaker as risky outcomes while remaining blocked from automatic retry. Windows unattended startup also has a five-minute liveness trigger with `MultipleInstances=IgnoreNew`, so an externally terminated managed runtime is automatically restarted without creating a second bot process. `AUTOSTART_STATUS.ps1` reports the trigger count, repetition interval and next run for liveness diagnosis.
+
+## Delivery intelligence
+
+V3.4 records every delivery attempt and explains unresolved work by failure family, destination, account and recommended action. Diagnosis is read-only. Recovery planning is also read-only unless `--apply` is explicitly supplied, and uncertain Telegram acknowledgements are never automatically retried.
 
 ```powershell
-py .\app.py add-campaign CAMP_A "Main Rotation" ad_01 --tags main --rotation sequential --conflict-gap-minutes 60
+py .\app.py delivery-intelligence --campaign main_production_01
+py .\app.py delivery-recovery --campaign main_production_01
 ```
 
-Add more variants:
+## Fast Pass production
 
-```powershell
-py .\app.py campaign-content CAMP_A --add ad_02 --position 1
-py .\app.py campaign-content CAMP_A --add ad_03 --position 2
-```
+V3.3.0 changes production delivery from deliberately spread-out posting to a fast clean-first pass. New production cycles have zero spread, untouched pending destinations are always attempted before retry/deferred problem jobs, successful sends are paced by `MIN_SEND_GAP_SECONDS` (default 3 seconds), and any Telegram request without a conclusive acknowledgement within `SEND_TIMEOUT_SECONDS` (default 45 seconds) is moved to UNCERTAIN rather than blocking or being blindly resent. Existing Telegram FloodWait/SlowMode, duplicate-prevention, quarantine and circuit-breaker safeguards remain active.
 
-List variants:
+## V3.2.2 test-isolation hardening
 
-```powershell
-py .\app.py campaign-content CAMP_A
-```
+## V3.2.6 guarded go-live state recovery
 
-Rotation modes:
+V3.2.6 makes go-live idempotent after a failed rollout. If production is marked ACTIVE but the managed runtime is stopped and there are zero unresolved queue jobs, the go-live script first proves that the only failing readiness conditions are the ACTIVE lifecycle flags, normalizes the campaign to READY/inactive, and only then creates the rollback snapshot. Any additional safety problem aborts normalization. Failed activation verifies the restored lifecycle is READY/inactive.
 
-- `sequential`
-- `random`
-- `least_recent`
-- `weighted`
 
-The queue stores the exact `content_id` selected for each destination. Retries therefore keep the same selected content rather than unexpectedly switching variants.
+Go-live regression tests now run with project `.env` loading disabled so temporary test fixtures cannot be overwritten by the live bot configuration. Normal production `.env` precedence remains unchanged outside explicit test mode.
 
-## Preview before activation/posting
+# Smart Auto Poster V3.2.2
 
-```powershell
-py .\app.py preview CAMP_A
-```
+Production-handoff release for the verified 32-destination, five-variant 10-photo album campaign.
 
-Preview shows:
+The final guarded path is `GO_LIVE.ps1`. It performs strict readiness checks, verifies Telegram account sessions without sending, takes an off-OneDrive recovery snapshot, re-arms the 4-hour schedule from activation time, activates only with the explicit `ACTIVATE_32_ALBUM_PRODUCTION_4H` token, installs/starts the managed Windows service, and verifies service/scheduler/worker heartbeats. It performs no immediate `Post Now`.
 
-- selected destination count
-- Primary-only / Secondary-only / dual-access counts
-- photo/text counts
-- campaign variants
-- include/exclude tags
-- protected/never-post exclusions
+If any post-activation safety invariant fails, the managed service is stopped and the pre-go-live SQLite snapshot is restored.
 
-Dry-run enqueue remains available:
 
-```powershell
-py .\app.py enqueue CAMP_A --dry-run
-```
+## V3.2.3 managed Admin Bot startup
+The private Admin Bot uses an in-memory Telethon session by default (`ADMIN_BOT_PERSIST_SESSION=0`). Bot-token login does not require a persistent SQLite session, so this avoids file-lock/stale-session failures during unattended Windows startup. Set `ADMIN_BOT_PERSIST_SESSION=1` only if you explicitly need the legacy persistent session behavior.
 
-## Hard destination safety
+## V3.2.5 go-live stability
+The guarded Windows go-live now accounts for the scheduler's normal 15-second tick cadence. Scheduler heartbeat freshness is accepted up to 45 seconds while service, queue worker and Telegram Admin Bot remain capped at 20 seconds. Failed starts also clean verified stale runtime locks so a fail-closed rollback does not block the next safe activation attempt.
 
-Mark a destination protected:
 
-```powershell
-py .\app.py destination -100123456789 --protect
-```
+## V3.2.5 runtime-lock recovery
+If Windows Scheduled Task shutdown leaves the child Smart Auto Poster Python runtime alive, go-live recovery verifies the lock owner's PID, recorded start timestamp, live process start time, and runtime executable before terminating it. This avoids both stale-lock loops and unsafe PID-reuse kills.
 
-Protected destinations are excluded unless a campaign was explicitly created with `--allow-protected`.
 
-Hard-block a destination from all automatic campaigns:
+## Windows console safety (v4.0.1)
+Mission Control, progress and job timeline output now adapts to the active Windows console encoding so unusual Telegram group-name symbols cannot crash read-only diagnostics. Telegram Admin Bot output remains Unicode-rich.
 
-```powershell
-py .\app.py destination -100123456789 --never-auto-post
-```
+## V5.0.2 UNCERTAIN history evidence
 
-This rule is stronger than tags and cannot be bypassed by broad campaign targeting.
+Use `py app.py uncertain-scan` for a read-only scan or `py app.py uncertain-scan --apply-sent` to reconcile only unique exact positive Telegram-history matches. The scanner never infers NOT_SENT from absence. Run it with the managed runtime stopped to avoid Telegram session contention.
 
-Undo it with:
 
-```powershell
-py .\app.py destination -100123456789 --allow-auto-post
-```
+## V5.0.3 evidence recovery hardening
 
-## Automatic smart tags
+UNCERTAIN history scanning now recovers missing legacy account attribution from durable attempt/phase history and, when necessary, checks all authorised accounts. Automatic SENT reconciliation still requires one unique exact match in the strict evidence window. A wider diagnostic window is report-only and can never auto-reconcile a delivery. Absence of history is never interpreted as NOT_SENT.
 
-Live destination scans rebuild these system tags automatically:
+## V6 Command Prompt live dashboard
+Run `py app.py progress --campaign main_production_01 --watch --interval 2` for the enhanced Windows-safe live dashboard. It shows overall and pass progress, the current post and stage, next destinations, ETA, outcome counts, and compact per-destination progress bars.
 
-```text
-auto_primary_only
-auto_secondary_only
-auto_both_accounts
-auto_photo
-auto_text
-auto_forum
-auto_review
-auto_protected
-auto_never_post
-```
+### Full-coverage live qualification
+`py app.py live-coverage-run --campaign main_production_01 --poll 2`
 
-Your manually assigned tags are preserved.
-
-## Conflict spacing
-
-`--conflict-gap-minutes` prevents multiple campaigns already in the queue from stacking too closely for the same destination.
-
-Example:
-
-```powershell
-py .\app.py add-campaign CAMP_A "Main" ad_01 --tags main --conflict-gap-minutes 60
-```
-
-If another eligible job for the same group is already queued, the new job is placed at least 60 minutes behind it. Existing destination/campaign minimum intervals are also included in the spacing calculation.
-
-## Schedules and simulation
-
-Interval:
-
-```powershell
-py .\app.py schedule CAMP_A --interval-minutes 360
-```
-
-Daily times:
-
-```powershell
-py .\app.py schedule CAMP_A --daily-times 09:00,19:00
-```
-
-Selected weekdays:
-
-```powershell
-py .\app.py schedule CAMP_A --daily-times 10:00,18:30 --days mon,wed,fri
-```
-
-Preview future scheduled runs without queuing anything:
-
-```powershell
-py .\app.py simulate --hours 24
-```
-
-## Post Now
-
-Post Now is not a direct Telegram bypass. It still uses campaign targeting, protected/never-post rules, account routing, queue persistence, duplicate safeguards, pacing, and worker safety.
-
-Preview only:
-
-```powershell
-py .\app.py post-now CAMP_A --dry-run
-```
-
-Queue now:
-
-```powershell
-py .\app.py post-now CAMP_A
-```
-
-The Control Panel requires typing `SEND` after preview before it queues the campaign.
-
-## Queue/failure operations
-
-```powershell
-py .\app.py queue-summary
-py .\app.py queue --status failed
-py .\app.py retry-failed --campaign CAMP_A
-py .\app.py job 123 --retry
-py .\app.py job 123 --cancel
-```
-
-Interrupted in-flight sends still become `uncertain` and are never blindly retried.
-
-## Automatic destination re-scan
-
-The long-running service can rescan Telegram periodically while it is running:
-
-```text
-AUTO_RESCAN_MINUTES=360
-```
-
-New groups remain REVIEW + disabled. Lost access fails closed. Routing preferences are reconciled to the accounts that really have access.
-
-## Optional Windows auto-start
-
-Choose **32. Install Windows auto-start** from the Control Panel, or run:
-
-```powershell
-.\INSTALL_AUTOSTART.ps1
-```
-
-This installs a Windows scheduled task for the current user. It does **not** immediately start the service; the task triggers at the next Windows logon. The hidden runner writes service output to `logs\service_YYYYMMDD.log`.
-
-Remove it with Control Panel option 33 or:
-
-```powershell
-.\REMOVE_AUTOSTART.ps1
-```
-
-Do not install auto-start until a V2.3 `LIVE_TEST` one-job send has passed and the intended production campaigns have been reviewed.
-
-## Safe rollout sequence after applying V2.3
-
-```text
-1. Setup / upgrade environment
-2. Run self-tests (expect 33/33)
-3. Health check
-4. Validate
-5. Scan destinations
-6. Preview LIVE_TEST campaign
-7. Enqueue one LIVE_TEST job
-8. Run one queue job
-9. Confirm sent status in Telegram + queue
-10. Only then configure/enable production campaigns
-11. Optional: install Windows auto-start last
-```
-
-## Security / local secrets
-
-Keep `.env`, Telegram `.session` files, login codes, 2FA passwords, API hashes, and bot tokens local. Never paste them into chat. Live sessions remain under `runtime\sessions` inside this bot's permanent folder to avoid concurrent SQLite session locking with other bots.
+This explicit one-shot controller targets every currently eligible destination. Slow/timing-limited groups move to later passes. Every destination remains in the coverage ledger until confirmed SENT or explicitly blocked with a reason. Historical UNCERTAIN sends are evidence-gated and are never blindly retried.

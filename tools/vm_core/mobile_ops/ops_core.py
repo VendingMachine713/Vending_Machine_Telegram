@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 import re
 
 LINE = re.compile(r"^([A-Za-z0-9_+-]+)\s+(RUNNING|STOPPED|DISABLED)\s+(\d*)\s*(.*)$")
@@ -17,10 +17,10 @@ def status_summary(text: str) -> str:
     rows=parse_status(text)
     if not rows:
         return "Could not parse VM status."
-    icon={"RUNNING":"✅","STOPPED":"❌","DISABLED":"⏸"}
-    lines=["🤖 VM STATUS"]
+    icon={"RUNNING":"âœ…","STOPPED":"âŒ","DISABLED":"â¸"}
+    lines=["ðŸ¤– VM STATUS"]
     for r in rows:
-        lines.append(f"{icon.get(r['state'],'•')} {r['bot']}: {r['state']}")
+        lines.append(f"{icon.get(r['state'],'â€¢')} {r['bot']}: {r['state']}")
     return "\n".join(lines)
 
 def offline_names(text: str) -> list[str]:

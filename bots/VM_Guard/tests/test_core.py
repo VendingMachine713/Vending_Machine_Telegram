@@ -1,4 +1,4 @@
-
+﻿
 import unittest
 from core import score_message, extract_domains, FloodTracker
 class T(unittest.TestCase):

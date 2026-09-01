@@ -1,4 +1,4 @@
-
+﻿
 from __future__ import annotations
 
 import os
@@ -11,7 +11,17 @@ from dotenv import load_dotenv
 BOT_DIR = Path(__file__).resolve().parent
 MASTER_DIR = BOT_DIR.parent.parent
 ENV_PATH = BOT_DIR / ".env"
-load_dotenv(ENV_PATH)
+def _load_local_env() -> None:
+    """Load the bot-local .env deterministically, including Windows UTF-8 BOM files."""
+    if not ENV_PATH.exists():
+        raise RuntimeError(f"Missing .env file: {ENV_PATH}")
+    # `utf-8-sig` transparently strips a BOM if Windows PowerShell wrote one.
+    # `override=True` ensures the bot-local file wins over stale/blank inherited
+    # process variables from a parent shell.
+    load_dotenv(dotenv_path=ENV_PATH, override=True, encoding="utf-8-sig")
+
+
+_load_local_env()
 
 
 def _required(name: str) -> str:
@@ -58,6 +68,9 @@ class Settings:
 
 
 def load_settings() -> Settings:
+    # Re-read the local file so configuration changes made by supported helper
+    # scripts are picked up without relying on module-import timing.
+    _load_local_env()
     db_default = MASTER_DIR / "shared" / "exports" / "VM_Relationship_Manager" / "vm_relationships.db"
     backup_default = MASTER_DIR / "shared" / "backups" / "VM_Relationship_Manager"
     log_default = MASTER_DIR / "shared" / "logs" / "VM_Relationship_Manager"
@@ -66,7 +79,7 @@ def load_settings() -> Settings:
     settings = Settings(
         api_id=int(_required("TELEGRAM_API_ID")),
         api_hash=_required("TELEGRAM_API_HASH"),
-        phone=_required("TELEGRAM_PHONE"),
+        phone=os.getenv("TELEGRAM_PHONE", "").strip(),
         bot_token=_required("BOT_TOKEN"),
         admin_ids=_int_list(_required("ADMIN_IDS")),
         session_name=os.getenv("SESSION_NAME", session_default).strip(),

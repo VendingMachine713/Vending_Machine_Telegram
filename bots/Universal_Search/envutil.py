@@ -1,4 +1,4 @@
-
+﻿
 from pathlib import Path
 
 def load_env(path: Path) -> dict[str, str]:

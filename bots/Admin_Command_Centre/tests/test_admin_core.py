@@ -1,4 +1,4 @@
-import sys,tempfile,unittest
+﻿import sys,tempfile,unittest
 from pathlib import Path
 BOT=Path(__file__).resolve().parents[1]; ROOT=BOT.parents[1]
 for p in (str(BOT),str(ROOT)):

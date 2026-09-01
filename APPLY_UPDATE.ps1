@@ -1,4 +1,4 @@
-param([string]$Package)
+﻿param([string]$Package)
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Updates = Join-Path $Root 'updates'
@@ -6,8 +6,40 @@ $Inbox = Join-Path $Updates 'inbox'
 $Applied = Join-Path $Updates 'applied'
 $Failed = Join-Path $Updates 'failed'
 $Backups = Join-Path $Updates 'backups'
+$LocalBackups = Join-Path $env:LOCALAPPDATA 'Vending_Machine_Telegram\update_backups'
 $HistoryFile = Join-Path $Updates 'history.jsonl'
-@($Inbox,$Applied,$Failed,$Backups) | ForEach-Object { New-Item -ItemType Directory -Force -Path $_ | Out-Null }
+@($Inbox,$Applied,$Failed,$Backups,$LocalBackups) | ForEach-Object { New-Item -ItemType Directory -Force -Path $_ | Out-Null }
+
+
+function Copy-ItemRetry {
+    param([string]$Source,[string]$Destination,[int]$Attempts=4)
+    $last = $null
+    for ($i=1; $i -le $Attempts; $i++) {
+        try {
+            Copy-Item -LiteralPath $Source -Destination $Destination -Force -ErrorAction Stop
+            return
+        } catch {
+            $last = $_
+            [GC]::Collect(); [GC]::WaitForPendingFinalizers()
+            Start-Sleep -Seconds ([Math]::Min(6,$i * 2))
+        }
+    }
+    throw "Copy failed after $Attempts attempt(s): $Source -> $Destination | $($last.Exception.Message)"
+}
+function Invoke-PythonRetry {
+    param([string[]]$Arguments,[int]$Attempts=3)
+    $lastExit = 999
+    for ($i=1; $i -le $Attempts; $i++) {
+        try {
+            & py @Arguments
+            $lastExit = $LASTEXITCODE
+            if ($lastExit -eq 0) { return $true }
+        } catch { $lastExit = 998 }
+        [GC]::Collect(); [GC]::WaitForPendingFinalizers()
+        Start-Sleep -Seconds ([Math]::Min(6,$i * 2))
+    }
+    return $false
+}
 
 function Base-Version([string]$Value) {
     if (-not $Value) { return [version]'0.0.0' }
@@ -88,7 +120,7 @@ try {
     }
 
     $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-    $backupDir = Join-Path $Backups ("$($manifest.bot)_$($manifest.version)_$stamp")
+    $backupDir = Join-Path $LocalBackups ("$($manifest.bot)_$($manifest.version)_$stamp")
     New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
     $fileMeta = @()
     foreach ($src in $payloadFiles) {
@@ -99,11 +131,15 @@ try {
         if ($existed) {
             $bak = Join-Path $backupDir $rel
             New-Item -ItemType Directory -Force -Path (Split-Path -Parent $bak) | Out-Null
-            Copy-Item $dst $bak -Force
+            Copy-ItemRetry -Source $dst -Destination $bak
         }
     }
     $rollbackMeta = [pscustomobject]@{ target=$Target; bot=$manifest.bot; previous_version=$current; new_version=$manifest.version; files=$fileMeta; database_backup=[bool]$manifest.database_backup; database_path=$(if ($manifest.database_path) { [string]$manifest.database_path } else { 'data/smart_autoposter.sqlite3' }) }
     $rollbackMeta | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $backupDir 'rollback.json') -Encoding UTF8
+    try {
+        $pointer = [pscustomobject]@{ backup=$backupDir; bot=$manifest.bot; version=$manifest.version; previous_version=$current; created_at=(Get-Date).ToString('o') }
+        $pointer | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $Backups ("$($manifest.bot)_$($manifest.version)_$stamp.pointer.json")) -Encoding UTF8
+    } catch {}
 
     # Consistent SQLite online backup before any source/migration changes. V3 keeps this
     # backup beside the source rollback metadata so a failed post-update migration can
@@ -117,8 +153,8 @@ try {
             New-Item -ItemType Directory -Force -Path $dbDir | Out-Null
             $dbBackupFile = Join-Path $dbDir 'smart_autoposter.sqlite3'
             $backupCode = 'import sqlite3,sys; s=sqlite3.connect(sys.argv[1]); d=sqlite3.connect(sys.argv[2]); s.backup(d); d.close(); s.close()'
-            & py -c $backupCode $dbLiveFile $dbBackupFile
-            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $dbBackupFile)) { Fail-Update 'SQLite online backup failed before update' }
+            if (-not (Invoke-PythonRetry -Arguments @('-c',$backupCode,$dbLiveFile,$dbBackupFile))) { Fail-Update 'SQLite online backup failed before update' }
+            if (-not (Test-Path $dbBackupFile)) { Fail-Update 'SQLite online backup file missing after update backup' }
         }
     }
 
@@ -126,7 +162,7 @@ try {
         $rel = $src.FullName.Substring($payload.Length).TrimStart('\','/')
         $dst = Join-Path $Target $rel
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
-        Copy-Item $src.FullName $dst -Force
+        Copy-ItemRetry -Source $src.FullName -Destination $dst
     }
 
     Push-Location $Target
@@ -165,30 +201,44 @@ catch {
     Write-Host "[UPDATE FAILED] $($_.Exception.Message)" -ForegroundColor Red
     try { ([pscustomobject]@{status='failed';package=[IO.Path]::GetFileName($Package);error=$_.Exception.Message;at=(Get-Date).ToString('o') } | ConvertTo-Json -Compress) | Add-Content $HistoryFile -Encoding UTF8 } catch {}
     if ($backupDir -and (Test-Path (Join-Path $backupDir 'rollback.json'))) {
+        $sourceErrors = @()
         try {
             $meta = Get-Content (Join-Path $backupDir 'rollback.json') -Raw | ConvertFrom-Json
             foreach ($f in @($meta.files)) {
-                $dst = Join-Path $meta.target ([string]$f.path)
-                $bak = Join-Path $backupDir ([string]$f.path)
-                if ($f.existed -and (Test-Path $bak)) {
-                    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
-                    Copy-Item $bak $dst -Force
-                } elseif (-not $f.existed -and (Test-Path $dst)) {
-                    Remove-Item $dst -Force -ErrorAction SilentlyContinue
+                try {
+                    $dst = Join-Path $meta.target ([string]$f.path)
+                    $bak = Join-Path $backupDir ([string]$f.path)
+                    if ($f.existed -and (Test-Path $bak)) {
+                        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
+                        Copy-ItemRetry -Source $bak -Destination $dst
+                    } elseif (-not $f.existed -and (Test-Path $dst)) {
+                        Remove-Item $dst -Force -ErrorAction SilentlyContinue
+                    }
+                } catch {
+                    $sourceErrors += ("{0}: {1}" -f ([string]$f.path), $_.Exception.Message)
                 }
             }
-            Write-Host '[ROLLBACK] Source files restored automatically.' -ForegroundColor Yellow
-            if ($dbBackupFile -and $dbLiveFile -and (Test-Path $dbBackupFile)) {
-                try {
-                    Remove-Item ($dbLiveFile + '-wal') -Force -ErrorAction SilentlyContinue
-                    Remove-Item ($dbLiveFile + '-shm') -Force -ErrorAction SilentlyContinue
-                    $restoreCode = 'import sqlite3,sys; s=sqlite3.connect(sys.argv[1]); d=sqlite3.connect(sys.argv[2]); s.backup(d); d.close(); s.close()'
-                    & py -c $restoreCode $dbBackupFile $dbLiveFile
-                    if ($LASTEXITCODE -ne 0) { throw 'SQLite restore command failed' }
-                    Write-Host '[ROLLBACK] Database restored automatically.' -ForegroundColor Yellow
-                } catch { Write-Host "[DATABASE ROLLBACK ERROR] $($_.Exception.Message)" -ForegroundColor Red }
+            if ($sourceErrors.Count -eq 0) {
+                Write-Host '[ROLLBACK] Source files restored automatically.' -ForegroundColor Yellow
+            } else {
+                Write-Host "[ROLLBACK WARNING] $($sourceErrors.Count) source file(s) could not be restored; continuing to database rollback." -ForegroundColor Yellow
             }
-        } catch { Write-Host "[ROLLBACK ERROR] $($_.Exception.Message)" -ForegroundColor Red }
+        } catch {
+            $sourceErrors += ("rollback metadata/source phase: {0}" -f $_.Exception.Message)
+            Write-Host '[ROLLBACK WARNING] Source restore phase had errors; continuing to database rollback.' -ForegroundColor Yellow
+        }
+        if ($dbBackupFile -and $dbLiveFile -and (Test-Path $dbBackupFile)) {
+            try {
+                Remove-Item ($dbLiveFile + '-wal') -Force -ErrorAction SilentlyContinue
+                Remove-Item ($dbLiveFile + '-shm') -Force -ErrorAction SilentlyContinue
+                $restoreCode = 'import sqlite3,sys; s=sqlite3.connect(sys.argv[1]); d=sqlite3.connect(sys.argv[2]); s.backup(d); d.close(); s.close()'
+                if (-not (Invoke-PythonRetry -Arguments @('-c',$restoreCode,$dbBackupFile,$dbLiveFile))) { throw 'SQLite restore command failed' }
+                Write-Host '[ROLLBACK] Database restored automatically.' -ForegroundColor Yellow
+            } catch { Write-Host "[DATABASE ROLLBACK ERROR] $($_.Exception.Message)" -ForegroundColor Red }
+        }
+        if ($sourceErrors.Count -gt 0) {
+            $sourceErrors | ForEach-Object { Write-Host "[ROLLBACK SOURCE ERROR] $_" -ForegroundColor Red }
+        }
     }
     try {
         $dest = Join-Path $Failed ([IO.Path]::GetFileName($Package))

@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 import tempfile
 import types
 import unittest
@@ -23,6 +23,7 @@ sys.modules.setdefault("telethon", telethon)
 
 from smart_autoposter.db import Database, utcnow
 from smart_autoposter.worker import Worker
+from smart_autoposter.telegram_io import classify_exception
 
 
 class WorkerSelectionTests(unittest.TestCase):
@@ -77,6 +78,33 @@ class WorkerSelectionTests(unittest.TestCase):
         self.assertEqual(reason, "account_cooldown_or_pacing")
 
 
+
+
+class WorkerTransientPlatformTests(unittest.TestCase):
+    def test_worker_busy_does_not_consume_retry_budget_or_account_health(self):
+        tmp = tempfile.TemporaryDirectory()
+        try:
+            db = Database(Path(tmp.name) / "db.sqlite3")
+            db.init()
+            now = utcnow()
+            with db.connect() as con:
+                con.execute("INSERT INTO accounts(account_key,session_name,enabled,authorized,identity,health_score,consecutive_failures,updated_at) VALUES('primary','p',1,1,'p',100,0,?)", (now,))
+                con.execute("""INSERT INTO destinations(group_id,group_name,primary_access,preferred_account,mode,enabled,needs_review,updated_at)
+                               VALUES(-1,'Test',1,'primary','photo',1,0,?)""", (now,))
+                con.execute("INSERT INTO content(content_id,caption,media_json,enabled,lifecycle_state,created_at,updated_at) VALUES('c','x','[]',1,'ready',?,?)", (now,now))
+                con.execute("INSERT INTO campaigns(campaign_id,name,content_id,enabled,lifecycle_state,created_at,updated_at) VALUES('camp','Camp','c',1,'active',?,?)", (now,now))
+                con.execute("INSERT INTO queue(job_key,run_key,campaign_id,group_id,content_id,due_at,status,attempts,max_attempts,created_at,updated_at) VALUES('j','r','camp',-1,'c',?,'retry',3,4,?,?)", (now,now,now))
+                job = dict(con.execute("SELECT * FROM queue WHERE job_key='j'").fetchone())
+            retry_at = (datetime.now(timezone.utc)+timedelta(minutes=2)).isoformat(timespec="seconds")
+            Worker(db, None).finish_error(job, "worker_busy: Telegram workers are busy", retry_at=retry_at, account="primary", kind="worker_busy")
+            with db.connect() as con:
+                q = con.execute("SELECT status,attempts FROM queue WHERE job_key='j'").fetchone()
+                a = con.execute("SELECT health_score,consecutive_failures FROM accounts WHERE account_key='primary'").fetchone()
+            self.assertEqual(tuple(q), ("deferred", 3))
+            self.assertEqual(tuple(a), (100, 0))
+        finally:
+            tmp.cleanup()
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -104,9 +132,13 @@ class WorkerContentSelectionTests(unittest.TestCase):
             add_campaign_content(db, "c", "b", position=1)
             with db.connect() as con: con.execute("UPDATE campaigns SET enabled=1,lifecycle_state='active',last_preview_at=? WHERE campaign_id='c'", (utcnow(),))
             enqueue_campaign(db, "c", run_key="first")
+            # Resolve the first row before a new cycle: V4 never stacks two unresolved posts.
+            with db.connect() as con:
+                first = con.execute("SELECT id,content_id FROM queue WHERE run_key='first'").fetchone()
+                con.execute("UPDATE queue SET status='sent',resolved_at=?,updated_at=? WHERE id=?", (utcnow(), utcnow(), first["id"]))
+            from smart_autoposter.core import record_content_sent
+            record_content_sent(db, "c", -1001, first["content_id"])
             enqueue_campaign(db, "c", run_key="second")
-            # Cancel first so worker claims second, which should have variant b.
-            with db.connect() as con: con.execute("UPDATE queue SET status='cancelled' WHERE id=(SELECT MIN(id) FROM queue)")
             pool = Pool(); worker = Worker(db, pool, min_send_gap_seconds=0)
             auth = {"primary":{"authorized":True},"secondary":{"authorized":True}}
             asyncio.run(worker.run_once(auth))
@@ -114,3 +146,86 @@ class WorkerContentSelectionTests(unittest.TestCase):
             with db.connect() as con:
                 usage = con.execute("SELECT use_count FROM content_usage WHERE campaign_id='c' AND group_id=-1001 AND content_id='b'").fetchone()
             self.assertEqual(usage[0], 1)
+
+class WorkerTimingRuleRetryTests(unittest.TestCase):
+    def test_slow_mode_does_not_consume_retry_budget(self):
+        from smart_autoposter.core import create_campaign, create_content
+        with tempfile.TemporaryDirectory() as td:
+            db = Database(Path(td) / "db.sqlite3"); db.init(); now = utcnow()
+            create_content(db, "content", "caption", [])
+            create_campaign(db, "camp", "Campaign", "content")
+            with db.connect() as con:
+                con.execute("INSERT INTO accounts(account_key,session_name,enabled,authorized,identity,updated_at) VALUES('primary','p',1,1,'p',?)", (now,))
+                con.execute("INSERT INTO destinations(group_id,group_name,primary_access,secondary_access,preferred_account,mode,enabled,needs_review,updated_at) VALUES(-1001,'T',1,0,'primary','text',1,0,?)", (now,))
+                con.execute("INSERT INTO queue(job_key,campaign_id,group_id,content_id,due_at,status,attempts,max_attempts,created_at,updated_at) VALUES('j','camp',-1001,'content',?,'sending',3,4,?,?)", (now,now,now))
+                job = dict(con.execute("SELECT * FROM queue WHERE job_key='j'").fetchone())
+            retry_at = (datetime.now(timezone.utc)+timedelta(hours=1)).isoformat(timespec="seconds")
+            Worker(db, None).finish_error(job, "slow_mode: test", retry_at=retry_at, account="primary", kind="slow_mode")
+            with db.connect() as con:
+                row = con.execute("SELECT status,attempts,due_at FROM queue WHERE job_key='j'").fetchone()
+                next_eligible = con.execute("SELECT next_eligible_at FROM destinations WHERE group_id=-1001").fetchone()[0]
+            self.assertEqual(row[0], "deferred")
+            self.assertEqual(row[1], 3)
+            self.assertEqual(row[2], retry_at)
+            self.assertEqual(next_eligible, retry_at)
+
+    def test_flood_wait_does_not_consume_retry_budget(self):
+        from smart_autoposter.core import create_campaign, create_content
+        with tempfile.TemporaryDirectory() as td:
+            db = Database(Path(td) / "db.sqlite3"); db.init(); now = utcnow()
+            create_content(db, "content", "caption", [])
+            create_campaign(db, "camp", "Campaign", "content")
+            with db.connect() as con:
+                con.execute("INSERT INTO accounts(account_key,session_name,enabled,authorized,identity,updated_at) VALUES('primary','p',1,1,'p',?)", (now,))
+                con.execute("INSERT INTO destinations(group_id,group_name,primary_access,secondary_access,preferred_account,mode,enabled,needs_review,updated_at) VALUES(-1001,'T',1,0,'primary','text',1,0,?)", (now,))
+                con.execute("INSERT INTO queue(job_key,campaign_id,group_id,content_id,due_at,status,attempts,max_attempts,created_at,updated_at) VALUES('j','camp',-1001,'content',?,'sending',3,4,?,?)", (now,now,now))
+                job = dict(con.execute("SELECT * FROM queue WHERE job_key='j'").fetchone())
+            retry_at = (datetime.now(timezone.utc)+timedelta(minutes=30)).isoformat(timespec="seconds")
+            Worker(db, None).finish_error(job, "flood_wait: test", retry_at=retry_at, account="primary", kind="flood_wait")
+            with db.connect() as con:
+                row = con.execute("SELECT status,attempts,due_at FROM queue WHERE job_key='j'").fetchone()
+            self.assertEqual(row[0], "deferred")
+            self.assertEqual(row[1], 3)
+            self.assertEqual(row[2], retry_at)
+
+
+class WorkerAmbiguousAcknowledgementTests(unittest.TestCase):
+    def _build(self):
+        tmp = tempfile.TemporaryDirectory()
+        db = Database(Path(tmp.name) / "db.sqlite3")
+        db.init(); now = utcnow()
+        with db.connect() as con:
+            con.execute("INSERT INTO accounts(account_key,session_name,enabled,authorized,identity,health_score,consecutive_failures,updated_at) VALUES('primary','p',1,1,'p',100,0,?)", (now,))
+            con.execute("INSERT INTO destinations(group_id,group_name,primary_access,preferred_account,mode,enabled,needs_review,updated_at) VALUES(-1,'Test',1,'primary','photo',1,0,?)", (now,))
+            con.execute("INSERT INTO content(content_id,caption,media_json,enabled,lifecycle_state,created_at,updated_at) VALUES('c','x','[]',1,'ready',?,?)", (now,now))
+            con.execute("INSERT INTO campaigns(campaign_id,name,content_id,enabled,lifecycle_state,created_at,updated_at) VALUES('camp','Camp','c',1,'active',?,?)", (now,now))
+            con.execute("INSERT INTO queue(job_key,run_key,campaign_id,group_id,content_id,due_at,status,attempts,max_attempts,created_at,updated_at) VALUES('j','r','camp',-1,'c',?,'sending',1,4,?,?)", (now,now,now))
+            job = dict(con.execute("SELECT * FROM queue WHERE job_key='j'").fetchone())
+        return tmp, db, job
+
+    def test_worker_busy_too_long_classifies_as_uncertain_ack(self):
+        Exc = type("WorkerBusyTooLongRetryError", (Exception,), {})
+        kind, retry_at, permanent = classify_exception(Exc("Telegram workers are too busy to respond immediately"))
+        self.assertEqual(kind, "uncertain_telegram_ack")
+        self.assertIsNone(retry_at)
+        self.assertFalse(permanent)
+
+    def test_uncertain_ack_never_auto_retries_or_penalizes_health(self):
+        tmp, db, job = self._build()
+        try:
+            Worker(db, None).finish_error(
+                job,
+                "uncertain_telegram_ack: Telegram workers are too busy",
+                retry_at=None,
+                account="primary",
+                kind="uncertain_telegram_ack",
+            )
+            with db.connect() as con:
+                q = con.execute("SELECT status,attempts,error_kind FROM queue WHERE job_key='j'").fetchone()
+                a = con.execute("SELECT health_score,consecutive_failures FROM accounts WHERE account_key='primary'").fetchone()
+                d = con.execute("SELECT consecutive_failures FROM destinations WHERE group_id=-1").fetchone()
+            self.assertEqual(tuple(q), ("uncertain", 2, "uncertain_telegram_ack"))
+            self.assertEqual(tuple(a), (100, 0))
+            self.assertEqual(d[0], 0)
+        finally:
+            tmp.cleanup()

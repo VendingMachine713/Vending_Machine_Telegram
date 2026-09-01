@@ -1,4 +1,4 @@
-import sqlite3
+﻿import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,7 +22,7 @@ class MigrationTests(unittest.TestCase):
             self.assertIn("last_success_at",ac)
             self.assertIn("run_key",qc)
             self.assertIn("content_id",qc)
-            self.assertEqual(version, "6")
+            self.assertEqual(version, "20")
 
     def test_existing_content_table_migrates_before_fingerprint_index(self):
         """Regression for V2.2.3 -> V2.4: index creation must follow ALTER TABLE."""
@@ -52,6 +52,22 @@ class MigrationTests(unittest.TestCase):
             self.assertIn("fingerprint", cols)
             self.assertIn("idx_content_fingerprint", indexes)
             self.assertEqual(tuple(camp), (1, "active"))
+
+    def test_legacy_destination_columns_are_not_lost_by_duplicate_migration_keys(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "legacy_dest.sqlite3"
+            con = sqlite3.connect(p)
+            con.executescript("""
+                CREATE TABLE destinations(group_id INTEGER PRIMARY KEY,group_name TEXT NOT NULL,primary_access INTEGER NOT NULL DEFAULT 0,secondary_access INTEGER NOT NULL DEFAULT 0,preferred_account TEXT NOT NULL DEFAULT 'primary',mode TEXT NOT NULL DEFAULT 'review',enabled INTEGER NOT NULL DEFAULT 0,needs_review INTEGER NOT NULL DEFAULT 1,updated_at TEXT NOT NULL);
+                CREATE TABLE queue(id INTEGER PRIMARY KEY,job_key TEXT UNIQUE,campaign_id TEXT,group_id INTEGER,account_key TEXT,due_at TEXT,status TEXT,attempts INTEGER,max_attempts INTEGER,last_error TEXT,telegram_message_ids TEXT,created_at TEXT,updated_at TEXT);
+                CREATE TABLE accounts(account_key TEXT PRIMARY KEY,session_name TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1,authorized INTEGER,identity TEXT,cooldown_until TEXT,consecutive_failures INTEGER NOT NULL DEFAULT 0,last_error TEXT,updated_at TEXT NOT NULL);
+            """)
+            con.commit(); con.close()
+            Database(p).init()
+            con=sqlite3.connect(p)
+            cols={r[1] for r in con.execute("PRAGMA table_info(destinations)")}
+            con.close()
+            self.assertTrue({'protected','never_auto_post','last_seen_at','text_allowed','photo_allowed','capability_source','capability_updated_at'} <= cols)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,9 @@
+﻿{
+  "enabled": true,
+  "daily_brief": true,
+  "weekly_review": true,
+  "timezone": "Australia/Adelaide",
+  "daily_hour": 8,
+  "weekly_weekday": 0,
+  "raw_event_retention_days": 90
+}

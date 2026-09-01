@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [switch]$Apply,
     [string]$Remote = "origin",
@@ -9,9 +9,9 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 function Invoke-Git {
-    param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Args)
-    & git @Args
-    if ($LASTEXITCODE -ne 0) { throw "git $($Args -join ' ') failed with exit code $LASTEXITCODE" }
+    param([Parameter(ValueFromRemainingArguments=$true)][string[]]$GitArgs)
+    & git @GitArgs
+    if ($LASTEXITCODE -ne 0) { throw "git $($GitArgs -join ' ') failed with exit code $LASTEXITCODE" }
 }
 
 function Test-SafeEnvTemplate {

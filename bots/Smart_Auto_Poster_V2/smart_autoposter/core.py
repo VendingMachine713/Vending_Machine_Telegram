@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import json
@@ -170,16 +170,42 @@ def _campaign_active(camp, now: str):
 
 def _campaign_content_rows(con, campaign_id: str):
     return con.execute('''SELECT cc.content_id,cc.position,cc.weight,cc.enabled,ct.enabled AS content_enabled,
-                          ct.caption,ct.media_json
+                          ct.caption,ct.media_json,ct.lifecycle_state
                           FROM campaign_content cc JOIN content ct ON ct.content_id=cc.content_id
-                          WHERE cc.campaign_id=? AND cc.enabled=1 AND ct.enabled=1
+                          WHERE cc.campaign_id=? AND cc.enabled=1 AND ct.enabled=1 AND ct.lifecycle_state='ready'
                           ORDER BY cc.position,cc.content_id''', (campaign_id,)).fetchall()
 
 
-def _select_content(con, camp, group_id: int):
+def _content_capabilities(row) -> set[str]:
+    """Return delivery modes this content can safely satisfy.
+
+    Text destinations require non-empty caption text. Photo destinations require
+    1..10 media files; caption is optional for Telegram media groups. A normal ad
+    containing both caption and media therefore supports both destination modes.
+    """
+    caps: set[str] = set()
+    if str(row["caption"] or "").strip():
+        caps.add("text")
+    try:
+        media = json.loads(row["media_json"] or "[]")
+    except Exception:
+        media = []
+    if isinstance(media, list) and 1 <= len(media) <= 10:
+        caps.add("photo")
+    return caps
+
+
+def _select_content(con, camp, group_id: int, destination_mode: str | None = None):
     rows = _campaign_content_rows(con, camp["campaign_id"])
     if not rows:
         raise RuntimeError(f"Campaign has no enabled content variants: {camp['campaign_id']}")
+    mode_required = str(destination_mode or "").strip().lower()
+    if mode_required in {"text", "photo"}:
+        rows = [row for row in rows if mode_required in _content_capabilities(row)]
+        if not rows:
+            raise RuntimeError(
+                f"Campaign {camp['campaign_id']} has no {mode_required}-compatible content for destination {group_id}"
+            )
     if len(rows) == 1:
         return rows[0]["content_id"]
 
@@ -292,7 +318,7 @@ def _next_due(con, d, camp, base_iso: str, salt: str = ""):
         base = base.replace(tzinfo=timezone.utc)
     spacing = max(int(d["min_interval_seconds"] or 0), int(camp["min_destination_interval_seconds"] or 0),
                   int(camp["conflict_gap_seconds"] or 0))
-    row = con.execute('''SELECT due_at FROM queue WHERE group_id=? AND status IN ('pending','retry','sending','deferred')
+    row = con.execute('''SELECT due_at FROM queue WHERE group_id=? AND status IN ('pending','retry','processing','sending','deferred')
                          ORDER BY due_at DESC,id DESC LIMIT 1''', (d["group_id"],)).fetchone()
     if row and spacing > 0:
         try:
@@ -361,6 +387,7 @@ def campaign_preview(db: Database, campaign_id: str):
             "variant_count": len(variants),
             "variants": [r["content_id"] for r in variants],
             "selected": len(selected),
+            "group_ids": [int(d["group_id"]) for d in selected],
             "accounts": by_account,
             "modes": by_mode,
             "skipped": skipped,
@@ -379,6 +406,10 @@ def campaign_preview(db: Database, campaign_id: str):
 def enqueue_campaign(db: Database, campaign_id: str, dry_run=False, run_key: str | None = None, limits: dict | None = None):
     now = utcnow()
     with db.connect() as con:
+        if not dry_run:
+            # Serialize enqueue decisions so two scheduler/control surfaces cannot
+            # race past the global one-unresolved-post-per-group lock.
+            con.execute("BEGIN IMMEDIATE")
         camp = con.execute("SELECT * FROM campaigns WHERE campaign_id=?", (campaign_id,)).fetchone()
         if not camp:
             raise RuntimeError(f"Unknown campaign: {campaign_id}")
@@ -409,18 +440,50 @@ def enqueue_campaign(db: Database, campaign_id: str, dry_run=False, run_key: str
                 max_pending_per_destination=int(limits.get("max_pending_per_destination", 100)),
             )
 
-        inserted = dup = 0
+        inserted = dup = overlap_locked = incompatible = 0
         due_values = []
         content_counts: dict[str, int] = {}
+        skipped_groups: list[dict] = []
         for d in selected:
-            content_id = _select_content(con, camp, d["group_id"])
             raw = f"{campaign_id}|{d['group_id']}|{key}"
             job_key = hashlib.sha256(raw.encode()).hexdigest()
+            if con.execute("SELECT 1 FROM queue WHERE job_key=?", (job_key,)).fetchone():
+                dup += 1
+                continue
+            # V4 anti-spam invariant: a destination may have at most one unresolved
+            # post globally, even across campaigns. New cycles keep flowing to other
+            # groups while a SlowMode/retry/UNCERTAIN group retains its single job.
+            existing = con.execute(
+                """SELECT id,campaign_id,status,run_key,due_at FROM queue
+                   WHERE group_id=?
+                     AND status IN ('pending','retry','deferred','processing','sending','uncertain')
+                   ORDER BY id DESC LIMIT 1""",
+                (d["group_id"],),
+            ).fetchone()
+            if existing:
+                overlap_locked += 1
+                skipped_groups.append({
+                    "group_id": int(d["group_id"]), "group_name": d["group_name"],
+                    "reason": "unresolved_job_exists", "existing_job_id": int(existing["id"]),
+                    "existing_status": existing["status"], "existing_run_key": existing["run_key"],
+                    "existing_campaign_id": existing["campaign_id"],
+                })
+                continue
+            try:
+                content_id = _select_content(con, camp, d["group_id"], d["mode"])
+            except RuntimeError as exc:
+                incompatible += 1
+                skipped_groups.append({
+                    "group_id": int(d["group_id"]), "group_name": d["group_name"],
+                    "reason": "content_incompatible", "mode": d["mode"], "detail": str(exc),
+                })
+                continue
             due_at = _next_due(con, d, camp, now, key)
             try:
-                con.execute('''INSERT INTO queue(job_key,run_key,campaign_id,group_id,content_id,due_at,status,created_at,updated_at)
-                               VALUES(?,?,?,?,?,?,?,?,?)''',
-                            (job_key, key, campaign_id, d["group_id"], content_id, due_at, "pending", now, now))
+                con.execute('''INSERT INTO queue(job_key,run_key,campaign_id,group_id,content_id,due_at,status,
+                               pass_no,phase,phase_percent,phase_detail,phase_updated_at,created_at,updated_at)
+                               VALUES(?,?,?,?,?,?,?,1,'queued',5,'waiting for first-pass dispatch',?,?,?)''',
+                            (job_key, key, campaign_id, d["group_id"], content_id, due_at, "pending", now, now, now))
                 inserted += 1
                 due_values.append(due_at)
                 content_counts[content_id] = content_counts.get(content_id, 0) + 1
@@ -431,12 +494,21 @@ def enqueue_campaign(db: Database, campaign_id: str, dry_run=False, run_key: str
                     raise
         if inserted > 0:
             con.execute("UPDATE campaigns SET completed_cycles=completed_cycles+1,updated_at=? WHERE campaign_id=?", (utcnow(), campaign_id))
+        con.execute("""INSERT INTO production_runs(run_key,campaign_id,state,target_count,inserted_count,overlap_locked,incompatible_count,started_at,updated_at)
+                     VALUES(?,?,?,?,?,?,?,?,?)
+                     ON CONFLICT(run_key,campaign_id) DO UPDATE SET
+                     target_count=excluded.target_count,inserted_count=MAX(production_runs.inserted_count,excluded.inserted_count),
+                     overlap_locked=excluded.overlap_locked,incompatible_count=excluded.incompatible_count,updated_at=excluded.updated_at""",
+                    (key,campaign_id,'open',len(selected),inserted,overlap_locked,incompatible,now,utcnow()))
         return {
             "selected": len(selected), "inserted": inserted, "duplicates": dup, "run_key": key,
+            "overlap_locked": overlap_locked,
+            "content_incompatible": incompatible,
             "content_distribution": content_counts,
             "first_due_at": min(due_values) if due_values else None,
             "last_due_at": max(due_values) if due_values else None,
             "skipped": skipped,
+            "skipped_groups": skipped_groups,
         }
 
 

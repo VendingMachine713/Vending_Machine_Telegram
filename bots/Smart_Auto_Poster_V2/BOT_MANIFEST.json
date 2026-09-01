@@ -1,12 +1,13 @@
-{
+﻿{
   "schema_version": 3,
   "name": "Smart_Auto_Poster_V2",
-  "version": "3.0.4",
+  "version": "6.0.0",
   "status": "existing",
   "classification": "CANONICAL",
   "entrypoint": "app.py",
   "entrypoint_confidence": "high",
   "launchers": [
+    "RUN_ALBUM_CANARY.ps1",
     "RUN_SERVICE.ps1",
     "START_AUTO_POSTER.ps1",
     "run_setup.ps1"
@@ -15,6 +16,8 @@
   "pyproject": null,
   "databases": [
     "backups\\smart_autoposter_2026-08-27T152315+0000.sqlite3",
+    "backups\\smart_autoposter_auto_20260829T220026Z.sqlite3",
+    "backups\\smart_autoposter_auto_20260831T024236Z.sqlite3",
     "backups\\smart_autoposter_before_import_2026-08-27T062014+0000.sqlite3",
     "backups\\smart_autoposter_before_import_2026-08-27T062725+0000.sqlite3",
     "data\\smart_autoposter.sqlite3"
@@ -30,16 +33,60 @@
     "tests\\test_v23_production.py",
     "tests\\test_v24_autonomous.py",
     "tests\\test_v24_recovery.py",
+    "tests\\test_v305_production.py",
     "tests\\test_v30_platform.py",
-    "tests\\test_worker_logic.py"
+    "tests\\test_v340_delivery_intelligence.py",
+    "tests\\test_v350_reconciliation.py",
+    "tests\\test_v351_runtime_safety.py",
+    "tests\\test_v352_progress.py",
+    "tests\\test_v400_round_engine.py",
+    "tests\\test_v401_windows_console.py",
+    "tests\\test_v500_production_controller.py",
+    "tests\\test_v500_soak.py",
+    "tests\\test_worker_logic.py",
+    "tests\\test_v600_control_plane.py"
   ],
   "vm_core": {
     "compatible": true,
-    "minimum_version": "1.1.0"
+    "minimum_version": "1.4.0"
   },
   "lifecycle": {
     "managed_by_vm": true,
-    "auto_start": false,
-    "auto_restart": false
+    "auto_start": true,
+    "auto_restart": true
+  },
+  "v4": {
+    "round_engine": true,
+    "one_unresolved_post_per_group": true,
+    "mixed_text_photo_routing": true,
+    "durable_phase_history": true,
+    "mission_control": true,
+    "uncertain_auto_retry": false
+  },
+  "v5": {
+    "safe_queue_hygiene": true,
+    "database_one_unresolved_group_guard": "conditional_after_legacy_evidence_cleanup",
+    "per_account_capability_routing": true,
+    "destination_timing_memory": true,
+    "production_run_ledger": true,
+    "production_gate": true,
+    "uncertain_auto_retry": false,
+    "startup_safe_reconciliation": true,
+    "degraded_safe_mode_when_legacy_evidence_blocks_db_guard": true,
+    "uncertain_evidence_account_inference": true,
+    "diagnostic_history_window_read_only": true
+  },
+  "v6": {
+    "destination_intelligence": true,
+    "delivery_confidence": true,
+    "predictive_timing": true,
+    "production_objectives": true,
+    "production_health_scoring": true,
+    "recovery_planning": true,
+    "telegram_v6_control": true,
+    "schema_version": 20,
+    "uncertain_auto_retry": false,
+    "production_fail_closed": true,
+    "one_unresolved_post_per_group": true
   }
 }

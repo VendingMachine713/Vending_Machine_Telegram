@@ -1,4 +1,4 @@
-# Permanent LIVE_TEST Deployment Gate
+﻿# Permanent LIVE_TEST Deployment Gate
 
 Use the existing safe test destination for every release.
 

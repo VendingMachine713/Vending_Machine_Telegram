@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 import tempfile
 import unittest
@@ -22,9 +22,11 @@ for _name in [
 telethon.errors = errs
 sys.modules.setdefault("telethon", telethon)
 
+from smart_autoposter import __version__
 from smart_autoposter.admin_bot import TelegramAdminController, dashboard_text
 from smart_autoposter.analytics import analytics_snapshot
 from smart_autoposter.collections import CollectionSpec, collection_preview, delete_collection, get_collection, resolve_collection, upsert_collection
+from smart_autoposter.cli import _json_text
 from smart_autoposter.core import campaign_preview, create_campaign, create_content, enqueue_campaign, validate
 from smart_autoposter.db import Database, utcnow
 from smart_autoposter.operations import finalize_cycle_limited_campaigns, mark_campaign_previewed, set_campaign_state
@@ -66,7 +68,7 @@ class V30PlatformTests(unittest.TestCase):
 
     def test_schema_v6_platform_tables_and_columns(self):
         with self.db.connect() as con:
-            self.assertEqual(con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0],'6')
+            self.assertEqual(con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0],'20')
             tables={r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertTrue({'destination_collections','automation_rules','recommendations'}.issubset(tables))
             cols={r[1] for r in con.execute('PRAGMA table_info(campaigns)')}
@@ -137,6 +139,8 @@ class V30PlatformTests(unittest.TestCase):
         create_campaign(self.db,'limited','Limited','ad_a',tags='main',max_cycles=2)
         self.activate('limited')
         enqueue_campaign(self.db,'limited',run_key='a')
+        with self.db.connect() as con:
+            con.execute("UPDATE queue SET status='sent',resolved_at=?,updated_at=? WHERE campaign_id='limited' AND run_key='a'", (utcnow(), utcnow()))
         enqueue_campaign(self.db,'limited',run_key='b')
         with self.db.connect() as con:
             self.assertEqual(con.execute("SELECT completed_cycles FROM campaigns WHERE campaign_id='limited'").fetchone()[0],2)
@@ -275,7 +279,7 @@ class V30PlatformTests(unittest.TestCase):
 
     def test_daily_report_contains_v3_and_campaigns(self):
         text=daily_report_text(self.db)
-        self.assertIn('SMART AUTO POSTER V3.0',text); self.assertIn('Campaigns:',text)
+        self.assertIn(f'SMART AUTO POSTER V{__version__}',text); self.assertIn('Campaigns:',text)
 
     def test_weekly_report_contains_accounts(self):
         self.assertIn('Accounts:',weekly_report_text(self.db))
@@ -290,7 +294,7 @@ class V30PlatformTests(unittest.TestCase):
         c=TelegramAdminController(self.db,settings,SafetyController(self.db)); self.assertFalse(c.authorized(999))
 
     def test_dashboard_reports_v3(self):
-        self.assertIn('SMART AUTO POSTER V3.0',dashboard_text(self.db))
+        self.assertIn(f'SMART AUTO POSTER V{__version__}',dashboard_text(self.db))
 
     def test_dual_access_balancer_prefers_healthier_account(self):
         now=utcnow()
@@ -315,11 +319,95 @@ class V30PlatformTests(unittest.TestCase):
 
     def test_control_panel_exposes_v3_collections_rules_recommendations(self):
         text=(Path(__file__).parents[1]/'CONTROL_PANEL.ps1').read_text(encoding='utf-8')
-        self.assertIn('SMART AUTO POSTER V3.0',text)
+        self.assertIn('SMART AUTO POSTER V$Version',text)
+        self.assertIn("VERSION.txt", text)
         self.assertIn('62. List destination collections',text)
         self.assertIn('65. List automation rules',text)
         self.assertIn('68. Generate/list smart recommendations',text)
-        self.assertIn('72. V3 release verification',text)
+        self.assertIn('72. V4 release verification',text)
+        self.assertIn('78. Album delivery plan',text)
+        self.assertIn('79. Prepare ALL selected production destinations for album delivery',text)
+        self.assertIn('81. Guarded production go-live',text)
+        self.assertIn('PREPARE_ALL_ALBUM_DELIVERY.ps1',text)
+        self.assertIn('GO_LIVE.ps1',text)
+        self.assertIn('85. Strict final go-live readiness',text)
+        self.assertIn('86. Re-arm main production schedule from now',text)
+
+    def test_guarded_go_live_requires_strict_preflight_rearm_backup_and_explicit_approval(self):
+        root=Path(__file__).parents[1]
+        go=(root/'GO_LIVE.ps1').read_text(encoding='utf-8-sig')
+        self.assertIn('ACTIVATE_32_ALBUM_PRODUCTION_4H', go)
+        self.assertIn('go-live-readiness', go)
+        self.assertIn('album_canary_visual_ok.json', (root/'smart_autoposter'/'cli.py').read_text(encoding='utf-8'))
+        self.assertIn('accounts-check', go)
+        self.assertIn('New-LocalDbSnapshot', go)
+        self.assertIn('Restore-DbSnapshot', go)
+        self.assertIn('schedule-rearm', go)
+        self.assertIn('campaign-state $Campaign active', go)
+        self.assertLess(go.index('schedule-rearm'), go.index('campaign-state $Campaign active'))
+        self.assertIn('Start-ScheduledTask', go)
+        self.assertIn('watchdog --require service --require scheduler --require worker', go)
+        self.assertIn('Immediate Post Now: NONE', go)
+        self.assertNotIn('post-now', go.lower().replace('immediate post now', ''))
+        activate=(root/'ACTIVATE_MAIN_PRODUCTION.ps1').read_text(encoding='utf-8-sig')
+        self.assertIn('go-live-readiness', activate)
+        self.assertIn('schedule-rearm', activate)
+        self.assertLess(activate.index('schedule-rearm'), activate.index('campaign-state main_production_01 active'))
+        self.assertNotIn('post-now', activate.lower())
+        panel=(root/'CONTROL_PANEL.ps1').read_text(encoding='utf-8-sig')
+        self.assertIn('function Run-ChildScript', panel)
+        self.assertIn("Run-ChildScript (Join-Path $Root 'RESUME_ALBUM_CANARY.ps1')", panel)
+        self.assertIn("Run-ChildScript (Join-Path $Root 'RECOVERY_DOCTOR.ps1')", panel)
+
+    def test_visual_reconcile_script_removes_retry_task_before_queue_reconciliation(self):
+        root=Path(__file__).parents[1]
+        text=(root/'RECONCILE_ALBUM_CANARY_VISUAL.ps1').read_text(encoding='utf-8-sig')
+        self.assertIn('VM Smart Auto Poster Album Canary Retry', text)
+        self.assertIn('/End /TN $TaskName', text)
+        self.assertIn('/Delete /TN $TaskName /F', text)
+        self.assertIn('ALBUM_VISUALLY_CONFIRMED_SENT', text)
+        self.assertIn('canary-reconcile-sent', text)
+        self.assertIn('telegram_send_performed = $false', text)
+        self.assertNotIn('post-now', text.lower())
+        self.assertLess(text.index('/Delete /TN $TaskName /F'), text.index('canary-reconcile-sent'))
+        self.assertIn('group_id = [long]$after.group_id', text)
+        self.assertNotIn('group_id = [int]$after.group_id', text)
+        panel=(root/'CONTROL_PANEL.ps1').read_text(encoding='utf-8-sig')
+        self.assertIn('84. Reconcile visually confirmed ambiguous canary', panel)
+        self.assertIn('RECONCILE_ALBUM_CANARY_VISUAL.ps1', panel)
+
+
+    def test_machine_json_is_legacy_codepage_safe_and_round_trips_unicode(self):
+        payload={"group_id":-1004428425263,"group_name":"Findon C@ckFlatsâ™§ C3TBC","selected":32}
+        text=_json_text(payload,machine_safe=True)
+        # Windows PowerShell 5.1 may capture native output through cp1252.
+        text.encode("cp1252")
+        self.assertIn("\\u2667",text)
+        self.assertEqual(json.loads(text),payload)
+
+    def test_visual_reconcile_uses_64bit_telegram_group_id(self):
+        text=(Path(__file__).parents[1]/'RECONCILE_ALBUM_CANARY_VISUAL.ps1').read_text(encoding='utf-8-sig')
+        self.assertIn('group_id = [long]$after.group_id', text)
+        self.assertNotIn('group_id = [int]$after.group_id', text)
+        self.assertIn('ExpectedJobId', text)
+
+    def test_admin_bot_managed_startup_uses_memory_session_and_readiness_handshake(self):
+        root=Path(__file__).parents[1]
+        admin=(root/'smart_autoposter'/'admin_bot.py').read_text(encoding='utf-8')
+        service=(root/'smart_autoposter'/'service.py').read_text(encoding='utf-8')
+        settings=(root/'smart_autoposter'/'settings.py').read_text(encoding='utf-8')
+        self.assertIn('admin_bot_persist_session', settings)
+        self.assertIn('else None', admin)
+        self.assertIn('wait_until_ready', admin)
+        self.assertIn('await controller.wait_until_ready(timeout_seconds=30)', service)
+        self.assertIn('Configured Telegram Admin Bot failed managed startup', service)
+
+    def test_admin_bot_emits_watchdog_heartbeat_for_unattended_control(self):
+        text=(Path(__file__).parents[1]/'smart_autoposter'/'admin_bot.py').read_text(encoding='utf-8')
+        self.assertIn('heartbeat("admin_bot", "ok"', text)
+        self.assertIn('heartbeat("admin_bot", "stopped"', text)
+        go=(Path(__file__).parents[1]/'GO_LIVE.ps1').read_text(encoding='utf-8-sig')
+        self.assertIn('--require admin_bot', go)
 
     def test_master_updater_contains_hash_verification_and_target_guard(self):
         text=(Path(__file__).parents[1]/'master_updater'/'APPLY_UPDATE.ps1').read_text(encoding='utf-8')
@@ -329,6 +417,34 @@ class V30PlatformTests(unittest.TestCase):
         self.assertNotIn("(^|\\)\\.\\.(\\|$)", text)
         rb=(Path(__file__).parents[1]/'master_updater'/'ROLLBACK_LAST_UPDATE.ps1').read_text(encoding='utf-8')
         self.assertIn('Database rollback complete',rb); self.assertIn('database_path',rb)
+
+    def test_master_updater_uses_local_retryable_rollback_storage(self):
+        root=Path(__file__).parents[1]
+        apply=(root/'master_updater'/'APPLY_UPDATE.ps1').read_text(encoding='utf-8')
+        rollback=(root/'master_updater'/'ROLLBACK_LAST_UPDATE.ps1').read_text(encoding='utf-8')
+        self.assertIn('LOCALAPPDATA', apply)
+        self.assertIn('update_backups', apply)
+        self.assertIn('Copy-ItemRetry', apply)
+        self.assertIn('Invoke-PythonRetry', apply)
+        self.assertIn('Copy-ItemRetry', rollback)
+        self.assertIn('Invoke-PythonRetry', rollback)
+        self.assertIn('sourceErrors', apply)
+        self.assertIn('continuing to database rollback', apply)
+        self.assertIn('sourceErrors', rollback)
+        self.assertIn('database rollback will still be attempted', rollback)
+
+    def test_recovery_doctor_is_read_only_and_checks_sqlite_directly(self):
+        root=Path(__file__).parents[1]
+        doctor=(root/'RECOVERY_DOCTOR.ps1').read_text(encoding='utf-8-sig')
+        self.assertIn('RECOVERY DOCTOR (READ ONLY)', doctor)
+        self.assertIn('PRAGMA quick_check', doctor)
+        self.assertIn('PRAGMA integrity_check', doctor)
+        self.assertIn('PRAGMA foreign_key_check', doctor)
+        self.assertNotIn('DELETE FROM', doctor.upper())
+        self.assertNotIn('UPDATE destinations', doctor)
+        panel=(root/'CONTROL_PANEL.ps1').read_text(encoding='utf-8-sig')
+        self.assertIn("82. Recovery doctor (read-only)", panel)
+        self.assertIn("RECOVERY_DOCTOR.ps1", panel)
 
 
 if __name__=='__main__': unittest.main()

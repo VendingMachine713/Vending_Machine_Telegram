@@ -1,4 +1,4 @@
-$ErrorActionPreference = "SilentlyContinue"
+﻿$ErrorActionPreference = "SilentlyContinue"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Vm = Join-Path $Root "VM.ps1"
 $LogDir = Join-Path $Root "shared\logs\VM_Core"

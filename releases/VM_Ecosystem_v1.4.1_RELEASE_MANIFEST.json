@@ -1,0 +1,62 @@
+﻿{
+  "release": "VM_Ecosystem_v1.4.1",
+  "base_release": "VM_Ecosystem_v1.4.0",
+  "platform_version": "1.4.1",
+  "delivery_model": "incremental_direct_drop",
+  "files": [
+    "APPLY_RELATIONSHIP_CLEANUP.bat",
+    "APPLY_RELATIONSHIP_CLEANUP.ps1",
+    "CHANGELOG_VM_PLATFORM.md",
+    "INSTALL_VM_ECOSYSTEM_v1.4.1.ps1",
+    "INSTALL_VM_ECOSYSTEM_v1.4.1_FROM_CMD.bat",
+    "README_VM_PLATFORM.md",
+    "VM_CONTROL.bat",
+    "VM_PROJECT.json",
+    "docs/VM_1_4_1_MAINTENANCE.md",
+    "pyproject.toml",
+    "releases/VM_Ecosystem_v1.4.1_RELEASE_MANIFEST.json",
+    "shared/vm_core/__init__.py",
+    "shared/vm_core/cli.py",
+    "shared/vm_core/doctor.py",
+    "shared/vm_core/git_audit.py",
+    "shared/vm_core/guard_engine.py",
+    "shared/vm_core/health.py",
+    "shared/vm_core/relationship_cleanup.py",
+    "shared/vm_core/support.py",
+    "shared/vm_core/validation.py",
+    "tests/test_v141_guard_window.py",
+    "tests/test_v141_installer_contract.py",
+    "tests/test_v141_installer_policy.py",
+    "tests/test_v141_maintenance.py",
+    "tests/test_v141_release_hardening.py",
+    "tools/repair_smart_autoposter_local.py"
+  ],
+  "test_gate": {
+    "platform": 55,
+    "Admin_Command_Centre": 8,
+    "Universal_Search": 1,
+    "VM_Guard": 1,
+    "total": 65
+  },
+  "live_findings_addressed": [
+    "Smart Auto Poster missing GO_LIVE.ps1",
+    "Smart Auto Poster missing master_updater/APPLY_UPDATE.ps1",
+    "Smart Auto Poster stale hard-coded control-panel version",
+    "VM Guard historical warning burst remained open after recovery"
+  ],
+  "safety": {
+    "contains_env_values": false,
+    "contains_sessions": false,
+    "contains_live_databases": false,
+    "replaces_smart_autoposter_source": false,
+    "auto_activates_smart_autoposter": false,
+    "telegram_send": false,
+    "canary_enqueue": false,
+    "smart_autoposter_repair_local_sources_only": true,
+    "smart_autoposter_repair_exact_tests_plus_full_suite": true,
+    "smart_autoposter_repair_rollback_on_failure": true,
+    "relationship_nested_cleanup_in_installer": "preview_only",
+    "relationship_cleanup_separate_explicit_approval": true,
+    "critical_install_failure_rollback": true
+  }
+}

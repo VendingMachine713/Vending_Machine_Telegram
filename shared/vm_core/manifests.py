@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 from dataclasses import dataclass, asdict
 from pathlib import Path
 import json
@@ -140,10 +140,11 @@ def inspect_bot(bot_dir: Path) -> BotInfo:
         for p in bot_dir.rglob("*.session")
         if p.is_file()
     )[:100]
+    ignored_parts = {".venv","venv","env","__pycache__","site-packages",".git"}
     tests = sorted(
         str(p.relative_to(bot_dir))
         for p in bot_dir.rglob("test_*.py")
-        if p.is_file()
+        if p.is_file() and not any(part.lower() in ignored_parts for part in p.relative_to(bot_dir).parts)
     )[:200]
     requirements = "requirements.txt" if (bot_dir / "requirements.txt").is_file() else None
     pyproject = "pyproject.toml" if (bot_dir / "pyproject.toml").is_file() else None
@@ -221,7 +222,7 @@ def _generated_manifest(bot: BotInfo) -> dict[str, Any]:
         "pyproject": bot.pyproject,
         "databases": bot.databases,
         "tests": bot.test_files,
-        "vm_core": {"compatible": True, "minimum_version": "1.1.0"},
+        "vm_core": {"compatible": True, "minimum_version": "1.4.0"},
     }
 
 def create_missing_bot_manifests(root: Path | None = None, *, write: bool = False) -> list[dict[str, Any]]:

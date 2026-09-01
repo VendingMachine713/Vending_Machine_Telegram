@@ -1,5 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
+from . import __version__
 import asyncio
 import json
 from datetime import datetime, timezone
@@ -38,6 +39,7 @@ class AutoPosterService:
             poll_seconds=self.poll_seconds,
             timezone_name=settings.timezone,
             min_send_gap_seconds=settings.min_send_gap_seconds,
+            send_timeout_seconds=settings.send_timeout_seconds,
             safety=self.safety,
             notifier=self.notifier,
         )
@@ -159,16 +161,24 @@ class AutoPosterService:
         if not self.settings.admin_bot_enabled:
             print("[ADMIN BOT] Disabled (set ADMIN_BOT_TOKEN + ADMIN_USER_IDS to enable).")
             return None
+        from .admin_bot import TelegramAdminController
+        controller = TelegramAdminController(self.db, self.settings, self.safety)
+        task = await controller.start_background()
+        print("[ADMIN BOT] Telegram control centre connecting...")
         try:
-            from .admin_bot import TelegramAdminController
-            controller = TelegramAdminController(self.db, self.settings, self.safety)
-            task = await controller.start_background()
-            print("[ADMIN BOT] Telegram control centre starting.")
-            return task
+            await controller.wait_until_ready(timeout_seconds=30)
         except Exception as exc:
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except BaseException:
+                    pass
             self.db.event("ERROR", "admin_bot_start_failed", str(exc)[:800])
             self.notifier.emit("IMPORTANT", "Admin bot failed to start", str(exc)[:1000], dedupe_key="admin-bot-start-failed", dedupe_window_seconds=3600)
-            return None
+            raise RuntimeError(f"Configured Telegram Admin Bot failed managed startup: {exc}") from exc
+        print("[ADMIN BOT] Telegram control centre connected and heartbeat verified.")
+        return task
 
     async def run(self):
         problems = validate(self.db)
@@ -185,6 +195,23 @@ class AutoPosterService:
         recovered = self.worker.recover_interrupted_sends()
         if recovered:
             print(f"[RECOVERY] {recovered} interrupted send(s) marked UNCERTAIN")
+        # V5 startup hygiene is deliberately narrow: it suppresses only rows that
+        # can be proven to have never crossed the Telegram send boundary.
+        from .queue_hygiene import apply_queue_hygiene, install_active_group_guard
+        hygiene = apply_queue_hygiene(self.db, actor="service_startup_v5")
+        if hygiene.get("applied"):
+            print(f"[RECOVERY] V5 safely suppressed {hygiene['applied']} redundant unsent queue row(s)")
+        if hygiene.get("review_count"):
+            self.notifier.emit("IMPORTANT", "Queue evidence needs review",
+                               f"{hygiene['review_count']} overlap row(s) could not be safely reconciled automatically.",
+                               dedupe_key="v5-queue-overlap-review", dedupe_window_seconds=3600)
+        guard = install_active_group_guard(self.db)
+        if guard.get("installed"):
+            print("[SAFETY] V5 database one-unresolved-post-per-group guard active")
+        else:
+            self.notifier.emit("IMPORTANT", "Anti-spam DB guard pending",
+                               "Database uniqueness guard is waiting for ambiguous queue overlap review.",
+                               dedupe_key="v5-db-guard-pending", dedupe_window_seconds=3600)
         if not any(x.get("authorized") for x in auth.values()):
             raise RuntimeError("No authorized Telegram user sessions")
 
@@ -192,7 +219,7 @@ class AutoPosterService:
         self.watchdog.beat("scheduler", "idle")
         self.watchdog.beat("worker", "idle")
         self.admin_task = await self._start_admin()
-        print("[RUNNING] Smart Auto Poster V3.0 active (scheduler + worker + recovery + watchdog). Ctrl+C to stop.")
+        print(f"[RUNNING] Smart Auto Poster V{__version__} active (scheduler + worker + recovery + watchdog). Ctrl+C to stop.")
         loop = asyncio.get_running_loop()
         last_schedule = 0.0
         last_safety = 0.0

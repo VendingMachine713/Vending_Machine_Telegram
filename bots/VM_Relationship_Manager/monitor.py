@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import logging
@@ -33,12 +33,27 @@ class TelegramMonitor:
             retry_delay=5,
         )
         self.ready = asyncio.Event()
+        self.self_user_id: int | None = None
         self._bootstrap_lock = asyncio.Lock()
         self._bootstrap_task: asyncio.Task | None = None
 
     async def start(self):
-        await self.client.start(phone=self.settings.phone)
+        # Session-first authentication: an already-authorised Telethon session
+        # does not need the account phone number on every startup.
+        await self.client.connect()
+        if not await self.client.is_user_authorized():
+            if not self.settings.phone:
+                raise RuntimeError(
+                    "Telegram monitoring session is not authorised and TELEGRAM_PHONE is not configured. "
+                    "Re-authenticate the session or restore TELEGRAM_PHONE before retrying."
+                )
+            await self.client.start(phone=self.settings.phone)
         me = await self.client.get_me()
+        self.self_user_id = me.id
+        self.engine.db.set_meta("monitor_self_user_id", str(me.id))
+        # Never treat the authorised monitoring account as one of its own CRM contacts.
+        if self.engine.db.one("SELECT 1 FROM contacts WHERE telegram_id=?", (me.id,)):
+            self.engine.privacy.set_excluded(me.id, True, "monitoring account self-record")
         log.info(
             "Telethon monitor authorised as %s (%s)",
             getattr(me, "username", None),
@@ -51,6 +66,10 @@ class TelegramMonitor:
             try:
                 sender = await event.get_sender()
                 if not isinstance(sender, User) or sender.bot:
+                    return
+                if self.self_user_id is not None and sender.id == self.self_user_id:
+                    return
+                if self.engine.privacy.is_excluded(sender.id):
                     return
 
                 chat = await event.get_chat()
@@ -68,8 +87,60 @@ class TelegramMonitor:
                     chat_title=chat_title,
                     occurred_at=event.date,
                 )
+
+                if getattr(event, "is_private", False):
+                    self.engine.record_private_interaction(
+                        telegram_id=sender.id,
+                        chat_id=chat_id,
+                        message_id=event.id,
+                        direction="incoming",
+                        occurred_at=event.date,
+                    )
             except Exception:
                 log.exception("Failed processing Telegram event")
+
+        @self.client.on(events.NewMessage(outgoing=True))
+        async def outgoing_handler(event):
+            try:
+                if not getattr(event, "is_private", False):
+                    return
+                chat = await event.get_chat()
+                if not isinstance(chat, User) or chat.bot:
+                    return
+                if self.engine.privacy.is_excluded(chat.id):
+                    return
+                chat_id = getattr(event, "chat_id", None)
+                if chat_id is None:
+                    return
+                # Seed identity if this is a private contact not yet known, then
+                # record direction/timing metadata only. Message content is not stored.
+                self.engine.upsert_identity(
+                    telegram_id=chat.id,
+                    username=getattr(chat, "username", None),
+                    display_name=_display_name(chat),
+                    observed_at=event.date,
+                    chat_id=chat_id,
+                    chat_title=getattr(chat, "username", None) or _display_name(chat),
+                    source="private_outgoing",
+                )
+                # Private outgoing messages are genuine relationship activity too.
+                self.engine.upsert_interaction(
+                    telegram_id=chat.id,
+                    username=getattr(chat, "username", None),
+                    display_name=_display_name(chat),
+                    chat_id=chat_id,
+                    chat_title=getattr(chat, "username", None) or _display_name(chat),
+                    occurred_at=event.date,
+                )
+                self.engine.record_private_interaction(
+                    telegram_id=chat.id,
+                    chat_id=chat_id,
+                    message_id=event.id,
+                    direction="outgoing",
+                    occurred_at=event.date,
+                )
+            except Exception:
+                log.exception("Failed processing outgoing private Telegram event")
 
         # Populate useful existing contacts in the background without blocking
         # the live event listener. Historical bootstrap seeds identities and
@@ -105,6 +176,8 @@ class TelegramMonitor:
 
         if not isinstance(entity, User) or entity.bot:
             return None
+        if self.engine.privacy.is_excluded(entity.id):
+            return self.engine.db.one("SELECT * FROM contacts WHERE telegram_id=?", (entity.id,))
 
         row = self.engine.upsert_identity(
             telegram_id=entity.id,
@@ -126,12 +199,26 @@ class TelegramMonitor:
         self,
         max_dialogs: int = 60,
         messages_per_dialog: int = 20,
+        force: bool = False,
     ):
         """Seed identities from accessible dialogs/recent history.
 
         This is deliberately conservative to reduce Telegram API load. It can be
         run again manually from the admin bot with /rescan.
         """
+        if not force:
+            last = self.engine.db.one(
+                "SELECT created_at FROM bot_health WHERE component='contact_bootstrap' AND status='ok' ORDER BY id DESC LIMIT 1"
+            )
+            if last:
+                try:
+                    age = datetime.now(timezone.utc) - datetime.fromisoformat(last["created_at"])
+                    if age.total_seconds() < 21600:
+                        log.info("Relationship bootstrap skipped: successful refresh was less than 6 hours ago")
+                        return {"dialogs": 0, "contacts": 0, "status": "recent"}
+                except Exception:
+                    pass
+
         if not self.ready.is_set():
             try:
                 await asyncio.wait_for(self.ready.wait(), timeout=60)
@@ -164,7 +251,9 @@ class TelegramMonitor:
                     )
 
                     # Private-user dialogs can be seeded immediately.
-                    if isinstance(entity, User) and not entity.bot:
+                    if (isinstance(entity, User) and not entity.bot
+                            and entity.id != self.self_user_id
+                            and not self.engine.privacy.is_excluded(entity.id)):
                         self.engine.upsert_identity(
                             telegram_id=entity.id,
                             username=getattr(entity, "username", None),
@@ -183,6 +272,10 @@ class TelegramMonitor:
                         ):
                             sender = await message.get_sender()
                             if not isinstance(sender, User) or sender.bot:
+                                continue
+                            if self.self_user_id is not None and sender.id == self.self_user_id:
+                                continue
+                            if self.engine.privacy.is_excluded(sender.id):
                                 continue
 
                             observed_at = message.date or datetime.now(timezone.utc)
@@ -230,6 +323,10 @@ class TelegramMonitor:
                     "Relationship bootstrap complete: dialogs=%s contacts=%s",
                     dialogs_scanned,
                     len(seeded_ids),
+                )
+                self.engine.db.execute(
+                    "INSERT INTO bot_health(component,status,details,created_at) VALUES ('contact_bootstrap','ok',?,?)",
+                    (f"dialogs={dialogs_scanned} contacts={len(seeded_ids)}", datetime.now(timezone.utc).isoformat()),
                 )
 
         return {"dialogs": dialogs_scanned, "contacts": len(seeded_ids)}

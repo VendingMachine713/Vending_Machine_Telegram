@@ -1,4 +1,4 @@
-$TaskName = 'VendingMachine Smart Auto Poster V2'
+﻿$TaskName = 'VendingMachine Smart Auto Poster V2'
 $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($null -eq $task) {
     Write-Host "[OK] Auto-start task is not installed." -ForegroundColor Green

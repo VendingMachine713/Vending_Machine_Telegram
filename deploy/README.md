@@ -1,4 +1,4 @@
-# Optional Deployment Scaffolding
+﻿# Optional Deployment Scaffolding
 
 These files are optional and are not used by the Windows installer.
 

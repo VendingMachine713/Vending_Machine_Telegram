@@ -1,1 +1,1 @@
-"""Shared Vending Machine platform modules."""
+# Vending Machine Telegram shared package.

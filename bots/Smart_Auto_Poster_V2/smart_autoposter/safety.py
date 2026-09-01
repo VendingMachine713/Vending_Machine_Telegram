@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -69,12 +69,16 @@ class SafetyController:
         with self.db.connect() as con:
             rows = con.execute(
                 """SELECT event_type,COUNT(*) AS n FROM events
-                   WHERE created_at>=? AND event_type IN ('send_success','send_failure')
+                   WHERE created_at>=? AND event_type IN ('send_success','send_failure','uncertain_send')
                    GROUP BY event_type""",
                 (cutoff,),
             ).fetchall()
         counts = {r["event_type"]: int(r["n"]) for r in rows}
-        return counts.get("send_success", 0), counts.get("send_failure", 0)
+        # Ambiguous Telegram acknowledgements are fail-closed queue outcomes and
+        # should contribute to the breaker. Expected timing/back-pressure events
+        # are recorded under their own event types by Worker and are excluded.
+        risky = counts.get("send_failure", 0) + counts.get("uncertain_send", 0)
+        return counts.get("send_success", 0), risky
 
     def status(self) -> SafetyState:
         meta = self._meta()
@@ -84,9 +88,23 @@ class SafetyController:
         until = self._parse(until_raw)
         paused = manual or bool(until and until > datetime.now(timezone.utc))
         successes, failures = self.counts()
+        # V4 adaptive recovery: an automatic breaker hold may release as soon as
+        # the rolling risk window itself is healthy again. Manual pauses are never
+        # auto-cleared. This avoids a stale 30-minute hold after old/misclassified
+        # outcomes have already aged out, while retaining fail-closed behavior when
+        # the threshold/ratio is still genuinely unsafe.
+        if paused and not manual and until:
+            total = successes + failures
+            ratio = (failures / total) if total else 0.0
+            risk_still_high = failures >= self.failure_threshold and total > 0 and ratio >= self.failure_ratio
+            if not risk_still_high:
+                self._set_meta(paused_until=None, paused_at=None, reason=None)
+                self.db.event("INFO", "safety_auto_recovered",
+                              f"Automatic breaker released after rolling risk recovered ({failures}/{total})")
+                return SafetyState(False, None, None, False, successes, failures)
         if not paused and until_raw:
             # Expired automatic pause: clear stale pause metadata.
-            self._set_meta(paused_until=None, reason=None)
+            self._set_meta(paused_until=None, paused_at=None, reason=None)
             until_raw = None
             reason = None
         return SafetyState(paused, reason, until_raw if paused else None, manual, successes, failures)
@@ -94,16 +112,16 @@ class SafetyController:
     def pause(self, reason: str, minutes: int | None = None, *, manual: bool = False) -> SafetyState:
         reason = (reason or "outbound paused").strip()[:500]
         if manual and minutes is None:
-            self._set_meta(manual_pause="1", paused_until=None, reason=reason)
+            self._set_meta(manual_pause="1", paused_until=None, paused_at=utcnow(), reason=reason)
         else:
             duration = max(1, int(minutes or self.pause_minutes))
             until = (datetime.now(timezone.utc) + timedelta(minutes=duration)).isoformat(timespec="seconds")
-            self._set_meta(manual_pause="0", paused_until=until, reason=reason)
+            self._set_meta(manual_pause="0", paused_until=until, paused_at=utcnow(), reason=reason)
         self.db.event("WARNING", "safety_pause", reason)
         return self.status()
 
     def resume(self, reason: str = "manual resume") -> SafetyState:
-        self._set_meta(manual_pause=None, paused_until=None, reason=None)
+        self._set_meta(manual_pause=None, paused_until=None, paused_at=None, reason=None)
         self.db.event("INFO", "safety_resume", reason[:500])
         return self.status()
 
@@ -119,7 +137,7 @@ class SafetyController:
         if ratio < self.failure_ratio:
             return current
         reason = (
-            f"Circuit breaker: {failures}/{total} sends failed in the last "
-            f"{self.window_minutes} minute(s) ({ratio:.0%} failure rate)"
+            f"Circuit breaker: {failures}/{total} recent send outcomes were failed/uncertain in the last "
+            f"{self.window_minutes} minute(s) ({ratio:.0%} risk rate)"
         )
         return self.pause(reason, self.pause_minutes, manual=False)

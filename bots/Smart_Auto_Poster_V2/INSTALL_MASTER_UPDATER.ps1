@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $BotRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $MasterRoot = (Resolve-Path (Join-Path $BotRoot '..\..')).Path
 $Source = Join-Path $BotRoot 'master_updater'

@@ -1,0 +1,10 @@
+﻿{
+  "rates": [
+    {
+      "source": "Universal_Search",
+      "metric": "searches_24h",
+      "cost_per_unit": 0.0,
+      "note": "Replace 0.0 only if you later use a paid search/API provider. VM Intelligence never invents prices."
+    }
+  ]
+}

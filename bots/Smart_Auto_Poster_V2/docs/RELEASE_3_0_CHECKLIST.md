@@ -1,4 +1,4 @@
-# Smart Auto Poster V3.0 release checklist
+﻿# Smart Auto Poster V3.0 release checklist
 
 Automated release gate:
 
@@ -11,7 +11,7 @@ Automated release gate:
 7. Validate update manifest payload membership + SHA-256 hashes.
 8. Scan release package for `.env`, `.session`, database/user-content and known secret patterns.
 9. Apply the **exact final ZIP** to a clean legacy baseline and repeat tests/integrity.
-10. On the user's PC: Health → Validate → Account identities.
+10. On the user's PC: Health â†’ Validate â†’ Account identities.
 11. `LIVE_TEST` dry run must select exactly the intended canary destination.
 12. Send one controlled queue job; verify `sent` history.
 13. If using Telegram Admin Control Centre, verify one private authorized-admin interaction and one unauthorized/read-only denial path.

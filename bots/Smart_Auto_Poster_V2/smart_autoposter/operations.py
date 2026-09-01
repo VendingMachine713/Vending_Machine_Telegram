@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .db import Database, utcnow
 
-ACTIVE_QUEUE_STATUSES = ("pending", "retry", "sending", "deferred")
+ACTIVE_QUEUE_STATUSES = ("pending", "retry", "processing", "sending", "deferred")
 FINAL_QUEUE_STATUSES = ("sent", "failed", "cancelled", "expired", "quarantined")
 CAMPAIGN_STATES = {"draft", "ready", "active", "paused", "archived"}
 CONTENT_STATES = {"ready", "disabled", "archived", "rejected"}
@@ -95,19 +95,19 @@ def queue_counts(db: Database) -> dict[str, int]:
 
 def queue_capacity(db: Database) -> dict[str, int]:
     with db.connect() as con:
-        total = con.execute("SELECT COUNT(*) FROM queue WHERE status IN ('pending','retry','sending','deferred')").fetchone()[0]
+        total = con.execute("SELECT COUNT(*) FROM queue WHERE status IN ('pending','retry','processing','sending','deferred')").fetchone()[0]
         max_campaign = con.execute('''SELECT COALESCE(MAX(n),0) FROM (
-                                      SELECT COUNT(*) n FROM queue WHERE status IN ('pending','retry','sending','deferred') GROUP BY campaign_id)''').fetchone()[0]
+                                      SELECT COUNT(*) n FROM queue WHERE status IN ('pending','retry','processing','sending','deferred') GROUP BY campaign_id)''').fetchone()[0]
         max_destination = con.execute('''SELECT COALESCE(MAX(n),0) FROM (
-                                         SELECT COUNT(*) n FROM queue WHERE status IN ('pending','retry','sending','deferred') GROUP BY group_id)''').fetchone()[0]
+                                         SELECT COUNT(*) n FROM queue WHERE status IN ('pending','retry','processing','sending','deferred') GROUP BY group_id)''').fetchone()[0]
     return {"active_total": int(total), "max_campaign": int(max_campaign), "max_destination": int(max_destination)}
 
 
 def enforce_queue_limits(db: Database, *, add_count: int, campaign_id: str, group_ids: list[int],
                          max_queue_size: int, max_pending_per_campaign: int, max_pending_per_destination: int):
     with db.connect() as con:
-        total = con.execute("SELECT COUNT(*) FROM queue WHERE status IN ('pending','retry','sending','deferred')").fetchone()[0]
-        camp = con.execute("SELECT COUNT(*) FROM queue WHERE campaign_id=? AND status IN ('pending','retry','sending','deferred')", (campaign_id,)).fetchone()[0]
+        total = con.execute("SELECT COUNT(*) FROM queue WHERE status IN ('pending','retry','processing','sending','deferred')").fetchone()[0]
+        camp = con.execute("SELECT COUNT(*) FROM queue WHERE campaign_id=? AND status IN ('pending','retry','processing','sending','deferred')", (campaign_id,)).fetchone()[0]
         if total + add_count > max_queue_size:
             raise RuntimeError(f"Queue capacity protection: {total}+{add_count} would exceed MAX_QUEUE_SIZE={max_queue_size}")
         if camp + add_count > max_pending_per_campaign:
@@ -115,7 +115,7 @@ def enforce_queue_limits(db: Database, *, add_count: int, campaign_id: str, grou
         if group_ids:
             placeholders = ",".join("?" for _ in group_ids)
             rows = con.execute(f'''SELECT group_id,COUNT(*) n FROM queue WHERE group_id IN ({placeholders})
-                                  AND status IN ('pending','retry','sending','deferred') GROUP BY group_id''', group_ids).fetchall()
+                                  AND status IN ('pending','retry','processing','sending','deferred') GROUP BY group_id''', group_ids).fetchall()
             counts = {int(r["group_id"]): int(r["n"]) for r in rows}
             bad = [gid for gid in group_ids if counts.get(gid, 0) + 1 > max_pending_per_destination]
             if bad:
@@ -132,24 +132,33 @@ def manage_job(db: Database, job_id: int, action: str, *, actor: str = "local", 
         if action == "cancel":
             if row["status"] == "sent":
                 raise RuntimeError("Cannot cancel a sent job")
-            con.execute("UPDATE queue SET status='cancelled',resolved_at=?,updated_at=? WHERE id=?", (now, now, job_id))
+            con.execute("""UPDATE queue SET status='cancelled',resolved_at=?,phase='cancelled',phase_percent=100,
+                        phase_detail='cancelled by operator',phase_updated_at=?,updated_at=? WHERE id=?""", (now, now, now, job_id))
         elif action == "retry":
-            if row["status"] not in {"failed", "uncertain", "cancelled", "quarantined", "deferred"}:
+            if row["status"] == "uncertain":
+                raise RuntimeError("UNCERTAIN jobs cannot use generic retry; reconcile Telegram history with uncertain-reconcile")
+            if row["status"] not in {"failed", "cancelled", "quarantined", "deferred"}:
                 raise RuntimeError(f"Job status {row['status']} is not eligible for retry")
-            con.execute("UPDATE queue SET status='retry',due_at=?,last_error='manual retry requested',error_kind=NULL,resolved_at=NULL,updated_at=? WHERE id=?",
-                        (now, now, job_id))
+            con.execute("""UPDATE queue SET status='retry',due_at=?,last_error='manual retry requested',error_kind=NULL,resolved_at=NULL,
+                        pass_no=pass_no+1,phase='retry_wait',phase_percent=35,phase_detail='manual retry requested',phase_updated_at=?,updated_at=? WHERE id=?""",
+                        (now, now, now, job_id))
         elif action == "defer":
             if row["status"] == "sent":
                 raise RuntimeError("Cannot defer a sent job")
             if not minutes or minutes < 1:
                 raise ValueError("defer minutes must be >=1")
             due = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat(timespec="seconds")
-            con.execute("UPDATE queue SET status='deferred',due_at=?,last_error='manually deferred',error_kind='manual_defer',updated_at=? WHERE id=?",
-                        (due, now, job_id))
+            con.execute("""UPDATE queue SET status='deferred',due_at=?,last_error='manually deferred',error_kind='manual_defer',
+                        pass_no=pass_no+1,deferral_count=deferral_count+1,phase='deferred',phase_percent=35,
+                        phase_detail='manually deferred',phase_updated_at=?,updated_at=? WHERE id=?""",
+                        (due, now, now, job_id))
         elif action == "mark-sent":
-            if row["status"] not in {"uncertain", "failed"}:
-                raise RuntimeError("mark-sent is only for uncertain/failed jobs")
-            con.execute("UPDATE queue SET status='sent',last_error='manually resolved as sent',resolved_at=?,updated_at=? WHERE id=?", (now, now, job_id))
+            if row["status"] == "uncertain":
+                raise RuntimeError("UNCERTAIN jobs require evidence-backed uncertain-reconcile")
+            if row["status"] != "failed":
+                raise RuntimeError("mark-sent is only for failed jobs")
+            con.execute("""UPDATE queue SET status='sent',last_error='manually resolved as sent',resolved_at=?,phase='sent',phase_percent=100,
+                        phase_detail='manually resolved as sent',phase_updated_at=?,updated_at=? WHERE id=?""", (now, now, now, job_id))
         else:
             raise ValueError("Unknown job action")
     audit(db, actor, f"job_{action}", "queue_job", str(job_id), previous_status=row["status"], minutes=minutes)
@@ -157,11 +166,69 @@ def manage_job(db: Database, job_id: int, action: str, *, actor: str = "local", 
         return dict(con.execute("SELECT * FROM queue WHERE id=?", (job_id,)).fetchone())
 
 
+
+def retry_failed_safely(db: Database, *, campaign_id: str | None = None, actor: str = "local") -> dict:
+    """Retry at most one failed row per destination without creating overlap.
+
+    UNCERTAIN rows are intentionally excluded. If a destination already has any
+    unresolved job, its historical FAILED rows remain untouched. This preserves
+    the V4 one-post-per-group invariant even when an operator uses bulk retry.
+    """
+    now = utcnow()
+    retried = 0
+    skipped_active = 0
+    skipped_older = 0
+    with db.connect() as con:
+        where = "WHERE status='failed'"
+        params: list[object] = []
+        if campaign_id:
+            where += " AND campaign_id=?"
+            params.append(campaign_id)
+        rows = con.execute(
+            f"SELECT id,group_id,campaign_id FROM queue {where} ORDER BY group_id,id DESC",
+            params,
+        ).fetchall()
+        seen: set[int] = set()
+        for row in rows:
+            gid = int(row["group_id"])
+            if gid in seen:
+                skipped_older += 1
+                continue
+            seen.add(gid)
+            active = con.execute(
+                """SELECT id FROM queue WHERE group_id=? AND id<>?
+                   AND status IN ('pending','retry','deferred','processing','sending','uncertain')
+                   ORDER BY id DESC LIMIT 1""",
+                (gid, int(row["id"])),
+            ).fetchone()
+            if active:
+                skipped_active += 1
+                continue
+            cur = con.execute(
+                """UPDATE queue SET status='retry',due_at=?,last_error='safe bulk retry requested',
+                   error_kind=NULL,resolved_at=NULL,pass_no=pass_no+1,phase='retry_wait',
+                   phase_percent=35,phase_detail='safe bulk retry requested',phase_updated_at=?,
+                   progress_current=NULL,progress_total=NULL,progress_unit=NULL,updated_at=?
+                   WHERE id=? AND status='failed'""",
+                (now, now, now, int(row["id"])),
+            )
+            retried += int(cur.rowcount or 0)
+    audit(db, actor, "retry_failed_safe", "campaign" if campaign_id else "queue", campaign_id,
+          retried=retried, skipped_active=skipped_active, skipped_older=skipped_older)
+    return {
+        "retried": retried,
+        "skipped_active": skipped_active,
+        "skipped_older_failed_rows": skipped_older,
+        "uncertain_retried": 0,
+    }
+
 def bulk_cancel_campaign(db: Database, campaign_id: str, *, actor: str = "local") -> int:
     now = utcnow()
     with db.connect() as con:
-        cur = con.execute("UPDATE queue SET status='cancelled',resolved_at=?,updated_at=? WHERE campaign_id=? AND status IN ('pending','retry','deferred')",
-                          (now, now, campaign_id))
+        cur = con.execute("""UPDATE queue SET status='cancelled',resolved_at=?,phase='cancelled',phase_percent=100,
+                          phase_detail='campaign queue cancelled',phase_updated_at=?,updated_at=?
+                          WHERE campaign_id=? AND status IN ('pending','retry','deferred')""",
+                          (now, now, now, campaign_id))
         n = cur.rowcount
     audit(db, actor, "campaign_queue_cancel", "campaign", campaign_id, jobs=n)
     return n
@@ -217,7 +284,7 @@ def operational_summary(db: Database, hours: int = 24) -> dict:
             COUNT(*) total FROM destinations''', (utcnow(),)).fetchone()
         errors = con.execute('''SELECT COALESCE(error_kind,'unknown') kind,COUNT(*) n FROM queue
                                 WHERE status='failed' AND updated_at>=? GROUP BY COALESCE(error_kind,'unknown') ORDER BY n DESC LIMIT 8''', (cutoff,)).fetchall()
-        active_queue = con.execute("SELECT COUNT(*) FROM queue WHERE status IN ('pending','retry','sending','deferred')").fetchone()[0]
+        active_queue = con.execute("SELECT COUNT(*) FROM queue WHERE status IN ('pending','retry','processing','sending','deferred')").fetchone()[0]
     sent = by_status.get("sent", 0)
     failed = by_status.get("failed", 0)
     attempts = sent + failed
@@ -290,13 +357,14 @@ def expire_ineligible_jobs(db: Database, *, now: str | None = None) -> int:
         cur = con.execute(
             '''UPDATE queue
                SET status='expired',error_kind='campaign_ineligible',
-                   last_error='campaign archived or end date passed',resolved_at=?,updated_at=?
+                   last_error='campaign archived or end date passed',resolved_at=?,phase='expired',phase_percent=100,
+                   phase_detail='campaign archived or end date passed',phase_updated_at=?,updated_at=?
                WHERE status IN ('pending','retry','deferred')
                  AND campaign_id IN (
                     SELECT campaign_id FROM campaigns
                     WHERE lifecycle_state='archived' OR (end_at IS NOT NULL AND end_at<?)
                  )''',
-            (now, now, now),
+            (now, now, now, now),
         )
         return cur.rowcount
 
@@ -331,7 +399,7 @@ def finalize_cycle_limited_campaigns(db: Database, *, actor: str = "system") -> 
         rows = con.execute("""SELECT campaign_id,max_cycles,completed_cycles FROM campaigns
                               WHERE lifecycle_state='active' AND enabled=1 AND max_cycles>0 AND completed_cycles>=max_cycles""").fetchall()
         for r in rows:
-            active = con.execute("SELECT COUNT(*) FROM queue WHERE campaign_id=? AND status IN ('pending','retry','sending','deferred')", (r['campaign_id'],)).fetchone()[0]
+            active = con.execute("SELECT COUNT(*) FROM queue WHERE campaign_id=? AND status IN ('pending','retry','processing','sending','deferred')", (r['campaign_id'],)).fetchone()[0]
             if active:
                 continue
             con.execute("UPDATE campaigns SET lifecycle_state='archived',enabled=0,updated_at=? WHERE campaign_id=?", (now, r['campaign_id']))

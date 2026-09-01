@@ -89,4 +89,3 @@ Write-Host "[8/8] Final status..."
 
 Write-Host ""
 Write-Host "[PASS] VM safe release completed."
-
