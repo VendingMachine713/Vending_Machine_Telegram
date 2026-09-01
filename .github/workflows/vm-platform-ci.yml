@@ -4,8 +4,12 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  test:
+  platform:
+    name: Platform validation
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,9 +19,42 @@ jobs:
           cache: "pip"
       - name: Install platform dev tools
         run: python -m pip install ruff
-      - name: Compile
-        run: python -m compileall -q shared vm.py
-      - name: Lint
-        run: ruff check shared tests vm.py
-      - name: Tests
+      - name: Compile platform
+        run: python -m compileall -q shared tests tools/ci vm.py
+      - name: Lint CI and repository validation code
+        run: ruff check tools/ci --output-format=github
+      - name: Platform tests
         run: python -m unittest discover -s tests -p "test_*.py" -v
+
+  bot-core:
+    name: Bot core tests (${{ matrix.bot }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        bot:
+          - Universal_Search
+          - VM_Guard
+          - Admin_Command_Centre
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile bot
+        working-directory: bots/${{ matrix.bot }}
+        run: python -m compileall -q .
+      - name: Run bot tests
+        working-directory: bots/${{ matrix.bot }}
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+
+  repository-health:
+    name: Repository health
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate repository metadata
+        run: python tools/ci/validate_repository.py
