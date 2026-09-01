@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "name": "Admin_Command_Centre",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "status": "existing",
   "classification": "CANONICAL",
   "entrypoint": "main.py",
@@ -28,6 +28,12 @@
       "VM_ADMIN_ALLOW_MUTATIONS"
     ]
   },
+  "capabilities": [
+    "platform_status",
+    "platform_health",
+    "service_lifecycle",
+    "smart_auto_poster_control"
+  ],
   "lifecycle": {
     "managed_by_vm": true,
     "auto_start": false,

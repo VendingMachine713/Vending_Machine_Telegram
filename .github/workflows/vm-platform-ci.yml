@@ -48,6 +48,21 @@ jobs:
         working-directory: bots/${{ matrix.bot }}
         run: python -m unittest discover -s tests -p "test_*.py" -v
 
+  smart-auto-poster-separation:
+    name: Smart Auto Poster admin separation
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile separation boundary
+        working-directory: bots/Smart_Auto_Poster_V2
+        run: python -m compileall -q smart_autoposter/settings.py tests/test_admin_separation.py
+      - name: Test embedded admin remains disabled
+        working-directory: bots/Smart_Auto_Poster_V2
+        run: python -m unittest tests.test_admin_separation -v
+
   repository-health:
     name: Repository health
     runs-on: windows-latest
