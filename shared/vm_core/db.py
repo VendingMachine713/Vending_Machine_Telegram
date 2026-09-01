@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Iterator, Any
 from .paths import project_root
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def utcnow() -> str:
@@ -123,6 +123,24 @@ class PlatformDB:
                 updated_at_utc TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS intelligence_recommendations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recommendation_key TEXT NOT NULL UNIQUE,
+                recommendation_type TEXT NOT NULL,
+                subject_type TEXT,
+                subject_id TEXT,
+                priority REAL NOT NULL DEFAULT 0,
+                confidence REAL NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'PROPOSED',
+                action TEXT NOT NULL,
+                rationale TEXT NOT NULL,
+                rule_id TEXT NOT NULL,
+                rule_version INTEGER NOT NULL DEFAULT 1,
+                evidence_json TEXT NOT NULL DEFAULT '{}',
+                created_at_utc TEXT NOT NULL,
+                updated_at_utc TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS destinations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 telegram_id TEXT UNIQUE,
@@ -178,6 +196,8 @@ class PlatformDB:
             CREATE INDEX IF NOT EXISTS idx_events_correlation ON events(correlation_id);
             CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status, severity, last_seen_utc);
             CREATE INDEX IF NOT EXISTS idx_signals_subject ON intelligence_signals(subject_type, subject_id, status);
+            CREATE INDEX IF NOT EXISTS idx_recommendations_status ON intelligence_recommendations(status, priority, updated_at_utc);
+            CREATE INDEX IF NOT EXISTS idx_recommendations_subject ON intelligence_recommendations(subject_type, subject_id, status);
             """)
             con.execute(
                 "INSERT OR IGNORE INTO migrations(version, applied_at_utc, description) VALUES(?,?,?)",
@@ -186,6 +206,10 @@ class PlatformDB:
             con.execute(
                 "INSERT OR IGNORE INTO migrations(version, applied_at_utc, description) VALUES(?,?,?)",
                 (2, utcnow(), "Structured events, incidents and VM intelligence signals"),
+            )
+            con.execute(
+                "INSERT OR IGNORE INTO migrations(version, applied_at_utc, description) VALUES(?,?,?)",
+                (3, utcnow(), "Evidence-governed VM Intelligence recommendations"),
             )
             con.execute(
                 "INSERT OR REPLACE INTO meta(key,value) VALUES('schema_version',?)",
@@ -343,6 +367,64 @@ class PlatformDB:
             query += " WHERE status=?"
             params.append(status.upper())
         query += " ORDER BY score DESC, confidence DESC, updated_at_utc DESC LIMIT ?"
+        params.append(max(1, limit))
+        with self.connect() as con:
+            return [dict(r) for r in con.execute(query, params)]
+
+    def upsert_recommendation(
+        self, recommendation_key: str, recommendation_type: str, action: str, rationale: str,
+        *, rule_id: str, rule_version: int = 1, subject_type: str | None = None,
+        subject_id: str | None = None, priority: float = 0, confidence: float = 0,
+        evidence: dict[str, Any] | None = None, status: str = "PROPOSED",
+    ) -> int:
+        """Create or refresh one explainable recommendation without duplicating it."""
+        allowed = {"PROPOSED", "BLOCKED", "ACCEPTED", "DISMISSED", "COMPLETED", "EXPIRED"}
+        normalized_status = status.upper()
+        if normalized_status not in allowed:
+            raise ValueError(f"unsupported recommendation status: {status}")
+        now = utcnow()
+        with self.connect() as con:
+            con.execute("""
+                INSERT INTO intelligence_recommendations(
+                    recommendation_key,recommendation_type,subject_type,subject_id,
+                    priority,confidence,status,action,rationale,rule_id,rule_version,
+                    evidence_json,created_at_utc,updated_at_utc
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(recommendation_key) DO UPDATE SET
+                    recommendation_type=excluded.recommendation_type,
+                    subject_type=excluded.subject_type,
+                    subject_id=excluded.subject_id,
+                    priority=excluded.priority,
+                    confidence=excluded.confidence,
+                    status=CASE
+                        WHEN intelligence_recommendations.status IN ('ACCEPTED','DISMISSED','COMPLETED')
+                        THEN intelligence_recommendations.status ELSE excluded.status END,
+                    action=excluded.action,
+                    rationale=excluded.rationale,
+                    rule_id=excluded.rule_id,
+                    rule_version=excluded.rule_version,
+                    evidence_json=excluded.evidence_json,
+                    updated_at_utc=excluded.updated_at_utc
+            """, (
+                recommendation_key, recommendation_type, subject_type, subject_id,
+                max(0.0, min(100.0, float(priority))),
+                max(0.0, min(1.0, float(confidence))), normalized_status,
+                action, rationale, rule_id, max(1, int(rule_version)),
+                json.dumps(evidence or {}, ensure_ascii=False), now, now,
+            ))
+            row = con.execute(
+                "SELECT id FROM intelligence_recommendations WHERE recommendation_key=?",
+                (recommendation_key,),
+            ).fetchone()
+            return int(row[0])
+
+    def recommendations(self, limit: int = 50, status: str | None = None) -> list[dict[str, Any]]:
+        query = "SELECT * FROM intelligence_recommendations"
+        params: list[Any] = []
+        if status:
+            query += " WHERE status=?"
+            params.append(status.upper())
+        query += " ORDER BY priority DESC, confidence DESC, updated_at_utc DESC LIMIT ?"
         params.append(max(1, limit))
         with self.connect() as con:
             return [dict(r) for r in con.execute(query, params)]
