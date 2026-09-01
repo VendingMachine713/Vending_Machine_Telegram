@@ -63,7 +63,10 @@ class Settings:
     auto_rescan_minutes: int
     daily_summary_hours: int
     weekly_summary_hours: int
-    # V2.4 unattended operations
+    # Legacy embedded-admin settings are retained temporarily for backwards
+    # compatibility with old local .env files and tests. They are intentionally
+    # ignored by the production service: Telegram administration now belongs to
+    # bots/Admin_Command_Centre only.
     admin_bot_token: str
     admin_user_ids: tuple[int, ...]
     admin_readonly_user_ids: tuple[int, ...]
@@ -155,14 +158,19 @@ class Settings:
 
     @property
     def admin_bot_enabled(self) -> bool:
-        return bool(self.admin_bot_token and (self.admin_user_ids or self.admin_readonly_user_ids) and self.api_id and self.api_hash)
+        """Embedded Smart Auto Poster admin bot is permanently disabled.
+
+        Telegram administration is owned by the standalone Admin Command Centre.
+        Keeping this property avoids breaking older code/tests while enforcing a
+        single runtime owner for the admin Telegram bot.
+        """
+        return False
 
     def ensure_dirs(self):
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self.config_csv.parent.mkdir(parents=True, exist_ok=True)
         Path(self.primary_session).parent.mkdir(parents=True, exist_ok=True)
         Path(self.secondary_session).parent.mkdir(parents=True, exist_ok=True)
-        Path(self.admin_bot_session).parent.mkdir(parents=True, exist_ok=True)
         self.media_cache_dir.mkdir(parents=True, exist_ok=True)
         self.backup_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
