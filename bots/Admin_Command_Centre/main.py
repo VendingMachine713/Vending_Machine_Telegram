@@ -7,7 +7,7 @@ def api_call(token,method,payload=None,timeout=60):
     with urllib.request.urlopen(req,timeout=timeout) as resp: return json.loads(resp.read().decode())
 def send_message(token,chat_id,text): return api_call(token,'sendMessage',{'chat_id':chat_id,'text':text[:4000]},30)
 def self_test():
-    cfg=config(); print('Admin Command Centre v0.2.0'); print('Token configured:',bool(cfg['token'])); print('Admin IDs configured:',bool(cfg['admin_ids'])); print('Mutations enabled:',cfg['allow_mutations']); return 0
+    cfg=config(); print('Admin Command Centre v0.3.0'); print('Token configured:',bool(cfg['token'])); print('Admin IDs configured:',bool(cfg['admin_ids'])); print('Mutations enabled:',cfg['allow_mutations']); return 0
 def main():
     if '--self-test' in sys.argv: return self_test()
     cfg=config()
