@@ -27,6 +27,8 @@ def collect_search_activity(root: Path | None = None) -> dict[str, Any]:
 
     shared = PlatformDB(root=root)
     shared.init()
+    with shared.connect() as dst:
+        dst.execute("UPDATE intelligence_signals SET status='INACTIVE',updated_at_utc=? WHERE signal_key LIKE 'search:activity_spike:%'", (datetime.now(timezone.utc).isoformat(),))
     now = datetime.now(timezone.utc)
     recent_cutoff = (now - timedelta(hours=24)).isoformat()
     baseline_start = (now - timedelta(days=8)).isoformat()
