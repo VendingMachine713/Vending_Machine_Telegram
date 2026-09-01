@@ -1,11 +1,16 @@
-# VM Platform v1.1.0
+# VM Platform v1.3.0
 
-The first consolidated productivity and automation foundation for the permanent `Vending_Machine_Telegram` project.
+The consolidated productivity, automation and intelligence foundation for the permanent `Vending_Machine_Telegram` project.
 
 ## Working capabilities
 
 - Bot discovery + manifests + machine-readable inventory
 - Shared platform SQLite database with migrations
+- Versioned structured event contract shared by all current bots
+- Shared incidents + intelligence signal persistence
+- Cross-bot VM Intelligence materialisation layer
+- Admin Command Centre `/intelligence` and `/brain` read-only intelligence view
+- Failure-isolated `BotEventPublisher` so telemetry cannot crash production bots
 - VM Doctor and safe structure inspection
 - Unified service status, dashboard and lifecycle preview/apply commands
 - Shared health protocol
@@ -27,6 +32,22 @@ The first consolidated productivity and automation foundation for the permanent 
 - Windows VM control panel
 - Persistent supervisor loop for unattended operation
 - Optional Docker Compose + Railway deployment scaffolding
+
+## VM Intelligence architecture
+
+All currently runnable bots publish operational evidence into VM Core through `shared.vm_core.publisher.BotEventPublisher`.
+
+The current integration publishes:
+
+- service lifecycle and heartbeat evidence
+- runtime incidents
+- VM Guard elevated-risk signals
+- Universal Search activity signals
+- existing shared service health / registry evidence
+
+VM Intelligence materialises explainable incidents and cross-bot signals from that evidence. It does not directly mutate bot-owned databases or perform operational actions. This keeps reasoning evidence-governed and allows future automation to add explicit authority gates.
+
+See `docs/VM_INTELLIGENCE.md` for the event contract and extension rules.
 
 ## Important safety defaults
 
@@ -57,12 +78,18 @@ or run:
 py vm.py dashboard
 ```
 
+From the Admin Command Centre, use:
+
+```text
+/intelligence
+/brain
+```
+
 ## Deep bot integration
 
-v1.0 deliberately does not rewrite unknown bot internals. Bots remain independently runnable. As each bot reaches its next milestone, shared adapters can replace duplicated infrastructure incrementally.
+VM Core does not replace bot-specific storage or proven operational logic. Each bot remains independently runnable. Shared adapters progressively centralise evidence, health, incidents and intelligence while preserving existing behaviour.
 
-
-## v1.1 live-project validation
+## Live-project validation
 
 Run one command:
 
@@ -72,5 +99,5 @@ py vm.py validate-all
 
 or choose **19. FULL PLATFORM VALIDATION + SUPPORT BUNDLE** in `VM_CONTROL.bat`.
 
-Reserved bot folders with no runnable code are now shown as `PLANNED`, not as failures.
+Reserved bot folders with no runnable code are shown as `PLANNED`, not as failures.
 Nested duplicate folders are compared by SHA-256 and never deleted automatically.
