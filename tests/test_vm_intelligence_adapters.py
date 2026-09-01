@@ -106,8 +106,11 @@ class VMIntelligenceAdapterTests(unittest.TestCase):
             source = self._autoposter_db(root)
             result = collect_autoposter_evidence(root)
             self.assertEqual(result["uncertain"], 1)
-            with sqlite3.connect(source) as con:
-                self.assertEqual(con.execute("SELECT status FROM queue WHERE id=7").fetchone()[0], "uncertain")
+            source_con = sqlite3.connect(source)
+            try:
+                self.assertEqual(source_con.execute("SELECT status FROM queue WHERE id=7").fetchone()[0], "uncertain")
+            finally:
+                source_con.close()
             db = PlatformDB(root=root)
             incident = db.incidents(5, "OPEN")[0]
             self.assertIn("UNCERTAIN", incident["summary"])
