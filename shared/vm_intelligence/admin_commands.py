@@ -80,7 +80,7 @@ def handle_intelligence_command(cmd,args,root):
     if cmd=="performance":
         return _clip("VM PERFORMANCE\n"+"\n".join(f"{x['score']:>5.1f}/100 {x['source']}" for x in s["bot_scoreboard"]))
     if cmd=="league":
-        return _clip("VM BOT LEAGUE\n"+"\n".join(f"{i}. {x['source']} â€” {x['score']}/100" for i,x in enumerate(sorted(s["bot_scoreboard"],key=lambda z:-z["score"]),1)))
+        return _clip("VM BOT LEAGUE\n"+"\n".join(f"{i}. {x['source']} — {x['score']}/100" for i,x in enumerate(sorted(s["bot_scoreboard"],key=lambda z:-z["score"]),1)))
     if cmd in {"predict","forecast"}:
         rows=s.get("predictive_v5",{}).get("predictions",[])
         return _clip("VM PREDICTIVE OPERATIONS\n"+("\n".join(

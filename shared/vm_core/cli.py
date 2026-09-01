@@ -33,6 +33,7 @@ from .relationship_cleanup import plan as relationship_cleanup_plan, apply as ap
 from .legacy_recovery import recover as recover_legacy, write_report as write_legacy_recovery_report
 from .git_audit import audit as git_audit
 from .storage_audit import audit as storage_audit
+from .stabilization import run_stabilization, write_stabilization_report
 
 
 def _json(obj): print(json.dumps(obj,indent=2,ensure_ascii=False,default=str))
@@ -96,6 +97,7 @@ def build_parser():
         ("relationship-cleanup","Preview or apply safe nested Relationship Manager cleanup."),
         ("legacy-recovery","Preview/apply recovery of pre-v1.3 Search/Guard Telegram components."),
         ("runtime-check","Verify managed services/components and optional autostart."),
+        ("stabilize","Audit runtime, database, backup, Git drift, and recovery readiness."),
         ("init","Initialise platform folders/database."),
     ]: s.add_parser(name,help=help_text)
     m=s.add_parser("manifests",help="Preview/create/refresh bot manifests."); m.add_argument("--write",action="store_true"); m.add_argument("--refresh",action="store_true")
@@ -108,6 +110,7 @@ def build_parser():
     s.choices["legacy-recovery"].add_argument("--apply",action="store_true")
     s.choices["runtime-check"].add_argument("--require-autostart",action="store_true")
     s.choices["runtime-check"].add_argument("--require-legacy-components",action="store_true")
+    s.choices["stabilize"].add_argument("--reference",default="origin/dev/v6.2-brain-native-fabric-final2")
     setup=s.add_parser("setup",help="Preview/install bot dependencies."); setup.add_argument("--apply",action="store_true")
     lintp=s.add_parser("lint",help="Run Ruff when available."); lintp.add_argument("--fix",action="store_true")
     fmt=s.add_parser("format-check",help="Check formatting with Ruff.")
@@ -146,6 +149,10 @@ def main(argv=None):
             _json(create_missing_bot_manifests(root,write=args.write))
         return 0
     if c=="health": _json(run_health(root)); return 0
+    if c=="stabilize":
+        result=run_stabilization(root,args.reference); jp,tp=write_stabilization_report(result,root)
+        _json({"report":result,"json":str(jp),"text":str(tp)})
+        return 0 if result["release_ready"] else 2
     if c=="env": _json(environment_report(root)); return 0
     if c=="deps":
         _json({"requirements":requirements_inventory(root),"pip_check":pip_check()}); return 0
