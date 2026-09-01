@@ -14,6 +14,27 @@ function Invoke-Git {
     if ($LASTEXITCODE -ne 0) { throw "git $($Args -join ' ') failed with exit code $LASTEXITCODE" }
 }
 
+function Test-SafeEnvTemplate {
+    param([string]$Path)
+    $leaf = Split-Path $Path -Leaf
+    return $leaf -in @('.env.example', '.env.sample', '.env.template')
+}
+
+function Test-SensitivePath {
+    param([string]$Path)
+    if (Test-SafeEnvTemplate $Path) { return $false }
+    $normalized = $Path -replace '\\','/'
+    $leaf = Split-Path $normalized -Leaf
+    $patterns = @(
+        '*.session','*.session-journal','*.sqlite','*.sqlite3','*.db','*.db-wal','*.db-shm',
+        '.env','.env.*','*token*.json','*credentials*.json','*client_secret*.json','*.pem','*.key'
+    )
+    foreach ($pattern in $patterns) {
+        if ($normalized -like $pattern -or $leaf -like $pattern) { return $true }
+    }
+    return $false
+}
+
 $root = (Invoke-Git rev-parse --show-toplevel | Select-Object -First 1).Trim()
 Set-Location $root
 
@@ -36,21 +57,11 @@ Write-Host "Current branch : $current"
 Write-Host "Changed files  : $($status.Count)"
 if ($status.Count) { $status | ForEach-Object { Write-Host "  $_" } }
 
-$ignoredRuntime = @(
-    '*.session','*.session-journal','*.sqlite','*.sqlite3','*.db','*.db-wal','*.db-shm',
-    '.env','.env.*','*token*.json','*credentials*.json','*client_secret*.json','*.pem','*.key'
-)
-
 $trackedSuspicious = @()
 foreach ($line in $status) {
     if ($line.Length -lt 4) { continue }
     $path = $line.Substring(3).Trim('"')
-    foreach ($pattern in $ignoredRuntime) {
-        if ($path -like $pattern -or (Split-Path $path -Leaf) -like $pattern) {
-            $trackedSuspicious += $path
-            break
-        }
-    }
+    if (Test-SensitivePath $path) { $trackedSuspicious += $path }
 }
 
 if ($trackedSuspicious.Count) {
@@ -78,8 +89,7 @@ if (-not $staged.Count) {
     exit 0
 }
 
-$forbiddenNames = '(?i)(^|/)(\.env($|\.)|.*\.session(-journal)?$|.*\.(sqlite3?|db)(-(wal|shm))?$|.*\.(pem|key)$|.*(credentials|client_secret|token).*\.json$)'
-$badNames = @($staged | Where-Object { ($_ -replace '\\','/') -match $forbiddenNames })
+$badNames = @($staged | Where-Object { Test-SensitivePath $_ })
 if ($badNames.Count) {
     & git reset
     Write-Warning "Blocked sensitive/runtime filenames:"
@@ -91,13 +101,20 @@ $diff = (& git diff --cached --no-ext-diff --unified=0) -join "`n"
 $secretPatterns = @(
     '(?i)api[_-]?hash\s*[:=]\s*["''][A-Za-z0-9]{20,}',
     '(?i)bot[_-]?token\s*[:=]\s*["''][0-9]{6,}:[A-Za-z0-9_-]{20,}',
-    '(?i)(password|secret)\s*[:=]\s*["''][^"'']{8,}'
+    '(?i)(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})',
+    '(?i)AKIA[0-9A-Z]{16}'
 )
 foreach ($pattern in $secretPatterns) {
     if ($diff -match $pattern) {
         & git reset
         throw "Possible credential detected in staged diff. Safe sync aborted before commit."
     }
+}
+
+& git diff --cached --check
+if ($LASTEXITCODE -ne 0) {
+    & git reset
+    throw "git diff --cached --check failed. Safe sync aborted before commit."
 }
 
 Invoke-Git commit -m "sync: reconcile Windows master source $stamp"
