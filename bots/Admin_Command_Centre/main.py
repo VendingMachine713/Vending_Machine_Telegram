@@ -1,6 +1,14 @@
 from __future__ import annotations
 import json,secrets,sys,time,urllib.parse,urllib.request
+from pathlib import Path
 from admin_core import config,claim_admin,handle_command,parse_command
+
+BOT_DIR=Path(__file__).resolve().parent
+ROOT=BOT_DIR.parents[1]
+if str(ROOT) not in sys.path: sys.path.insert(0,str(ROOT))
+from shared.vm_core.publisher import BotEventPublisher
+publisher=BotEventPublisher("Admin_Command_Centre",ROOT)
+
 API='https://api.telegram.org/bot{token}/{method}'
 def api_call(token,method,payload=None,timeout=60):
     data=urllib.parse.urlencode(payload or {}).encode(); req=urllib.request.Request(API.format(token=token,method=method),data=data)
@@ -13,6 +21,7 @@ def main():
     cfg=config()
     if not cfg['token']: print('[CONFIG REQUIRED] VM_ADMIN_BOT_TOKEN is missing. Copy .env.example to .env and add the token locally.'); return 2
     me=api_call(cfg['token'],'getMe',{},30); username=me.get('result',{}).get('username','unknown'); print('[READY] VM Admin Command Centre @'+username)
+    publisher.started(bot_username=username,mutations_enabled=cfg['allow_mutations'])
     claim_code=None
     if not cfg['admin_ids']:
         claim_code=secrets.token_hex(3).upper(); print('[CLAIM MODE] No admin is registered.'); print(f'[CLAIM CODE] Send /claim {claim_code} to @{username} from your Telegram account.'); print('[SECURITY] The claim code exists only for this local run.')
@@ -29,6 +38,10 @@ def main():
                     claim_admin(uid); cfg=config(); claim_code=None; send_message(cfg['token'],chat,'Admin access claimed successfully. Mutating commands remain disabled. Use /vm to begin.'); print('[CLAIMED] Admin Telegram user ID stored locally.'); continue
                 send_message(cfg['token'],chat,handle_command(uid,text,cfg))
             backoff=2
-        except KeyboardInterrupt: return 0
-        except Exception as exc: print('[WARN]',type(exc).__name__,exc); time.sleep(backoff); backoff=min(backoff*2,60)
+        except KeyboardInterrupt:
+            publisher.stopped('keyboard_interrupt')
+            return 0
+        except Exception as exc:
+            publisher.incident('telegram_poll_error','Admin Command Centre polling error',severity='WARNING',error_type=type(exc).__name__)
+            print('[WARN]',type(exc).__name__,exc); time.sleep(backoff); backoff=min(backoff*2,60)
 if __name__=='__main__': raise SystemExit(main())
