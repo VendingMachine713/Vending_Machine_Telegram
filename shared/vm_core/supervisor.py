@@ -44,6 +44,28 @@ def supervise_once(root: Path | None = None, apply: bool = False) -> list[dict[s
             log_event("supervisor_recovery", level="WARN", data={"service": bot.folder, "applied": apply}, root=root)
         else:
             actions.append({"service": bot.folder, "action": "none", "alive": alive, "policy": policy})
+
+    # Intelligence refresh is deliberately isolated from recovery control. A
+    # collector/read-model problem must never prevent normal supervisor actions.
+    try:
+        from .intelligence import materialize_intelligence
+        materialize_intelligence(root)
+    except Exception as exc:
+        emit(
+            "incident.intelligence_refresh_failed",
+            "supervisor",
+            {"summary": "VM Intelligence refresh failed", "error_type": type(exc).__name__},
+            root,
+            severity="WARNING",
+            subject_type="service",
+            subject_id="VM_Intelligence",
+        )
+        log_event(
+            "intelligence_refresh_failed",
+            level="WARN",
+            data={"error_type": type(exc).__name__},
+            root=root,
+        )
     return actions
 
 
