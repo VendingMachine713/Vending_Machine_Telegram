@@ -1,3 +1,5 @@
+from core import utc_now
+from match_engine import score_marketplace_pair
 from match_engine_v2 import MatchEngineV2, _parse_dt
 
 
@@ -65,6 +67,121 @@ class HardenedMatchEngineV2(MatchEngineV2):
             reminder_lead_days=reminder_lead_days,
             baseline_mode=bool(baseline_mode or historical_import),
         )
+
+    def _existing_unresolved_pairs_for_logical(self, logical_id):
+        with self.conn() as c:
+            return c.execute(
+                """SELECT id,demand_logical_id,supply_logical_id,status
+                   FROM marketplace_matches
+                   WHERE (demand_logical_id=? OR supply_logical_id=?)
+                     AND status NOT IN ('accepted','dismissed','inactive')""",
+                (logical_id, logical_id),
+            ).fetchall()
+
+    def _mark_match_inactive(self, match_id):
+        with self.conn() as c:
+            cur = c.execute(
+                """UPDATE marketplace_matches
+                   SET status='inactive',updated_utc=?
+                   WHERE id=? AND status NOT IN ('accepted','dismissed','inactive')""",
+                (utc_now(), int(match_id)),
+            )
+        return int(cur.rowcount)
+
+    def reconcile_logical_listing(self, logical_id, *, min_score=45.0, candidate_limit=500):
+        """Incrementally reconcile one logical listing without window false-negatives.
+
+        SQL candidate limits bound discovery work only. Existing unresolved pairs
+        that fall outside the current candidate window are revalidated directly
+        before any inactivation, so an old but still-valid match cannot disappear
+        merely because many newer candidates exist.
+        """
+        min_score = max(0.0, min(float(min_score), 100.0))
+        representative = self._active_representative(logical_id)
+        if not representative:
+            inactivated = self._inactivate_missing_pairs(logical_id, set())
+            self.cancel_wtb_expiry(logical_id)
+            return {
+                "logical_id": logical_id,
+                "active": False,
+                "pairs_evaluated": 0,
+                "eligible_pairs": 0,
+                "created": 0,
+                "updated": 0,
+                "inactivated": inactivated,
+            }
+
+        if representative["listing_type"] == "wanted":
+            self.ensure_wtb_expiry(representative)
+            candidates = self.candidate_supplies_for_demand(
+                representative, limit=candidate_limit
+            )
+            oriented = ((representative, supply) for supply in candidates)
+        else:
+            candidates = self.candidate_demands_for_supply(
+                representative, limit=candidate_limit
+            )
+            oriented = ((demand, representative) for demand in candidates)
+
+        evaluated_keys = set()
+        evaluated = 0
+        eligible = 0
+        created = 0
+        updated = 0
+        inactivated = 0
+
+        for demand, supply in oriented:
+            key = (demand["logical_listing_id"], supply["logical_listing_id"])
+            evaluated_keys.add(key)
+            evaluated += 1
+            result = score_marketplace_pair(demand, supply)
+            if not result.eligible or result.score < min_score:
+                continue
+            eligible += 1
+            _, was_created = self._upsert_scored_pair(demand, supply, result)
+            if was_created:
+                created += 1
+            else:
+                updated += 1
+
+        for existing in self._existing_unresolved_pairs_for_logical(logical_id):
+            key = (existing["demand_logical_id"], existing["supply_logical_id"])
+            if key in evaluated_keys:
+                # Candidate pairs that failed eligibility/threshold must still be
+                # explicitly inactivated; successful pairs were already upserted.
+                demand = self._active_representative(existing["demand_logical_id"])
+                supply = self._active_representative(existing["supply_logical_id"])
+                if demand and supply:
+                    result = score_marketplace_pair(demand, supply)
+                    if result.eligible and result.score >= min_score:
+                        continue
+                inactivated += self._mark_match_inactive(existing["id"])
+                continue
+
+            demand = self._active_representative(existing["demand_logical_id"])
+            supply = self._active_representative(existing["supply_logical_id"])
+            evaluated += 1
+            if not demand or not supply:
+                inactivated += self._mark_match_inactive(existing["id"])
+                continue
+            result = score_marketplace_pair(demand, supply)
+            if not result.eligible or result.score < min_score:
+                inactivated += self._mark_match_inactive(existing["id"])
+                continue
+            eligible += 1
+            self._upsert_scored_pair(demand, supply, result)
+            updated += 1
+
+        return {
+            "logical_id": logical_id,
+            "active": True,
+            "listing_type": representative["listing_type"],
+            "pairs_evaluated": evaluated,
+            "eligible_pairs": eligible,
+            "created": created,
+            "updated": updated,
+            "inactivated": inactivated,
+        }
 
     def cancel_stale_wtb_expiry_alerts(self, owner_user_id=None):
         """Cancel invalid reminder deliveries using conservative SQLite syntax."""
