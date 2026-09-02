@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json,secrets,sys,time,urllib.parse,urllib.request
 from pathlib import Path
-from admin_core import config,claim_admin,handle_command,parse_command
+from admin_core import config,claim_admin,handle_command,parse_command,poster_progress_text
 
 BOT_DIR=Path(__file__).resolve().parent
 ROOT=BOT_DIR.parents[1]
@@ -15,6 +15,7 @@ def api_call(token,method,payload=None,timeout=60):
     data=urllib.parse.urlencode(payload or {}).encode(); req=urllib.request.Request(API.format(token=token,method=method),data=data)
     with urllib.request.urlopen(req,timeout=timeout) as resp: return json.loads(resp.read().decode())
 def send_message(token,chat_id,text): return api_call(token,'sendMessage',{'chat_id':chat_id,'text':text[:4000]},30)
+def edit_message(token,chat_id,message_id,text): return api_call(token,'editMessageText',{'chat_id':chat_id,'message_id':message_id,'text':text[:4000]},30)
 def self_test():
     cfg=config(); print('Admin Command Centre v0.3.0'); print('Token configured:',bool(cfg['token'])); print('Admin IDs configured:',bool(cfg['admin_ids'])); print('Mutations enabled:',cfg['allow_mutations']); return 0
 def main():
@@ -28,9 +29,12 @@ def main():
         claim_code=secrets.token_hex(3).upper(); print('[CLAIM MODE] No admin is registered.'); print(f'[CLAIM CODE] Send /claim {claim_code} to @{username} from your Telegram account.'); print('[SECURITY] The claim code exists only for this local run.')
     print('[SECURITY] Mutations enabled:',cfg['allow_mutations'])
     offset=0; backoff=2
+    progress_watch={}; progress_last={}
     while True:
         try:
-            result=api_call(cfg['token'],'getUpdates',{'timeout':45,'offset':offset,'allowed_updates':json.dumps(['message'])},55)
+            watch_active=bool(progress_watch)
+            poll_timeout=3 if watch_active else 45
+            result=api_call(cfg['token'],'getUpdates',{'timeout':poll_timeout,'offset':offset,'allowed_updates':json.dumps(['message'])},poll_timeout+10)
             for update in result.get('result',[]):
                 offset=max(offset,int(update['update_id'])+1); msg=update.get('message') or {}; text=msg.get('text') or ''
                 if not text.startswith('/'): continue
@@ -49,7 +53,20 @@ def main():
                     mutating=cmd in MUTATING_COMMANDS,
                     outcome='denied' if response=='Access denied.' else ('blocked' if 'Mutating commands are disabled' in response else 'handled'),
                 )
-                send_message(cfg['token'],chat,response)
+                sent=send_message(cfg['token'],chat,response)
+                if response!='Access denied.' and cmd=='poster_progress':
+                    message_id=int((sent.get('result') or {}).get('message_id') or 0)
+                    if message_id:
+                        progress_watch[chat]=message_id; progress_last[chat]=response
+                elif response!='Access denied.' and cmd=='poster_progress_off':
+                    progress_watch.pop(chat,None); progress_last.pop(chat,None)
+            for chat,message_id in list(progress_watch.items()):
+                text=poster_progress_text()
+                if text!=progress_last.get(chat):
+                    edit_message(cfg['token'],chat,message_id,text)
+                    progress_last[chat]=text
+                if '\nRun: COMPLETE' in text:
+                    progress_watch.pop(chat,None); progress_last.pop(chat,None)
             backoff=2
         except KeyboardInterrupt:
             publisher.stopped('keyboard_interrupt')
