@@ -1,10 +1,10 @@
 # VM Universal Search
 
-Universal Search indexes Telegram messages into a local SQLite database and provides searchable access through the Telegram bot.
+Universal Search indexes Telegram messages into a local SQLite database and provides searchable access and passive match alerts through Telegram.
 
 ## Current version
 
-**v1.2.0**
+**v1.3.0**
 
 ## Core capabilities
 
@@ -26,11 +26,13 @@ The worker:
 - uses the same Bot API-style marked chat IDs (`-100...`) as the live index;
 - upserts by `(chat_id, message_id)` so live and historical indexing do not duplicate records.
 
+Historical backfill does **not** generate passive watch alerts. Alerts are generated from new live messages only, preventing a newly configured bot from flooding the admin with old historical matches.
+
 ### Search Engine v2
 
-v1.2 adds SQLite FTS5 search and a safe LIKE fallback when FTS5 is unavailable.
+SQLite FTS5 is used for ranked full-text search, with a safe LIKE fallback when FTS5 is unavailable.
 
-Search now supports:
+Search supports:
 
 - ranked full-text results;
 - exact phrases;
@@ -45,6 +47,28 @@ Search now supports:
 - recent search history;
 - links back to the original Telegram message when a link can be constructed.
 
+### Passive saved-search alerts
+
+v1.3 adds durable saved watches. A watch reuses the same query syntax as `/search` and evaluates each newly indexed live message.
+
+Matching messages are placed into a durable SQLite alert queue and delivered privately through the bot.
+
+The alert pipeline includes:
+
+- configure-once saved searches;
+- local-chat or admin global scope;
+- duplicate suppression per watch/message pair;
+- persistent pending/retry/sent/failed delivery state;
+- exponential retry backoff;
+- five delivery attempts per alert before terminal failure;
+- watch-level consecutive failure tracking;
+- automatic watch pause after repeated terminal delivery failures;
+- pause/resume/delete controls;
+- queue status reporting;
+- original-message links in alerts when available.
+
+A successful alert resets the watch failure counter.
+
 ## Bot commands
 
 ```text
@@ -52,6 +76,15 @@ Search now supports:
 /crosssearch <query>     admin only
 /findads <query>         admin only
 /recentsearches
+
+/watch name :: query
+/watch name :: query --global    global scope is admin only
+/watches
+/pausewatch <id>
+/resumewatch <id>
+/deletewatch <id>
+/alertstatus
+
 /searchhelp
 /health
 /backfillstatus          admin only
@@ -113,6 +146,47 @@ Result size and explicit page:
 
 The Telegram result message also provides Previous/Next buttons when additional pages are available.
 
+## Saved-watch examples
+
+Create a watch scoped to the group where the command is sent:
+
+```text
+/watch iphone-deals :: "iphone 15" --ads
+```
+
+Create a global watch across all indexed chats. The `--global` option requires the claimed admin:
+
+```text
+/watch hilux-global :: hilux -wanted --global
+```
+
+List watches:
+
+```text
+/watches
+```
+
+Pause and resume without deleting the configuration:
+
+```text
+/pausewatch 3
+/resumewatch 3
+```
+
+Delete permanently:
+
+```text
+/deletewatch 3
+```
+
+View delivery queue counts:
+
+```text
+/alertstatus
+```
+
+Private delivery requires the watch owner to have started a private chat with the bot. If delivery repeatedly fails, the queue backs off automatically rather than retrying aggressively.
+
 ## Configuration
 
 Copy `.env.example` to `.env`.
@@ -146,6 +220,8 @@ py -m pip install -r requirements.txt
 ```powershell
 .\START.ps1
 ```
+
+The passive alert worker starts and stops with the normal polling application. It does not require APScheduler or the optional `python-telegram-bot[job-queue]` dependency.
 
 ## Historical backfill
 
@@ -183,16 +259,15 @@ On the first Telethon login, Telegram may require an interactive login code. Aft
 
 ## Database migration behaviour
 
-The v1.2 database upgrade is automatic when `Store` opens the existing database.
+Database upgrades are automatic and idempotent when the stores open the existing database.
 
-It:
+They preserve existing data and add, as required:
 
-- preserves existing indexed messages;
-- preserves v1.1 live/backfill source metadata;
-- creates the FTS5 index when supported;
-- backfills the FTS index from existing messages once when required;
-- installs triggers so later inserts, edits and deletes stay synchronised;
-- creates search-session and search-history tables idempotently.
+- live/backfill source metadata;
+- FTS5 index and synchronisation triggers;
+- search sessions and recent-search history;
+- saved-search definitions;
+- durable alert queue and retry metadata.
 
 If the local SQLite build does not provide FTS5, search remains available through the slower LIKE fallback and `/health` reports the fallback mode.
 
@@ -201,8 +276,12 @@ If the local SQLite build does not provide FTS5, search remains available throug
 - Historical backfill is isolated from Bot API polling.
 - Telegram history access is read-only.
 - Media files are not downloaded by the backfill worker.
+- Historical backfill does not create old-message alerts.
 - Cross-chat searches require the claimed admin.
+- Global saved watches require the claimed admin.
 - Pagination sessions are bound to the user who initiated the search and expire after 24 hours.
+- Saved-watch delivery records prevent duplicate alerts for the same watch/message pair.
+- Delivery failures back off exponentially instead of busy-looping Telegram.
 - Bot tokens, API hashes and Telegram sessions remain local-only.
 
 ## Testing
