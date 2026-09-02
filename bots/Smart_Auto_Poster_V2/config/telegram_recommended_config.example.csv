@@ -1,0 +1,3 @@
+group_id,group_name,primary_access,secondary_access,preferred_account,recommended_mode,needs_review
+-1000000000001,Example Destination,yes,yes,secondary,photo,no
+-1000000000002,Example Review Destination,no,no,,review,yes

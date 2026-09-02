@@ -1,0 +1,34 @@
+# VM platform sensitive/runtime exclusions
+.env
+.env.*
+!.env.example
+*.session
+*.session-journal
+*.key
+*.pem
+secrets.json
+credentials.json
+
+# Runtime state
+logs/
+diagnostics/
+backups/
+state/*.sqlite3
+state/*.db
+state/pids/
+state/support/
+state/release_baselines/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Telegram/private runtime data
+media_cache/
+downloads/
+content/private/

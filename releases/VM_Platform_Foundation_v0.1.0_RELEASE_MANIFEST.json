@@ -1,0 +1,16 @@
+{
+  "release": "VM_Platform_Foundation_v0.1.0",
+  "release_type": "additive_platform_foundation",
+  "target_root": "Vending_Machine_Telegram/",
+  "replaces_existing_bot_files": false,
+  "touches_credentials": false,
+  "auto_writes_bot_manifests": false,
+  "commands": [
+    "py vm.py status",
+    "py vm.py doctor",
+    "py vm.py inventory",
+    "py vm.py manifests",
+    "py vm.py manifests --write",
+    "py vm.py test"
+  ]
+}

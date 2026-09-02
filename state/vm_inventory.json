@@ -1,0 +1,124 @@
+{
+  "schema_version": 4,
+  "project_root": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram",
+  "bot_count": 5,
+  "runnable_count": 3,
+  "planned_count": 2,
+  "bots": [
+    {
+      "folder": "Admin_Command_Centre",
+      "path": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots\\Admin_Command_Centre",
+      "manifest_present": true,
+      "version": "0.2.0",
+      "entrypoint": "main.py",
+      "entrypoint_confidence": "high",
+      "launchers": [
+        "START_ADMIN_COMMAND_CENTRE.bat"
+      ],
+      "requirements": "requirements.txt",
+      "pyproject": null,
+      "databases": [],
+      "session_files": [],
+      "test_files": [
+        "tests\\test_admin_core.py"
+      ],
+      "nested_duplicate_folder": false,
+      "classification": "CANONICAL"
+    },
+    {
+      "folder": "Smart_Auto_Poster_V2",
+      "path": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots\\Smart_Auto_Poster_V2",
+      "manifest_present": true,
+      "version": "3.0.4",
+      "entrypoint": "app.py",
+      "entrypoint_confidence": "high",
+      "launchers": [
+        "RUN_SERVICE.ps1",
+        "START_AUTO_POSTER.ps1",
+        "run_setup.ps1"
+      ],
+      "requirements": "requirements.txt",
+      "pyproject": null,
+      "databases": [
+        "backups\\smart_autoposter_2026-08-27T152315+0000.sqlite3",
+        "backups\\smart_autoposter_before_import_2026-08-27T062014+0000.sqlite3",
+        "backups\\smart_autoposter_before_import_2026-08-27T062725+0000.sqlite3",
+        "data\\smart_autoposter.sqlite3"
+      ],
+      "session_files": [
+        "runtime\\admin_bot.session",
+        "runtime\\sessions\\Auto_Post_Secondary.session",
+        "runtime\\sessions\\my_account.session"
+      ],
+      "test_files": [
+        "tests\\test_account_guard.py",
+        "tests\\test_admin_credentials.py",
+        "tests\\test_core.py",
+        "tests\\test_destination_sync.py",
+        "tests\\test_login_account.py",
+        "tests\\test_migration.py",
+        "tests\\test_safety_runtime.py",
+        "tests\\test_v23_production.py",
+        "tests\\test_v24_autonomous.py",
+        "tests\\test_v24_recovery.py",
+        "tests\\test_v30_platform.py",
+        "tests\\test_worker_logic.py"
+      ],
+      "nested_duplicate_folder": false,
+      "classification": "CANONICAL"
+    },
+    {
+      "folder": "Universal_Search",
+      "path": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots\\Universal_Search",
+      "manifest_present": true,
+      "version": null,
+      "entrypoint": null,
+      "entrypoint_confidence": "none",
+      "launchers": [],
+      "requirements": null,
+      "pyproject": null,
+      "databases": [],
+      "session_files": [],
+      "test_files": [],
+      "nested_duplicate_folder": false,
+      "classification": "PLACEHOLDER"
+    },
+    {
+      "folder": "VM_Guard",
+      "path": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots\\VM_Guard",
+      "manifest_present": true,
+      "version": null,
+      "entrypoint": null,
+      "entrypoint_confidence": "none",
+      "launchers": [],
+      "requirements": null,
+      "pyproject": null,
+      "databases": [],
+      "session_files": [],
+      "test_files": [],
+      "nested_duplicate_folder": false,
+      "classification": "PLACEHOLDER"
+    },
+    {
+      "folder": "VM_Relationship_Manager",
+      "path": "C:\\Users\\cherr\\OneDrive\\Desktop\\Vending_Machine_Telegram\\bots\\VM_Relationship_Manager",
+      "manifest_present": true,
+      "version": "1.2.0",
+      "entrypoint": "main.py",
+      "entrypoint_confidence": "high",
+      "launchers": [
+        "START_VM_RELATIONSHIPS.bat",
+        "START_VM_RELATIONSHIPS.ps1"
+      ],
+      "requirements": "requirements.txt",
+      "pyproject": null,
+      "databases": [],
+      "session_files": [
+        "runtime\\vm_relationship_user.session"
+      ],
+      "test_files": [],
+      "nested_duplicate_folder": true,
+      "classification": "CANONICAL"
+    }
+  ]
+}

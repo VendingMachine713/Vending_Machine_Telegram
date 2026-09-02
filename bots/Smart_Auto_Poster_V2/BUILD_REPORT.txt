@@ -1,0 +1,10 @@
+SMART AUTO POSTER V3.0.4 BUILD REPORT
+
+Regression tests: 123/123 PASS
+Python compile: PASS
+Admin credential precedence: PASS
+Invalid token handling: PASS
+
+This hotfix contains no .env, Telegram session, database, login code, phone number, API hash, or live bot token.
+
+Spread-window regression: PASS

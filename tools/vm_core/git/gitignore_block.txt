@@ -1,0 +1,52 @@
+# ===== VM PLATFORM SECURITY / RUNTIME =====
+# Secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.sample
+!**/.env.template
+*.session
+*.session-journal
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python environments / cache
+.venv/
+**/.venv/
+venv/
+**/venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+**/.pytest_cache/
+
+# Runtime data
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+logs/
+backups/
+shared/logs/
+shared/backups/
+shared/exports/
+**/state/admin_id.txt
+**/state/claim_code.txt
+
+# Generated / local-only
+diagnostics/*_latest.txt
+*.log
+*.tmp
+*.bak_before_*
+Thumbs.db
+.DS_Store
+# ===== END VM PLATFORM SECURITY / RUNTIME =====

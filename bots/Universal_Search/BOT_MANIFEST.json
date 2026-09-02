@@ -1,0 +1,59 @@
+{
+  "schema_version": 3,
+  "name": "Universal_Search",
+  "version": "1.3.0",
+  "status": "existing",
+  "classification": "CANONICAL",
+  "entrypoint": "main.py",
+  "entrypoint_confidence": "high",
+  "launchers": [
+    "START.ps1",
+    "BACKFILL.ps1"
+  ],
+  "requirements": "requirements.txt",
+  "pyproject": null,
+  "databases": [
+    "data\\universal_search.db"
+  ],
+  "tests": [
+    "tests\\test_core.py",
+    "tests\\test_backfill.py",
+    "tests\\test_watches.py"
+  ],
+  "vm_core": {
+    "compatible": true,
+    "minimum_version": "1.1.0"
+  },
+  "runtime_requirements": {
+    "env": [
+      "BOT_TOKEN"
+    ],
+    "optional_env": [
+      "TELEGRAM_API_ID",
+      "TELEGRAM_API_HASH",
+      "TELEGRAM_PHONE"
+    ]
+  },
+  "capabilities": [
+    "live_index",
+    "historical_backfill",
+    "fts5_ranked_search",
+    "exact_phrase_search",
+    "boolean_or_search",
+    "exclude_terms",
+    "search_filters",
+    "result_pagination",
+    "original_message_links",
+    "recent_search_history",
+    "saved_searches",
+    "passive_match_alerts",
+    "durable_alert_queue",
+    "alert_retry_backoff",
+    "watch_pause_resume"
+  ],
+  "lifecycle": {
+    "managed_by_vm": true,
+    "auto_start": false,
+    "auto_restart": false
+  }
+}
