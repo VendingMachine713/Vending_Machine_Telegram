@@ -74,6 +74,11 @@ async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text("Invalid claim code.")
 
 
+def _short(value, limit):
+    value = str(value or "")
+    return value if len(value) <= limit else value[: limit - 1] + "…"
+
+
 def message_link(row):
     username = (row["chat_username"] or "").lstrip("@")
     if username and re.fullmatch(r"[A-Za-z0-9_]+", username):
@@ -90,18 +95,36 @@ def fmt_row(row):
     )
     chat = row["chat_title"] or str(row["chat_id"])
     text = (row["text"] or "").replace("\n", " ").strip()
-    if len(text) > 260:
-        text = text[:257] + "..."
+    chat = _short(chat, 60)
+    who = _short(who, 45)
+    text = _short(text, 180)
     link = message_link(row)
     source = "history" if row["source"] == "backfill" else "live"
     lines = [
-        f"<b>{html.escape(str(chat))}</b> — {html.escape(str(who))}",
+        f"<b>{html.escape(chat)}</b> — {html.escape(who)}",
         html.escape(text) if text else "<i>Media message</i>",
         f"<i>{source}</i>",
     ]
     if link:
         lines.append(f'<a href="{html.escape(link, quote=True)}">Open original message</a>')
     return "\n".join(lines)
+
+
+def render_page(rows, page):
+    heading = f"<b>Search results — page {page}</b>"
+    blocks = [fmt_row(row) for row in rows]
+    text = heading + ("\n\n" + "\n\n".join(blocks) if blocks else "")
+    if len(text) <= 3900:
+        return text
+    # Defensive fallback: preserve valid HTML rather than slicing through tags/entities.
+    kept = []
+    for block in blocks:
+        candidate = heading + "\n\n" + "\n\n".join(kept + [block])
+        if len(candidate) > 3700:
+            break
+        kept.append(block)
+    suffix = "\n\n<i>Result text shortened by Telegram message-size limits.</i>"
+    return heading + "\n\n" + "\n\n".join(kept) + suffix
 
 
 def search_keyboard(token, page, has_more):
@@ -132,6 +155,8 @@ async def _send_search_page(
     if force_ads:
         effective_raw = (effective_raw + " --ads --available").strip()
     q = parse_query(effective_raw)
+    # Telegram result pages are intentionally bounded even if a larger --limit is supplied.
+    q.limit = min(q.limit, 10)
     if page_override is not None:
         q.page = max(1, int(page_override))
 
@@ -170,13 +195,7 @@ async def _send_search_page(
         fts_enabled=bool(store.fts_enabled),
     )
 
-    if rows:
-        body = "\n\n".join(fmt_row(row) for row in rows)
-        heading = f"<b>Search results — page {q.page}</b>\n"
-        text = (heading + body)[:3900]
-    else:
-        text = f"No matches on page {q.page}."
-
+    text = render_page(rows, q.page) if rows else f"No matches on page {q.page}."
     keyboard = search_keyboard(session_token, q.page, has_more)
     if update.callback_query:
         await update.callback_query.answer()
