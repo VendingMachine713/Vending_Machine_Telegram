@@ -429,6 +429,10 @@ def enqueue_campaign(db: Database, campaign_id: str, dry_run=False, run_key: str
             except Exception as exc:
                 if "UNIQUE" in str(exc).upper():
                     dup += 1
+                    # An immutable replay inserts nothing, but still returns the
+                    # deterministic schedule metadata calculated for that replay.
+                    due_values.append(due_at)
+                    content_counts[content_id] = content_counts.get(content_id, 0) + 1
                 else:
                     raise
         if inserted > 0:
