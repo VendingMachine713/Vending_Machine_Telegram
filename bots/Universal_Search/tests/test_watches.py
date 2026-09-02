@@ -145,6 +145,27 @@ class WatchTests(unittest.TestCase):
             self.assertEqual(current["enabled"], 0)
             self.assertEqual(current["id"], watch["id"])
 
+    def test_owner_reconciliation_disables_old_watches_and_cancels_queue(self):
+        with tempfile.TemporaryDirectory() as d:
+            core, watches = self.make_stores(d)
+            old_watch = watches.save(10, "old-owner", "iphone", -1001)
+            current_watch = watches.save(20, "current-owner", "iphone", -1001)
+            self.seed_message(core)
+            watches.enqueue_matches(watches.get_message(-1001, 1))
+            self.assertEqual(len(watches.due_alerts(10)), 2)
+
+            result = watches.reconcile_owner(20)
+            self.assertEqual(result["disabled_watches"], 1)
+            self.assertEqual(result["cancelled_alerts"], 1)
+            self.assertEqual(watches.list_for_owner(10)[0]["enabled"], 0)
+            self.assertEqual(watches.list_for_owner(20)[0]["enabled"], 1)
+            due = watches.due_alerts(10)
+            self.assertEqual(len(due), 1)
+            self.assertEqual(due[0]["watch_id"], current_watch["id"])
+            old_status = {r["status"]: r["count"] for r in watches.queue_status_for_owner(10)}
+            self.assertEqual(old_status.get("cancelled"), 1)
+            self.assertEqual(old_watch["owner_user_id"], 10)
+
     def test_cleanup_alert_history_removes_only_expired_terminal_records(self):
         with tempfile.TemporaryDirectory() as d:
             core, watches = self.make_stores(d)
