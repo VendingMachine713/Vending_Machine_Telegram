@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "platform": {
+    "name": "Vending Machine Telegram",
+    "timezone": "Australia/Adelaide",
+    "default_dry_run": true
+  },
+  "lifecycle": {
+    "start_in_new_console_on_windows": true,
+    "stop_timeout_seconds": 15
+  },
+  "backup": {
+    "retention": 10,
+    "include_bot_code": true,
+    "include_databases": true,
+    "include_sessions": false,
+    "include_env_files": false
+  },
+  "support_bundle": {
+    "include_recent_logs": true,
+    "include_database_files": false,
+    "include_session_files": false,
+    "include_env_files": false
+  }
+}

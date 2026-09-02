@@ -1,0 +1,5 @@
+#!/bin/sh
+ROOT="$(git rev-parse --show-toplevel)"
+PY=py
+command -v py >/dev/null 2>&1 || PY=python
+"$PY" "$ROOT/tools/vm_core/git/git_guard.py" --staged

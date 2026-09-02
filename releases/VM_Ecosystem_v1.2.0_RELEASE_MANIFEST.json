@@ -1,0 +1,13 @@
+{
+  "release": "VM_Ecosystem_v1.2.0",
+  "platform_version": "1.2.0",
+  "admin_command_centre_version": "0.2.0",
+  "replaces_smart_autoposter_source": false,
+  "replaces_relationship_manager_source": false,
+  "modifies_universal_search": false,
+  "modifies_vm_guard": false,
+  "touches_env_values": false,
+  "touches_session_contents": false,
+  "admin_mutations_default_enabled": false,
+  "admin_requires_allowlist": true
+}

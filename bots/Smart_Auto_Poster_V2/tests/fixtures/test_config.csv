@@ -1,0 +1,4 @@
+group_id,group_name,primary_access,secondary_access,preferred_account,recommended_mode,needs_review,notes
+-1001,Test Photo,yes,yes,primary,photo,no,
+-1002,Test Review,yes,no,primary,review,yes,
+-1003,Test Disabled,no,yes,secondary,disabled,no,

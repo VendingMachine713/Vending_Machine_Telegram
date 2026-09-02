@@ -1,0 +1,16 @@
+{
+  "release": "VM_Platform_v1.1.0",
+  "release_type": "platform_hardening_delta",
+  "target_root": "Vending_Machine_Telegram/",
+  "replaces_existing_bot_source": false,
+  "refreshes_bot_manifests": true,
+  "preserves_manifest_lifecycle": true,
+  "touches_env_values": false,
+  "touches_session_contents": false,
+  "deletes_nested_duplicate_folders": false,
+  "new_commands": [
+    "py vm.py duplicates",
+    "py vm.py validate-all"
+  ],
+  "new_control_menu_option": 19
+}

@@ -1,0 +1,214 @@
+# ============================================================
+# Vending Machine Telegram - Git Ignore
+# ============================================================
+
+# ---------- Secrets / credentials ----------
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+*.pem
+*.key
+*.p12
+*.pfx
+
+credentials.json
+credentials*.json
+client_secret*.json
+secrets.json
+secret.json
+token.json
+tokens.json
+
+# ---------- Telegram sessions ----------
+*.session
+*.session-journal
+**/*.session
+**/*.session-journal
+
+# ---------- Runtime databases ----------
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+
+# ---------- Python ----------
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+.venv/
+venv/
+env/
+**/.venv/
+**/venv/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---------- Logs ----------
+*.log
+logs/
+log/
+**/logs/
+**/log/
+
+shared/logs/
+
+# ---------- Runtime exports / backups ----------
+backups/
+**/backups/
+shared/backups/
+
+exports/
+**/exports/
+shared/exports/
+
+# ---------- Cache / temporary ----------
+cache/
+**/cache/
+tmp/
+temp/
+**/tmp/
+**/temp/
+
+*.tmp
+*.temp
+*.bak
+
+# ---------- IDE / editor ----------
+.vscode/
+.idea/
+*.code-workspace
+
+# ---------- Windows ----------
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ---------- macOS ----------
+.DS_Store
+
+# ---------- Packaging ----------
+build/
+dist/
+*.egg-info/
+
+# ---------- Node / web tooling ----------
+node_modules/
+.next/
+.vercel/
+
+# ---------- Local-only configuration ----------
+*.local
+*.local.json
+*.local.yaml
+*.local.yml
+*.local.toml
+config.local.*
+
+# ============================================================
+# VM Platform generated/local runtime state
+# ============================================================
+
+# Runtime locks and transient runtime state
+**/runtime/*.lock/
+**/runtime/**/*.lock/
+**/runtime/**/owner.json
+
+# Local bot runtime state
+bots/Universal_Search/state/*
+!bots/Universal_Search/state/.gitkeep
+
+bots/VM_Guard/state/*
+!bots/VM_Guard/state/.gitkeep
+
+# Central platform owner identity (numeric Telegram IDs; local-only)
+state/security/owner_user_ids.txt
+
+# Generated support bundles
+state/support/*
+!state/support/.gitkeep
+
+# Ad-hoc source backups
+*.bak_*
+*.backup
+*.backup_*
+
+# ===== VM PLATFORM SECURITY / RUNTIME =====
+# Secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.sample
+!**/.env.template
+*.session
+*.session-journal
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python environments / cache
+.venv/
+**/.venv/
+venv/
+**/venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+**/.pytest_cache/
+
+# Runtime data
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+logs/
+backups/
+shared/logs/
+shared/backups/
+shared/exports/
+**/state/admin_id.txt
+**/state/claim_code.txt
+state/security/owner_user_ids.txt
+
+# Generated / local-only
+diagnostics/*_latest.txt
+*.log
+*.tmp
+*.bak_before_*
+Thumbs.db
+.DS_Store
+# ===== END VM PLATFORM SECURITY / RUNTIME =====
+*.before_*
+
+# ===== PUBLIC RELEASE HARDENING =====
+# Real Telegram destination inventories and local operational config must never be tracked.
+bots/Smart_Auto_Poster_V2/config/telegram_recommended_config.csv
+bots/Smart_Auto_Poster_V2/config/telegram_recommended_config.local.csv
+**/*destination*.local.csv
+
+# Diagnostics may contain usernames, absolute paths, IDs, counts, and runtime metadata.
+diagnostics/
+**/diagnostics/
+
+# Keep sanitized examples trackable.
+!bots/Smart_Auto_Poster_V2/config/telegram_recommended_config.example.csv
+# ===== END PUBLIC RELEASE HARDENING =====

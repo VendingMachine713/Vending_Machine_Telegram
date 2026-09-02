@@ -1,0 +1,11 @@
+SMART AUTO POSTER V2.4 CONTENT INBOX
+
+Create one folder per advertisement here.
+Example:
+
+content\inbox\My_New_Ad\
+  caption.txt
+  01.jpg
+  02.jpg
+
+Then use Control Panel option 23: Import content inbox.
