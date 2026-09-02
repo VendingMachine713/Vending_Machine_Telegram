@@ -4,6 +4,7 @@ import json
 from typing import Iterable
 
 from .db import Database, utcnow
+from .redaction import redact_text
 
 OPEN_OUTCOMES = {"started", "acknowledged"}
 FINAL_OUTCOMES = {"sent", "failed", "uncertain"}
@@ -93,13 +94,14 @@ def finish_attempt(
     ensure_delivery_ledger(db)
     now = utcnow()
     encoded = json.dumps(message_ids) if message_ids is not None else None
+    safe_error = (redact_text(error_text) or "")[:1000] or None
     with db.connect() as con:
         cur = con.execute(
             """UPDATE delivery_attempts
                SET outcome=?,finished_at=?,error_kind=?,error_text=?,
                    telegram_message_ids=COALESCE(?,telegram_message_ids)
                WHERE id=? AND outcome IN ('started','acknowledged')""",
-            (outcome, now, error_kind, (error_text or "")[:1000] or None, encoded, int(attempt_id)),
+            (outcome, now, error_kind, safe_error, encoded, int(attempt_id)),
         )
         if cur.rowcount != 1:
             row = con.execute("SELECT outcome FROM delivery_attempts WHERE id=?", (int(attempt_id),)).fetchone()
@@ -149,7 +151,14 @@ def reconcile_open_attempts_from_queue(db: Database, queue_job_ids: Iterable[int
                        error_text=COALESCE(error_text,?),
                        telegram_message_ids=COALESCE(telegram_message_ids,?)
                    WHERE id=? AND outcome IN ('started','acknowledged')""",
-                (outcome, now, row["error_kind"], row["last_error"], row["telegram_message_ids"], row["id"]),
+                (
+                    outcome,
+                    now,
+                    row["error_kind"],
+                    (redact_text(row["last_error"]) or "")[:1000] or None,
+                    row["telegram_message_ids"],
+                    row["id"],
+                ),
             )
             counts[outcome] += 1
     return counts
