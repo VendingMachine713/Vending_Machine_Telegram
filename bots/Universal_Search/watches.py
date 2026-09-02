@@ -95,7 +95,7 @@ class WatchStore:
 
     @contextmanager
     def conn(self):
-        c = sqlite3.connect(self.db_path)
+        c = sqlite3.connect(self.db_path, timeout=10)
         c.row_factory = sqlite3.Row
         try:
             yield c
@@ -212,7 +212,7 @@ class WatchStore:
         with self.conn() as c:
             return c.execute(
                 """SELECT q.id alert_id,q.attempts,q.owner_user_id,q.watch_id,
-                          w.name watch_name,w.raw_query,
+                          w.name watch_name,w.raw_query,w.chat_scope,
                           m.*, c.title chat_title,c.username chat_username,
                           s.username sender_username,s.display_name
                    FROM alert_queue q
@@ -273,3 +273,17 @@ class WatchStore:
                    WHERE owner_user_id=? GROUP BY status ORDER BY status""",
                 (owner_user_id,),
             ).fetchall()
+
+    def cleanup_alert_history(self, sent_days=30, failed_days=90):
+        sent_cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(sent_days)))).isoformat()
+        failed_cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(failed_days)))).isoformat()
+        with self.conn() as c:
+            sent = c.execute(
+                "DELETE FROM alert_queue WHERE status='sent' AND sent_utc IS NOT NULL AND sent_utc<?",
+                (sent_cutoff,),
+            ).rowcount
+            failed = c.execute(
+                "DELETE FROM alert_queue WHERE status='failed' AND created_utc<?",
+                (failed_cutoff,),
+            ).rowcount
+        return max(0, sent) + max(0, failed)
