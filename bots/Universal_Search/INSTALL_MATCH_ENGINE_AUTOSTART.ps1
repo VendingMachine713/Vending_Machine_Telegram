@@ -32,9 +32,9 @@ $Task = New-ScheduledTask -Action $Action -Trigger $Trigger -Settings $Settings 
 Register-ScheduledTask -TaskName $TaskName -InputObject $Task -Force | Out-Null
 
 Write-Host "[OK] Windows auto-start installed/refreshed: $TaskName"
-Write-Host "[SAFE] The daemon only sends private match alerts; it does not poll Telegram updates."
+Write-Host "[SAFE] The daemon only sends private match/WTB reminder alerts; it does not poll Telegram updates."
 
 if ($StartNow) {
     Start-ScheduledTask -TaskName $TaskName
-    Write-Host "[OK] Match Engine start requested through Task Scheduler."
+    Write-Host "[OK] Match Engine v2 start requested through Task Scheduler."
 }
