@@ -259,6 +259,8 @@ def progress_text(db: Database, *, campaign_id: str | None = None, bar_width: in
 class TerminalProgressReporter:
     """Low-noise terminal reporter for the same progress state used by Telegram admin."""
 
+    _OVERALL_STAGES = {"claimed", "sent", "failed", "uncertain", "quarantined", "cancelled", "expired"}
+
     def __init__(self, db: Database, *, stream=None, min_percent_step: int = 5):
         self.db = db
         self.stream = stream or sys.stdout
@@ -267,6 +269,17 @@ class TerminalProgressReporter:
         self._last_bucket: int | None = None
         self._last_stage: str | None = None
 
+    def _print_overall(self, job: dict) -> None:
+        summary = run_progress(self.db, run_key=job.get("run_key"), campaign_id=job.get("campaign_id"))
+        if not summary:
+            return
+        problems = summary.failed + summary.uncertain
+        line = (
+            f"[RUN] {render_bar(summary.posted_percent)} | "
+            f"posted {summary.sent}/{summary.total} | left {summary.remaining} | problems {problems}"
+        )
+        print(line, file=self.stream, flush=True)
+
     def update(self, job: dict, stage: str, percent: float | int, *, error: str | None = None) -> GroupProgress:
         progress = set_group_progress(self.db, job, stage, percent, error=error)
         bucket = int(progress.percent // self.min_percent_step)
@@ -274,6 +287,8 @@ class TerminalProgressReporter:
         if changed:
             line = f"[POST] {progress.group_name} | {render_bar(progress.percent)} | {plain_status(stage, error=error)}"
             print(line, file=self.stream, flush=True)
+            if stage in self._OVERALL_STAGES:
+                self._print_overall(job)
             self._last_job_id = progress.job_id
             self._last_bucket = bucket
             self._last_stage = stage
