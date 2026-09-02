@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import Any
 
@@ -8,7 +9,6 @@ from .db import PlatformDB, utcnow
 from .paths import project_root
 
 
-TERMINAL_STATUSES = {"DISMISSED", "COMPLETED", "EXPIRED"}
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "PROPOSED": {"ACCEPTED", "DISMISSED"},
     "BLOCKED": {"DISMISSED"},
@@ -53,6 +53,7 @@ def transition_recommendation(
 ) -> RecommendationDecision:
     """Apply one governed recommendation state transition and record an audit event.
 
+    The recommendation state change and its audit event are committed atomically.
     This changes VM Intelligence metadata only. It never performs Telegram actions,
     retries campaign jobs, sends messages, or mutates bot-owned databases.
     """
@@ -62,24 +63,35 @@ def transition_recommendation(
 
     target = target_status.upper().strip()
     actor = actor.strip() or "operator"
-    row = _recommendation_by_key(db, recommendation_key)
-    current = str(row["status"]).upper()
-
-    if target == current:
-        raise RecommendationGovernanceError(
-            f"recommendation {recommendation_key} is already {current}"
-        )
-    allowed = ALLOWED_TRANSITIONS.get(current)
-    if allowed is None:
-        raise RecommendationGovernanceError(f"unknown current recommendation status: {current}")
-    if target not in allowed:
-        permitted = ", ".join(sorted(allowed)) or "none"
-        raise RecommendationGovernanceError(
-            f"invalid transition {current} -> {target}; allowed: {permitted}"
-        )
-
     now = utcnow()
+
     with db.connect() as con:
+        row_obj = con.execute(
+            "SELECT * FROM intelligence_recommendations WHERE recommendation_key=?",
+            (recommendation_key,),
+        ).fetchone()
+        if row_obj is None:
+            raise RecommendationGovernanceError(
+                f"recommendation not found: {recommendation_key}"
+            )
+        row = dict(row_obj)
+        current = str(row["status"]).upper()
+
+        if target == current:
+            raise RecommendationGovernanceError(
+                f"recommendation {recommendation_key} is already {current}"
+            )
+        allowed = ALLOWED_TRANSITIONS.get(current)
+        if allowed is None:
+            raise RecommendationGovernanceError(
+                f"unknown current recommendation status: {current}"
+            )
+        if target not in allowed:
+            permitted = ", ".join(sorted(allowed)) or "none"
+            raise RecommendationGovernanceError(
+                f"invalid transition {current} -> {target}; allowed: {permitted}"
+            )
+
         cur = con.execute(
             "UPDATE intelligence_recommendations "
             "SET status=?, updated_at_utc=? "
@@ -91,10 +103,7 @@ def transition_recommendation(
                 "recommendation changed concurrently; refresh and retry"
             )
 
-    event_id = db.add_event(
-        f"recommendation.{target.lower()}",
-        "vm_core.governance",
-        {
+        payload = {
             "recommendation_key": recommendation_key,
             "recommendation_type": row["recommendation_type"],
             "previous_status": current,
@@ -102,17 +111,34 @@ def transition_recommendation(
             "actor": actor,
             "note": (note or "")[:1000],
             "automatic_execution": False,
-        },
-        severity="INFO",
-        subject_type=row.get("subject_type"),
-        subject_id=row.get("subject_id"),
-        correlation_id=f"recommendation:{row['id']}",
-        evidence={
+        }
+        evidence = {
             "recommendation_id": row["id"],
             "rule_id": row["rule_id"],
             "rule_version": row["rule_version"],
-        },
-    )
+        }
+        event_cur = con.execute(
+            """
+            INSERT INTO events(
+                event_type,source,payload_json,created_at_utc,event_version,severity,
+                subject_type,subject_id,correlation_id,evidence_json
+            ) VALUES(?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                f"recommendation.{target.lower()}",
+                "vm_core.governance",
+                json.dumps(payload, ensure_ascii=False),
+                now,
+                1,
+                "INFO",
+                row.get("subject_type"),
+                row.get("subject_id"),
+                f"recommendation:{row['id']}",
+                json.dumps(evidence, ensure_ascii=False),
+            ),
+        )
+        event_id = int(event_cur.lastrowid)
+
     return RecommendationDecision(
         recommendation_key=recommendation_key,
         previous_status=current,
