@@ -12,7 +12,15 @@ ALL_OUTCOMES = OPEN_OUTCOMES | FINAL_OUTCOMES
 
 
 def ensure_delivery_ledger(db: Database) -> None:
-    """Create the additive delivery-attempt journal without changing queue semantics."""
+    """Create additive delivery and run-idempotency journals.
+
+    The queue-run seal is intentionally additive. Existing queue rows are backfilled
+    into the seal registry. New runs are sealed when enqueue_campaign increments the
+    campaign cycle counter after successfully creating a batch. Once sealed, the same
+    campaign_id + run_key cannot later be topped up after a restart or configuration
+    change; the existing core duplicate path sees the trigger's UNIQUE marker and
+    counts the replay as duplicate work instead of inserting anything new.
+    """
     with db.connect() as con:
         con.executescript(
             """
@@ -34,6 +42,47 @@ def ensure_delivery_ledger(db: Database) -> None:
                 ON delivery_attempts(queue_job_id, attempt_no);
             CREATE INDEX IF NOT EXISTS idx_delivery_attempts_outcome
                 ON delivery_attempts(outcome, started_at);
+
+            CREATE TABLE IF NOT EXISTS queue_run_seals (
+                campaign_id TEXT NOT NULL REFERENCES campaigns(campaign_id) ON DELETE CASCADE,
+                run_key TEXT NOT NULL,
+                sealed_at TEXT NOT NULL,
+                job_count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(campaign_id, run_key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_queue_run_seals_time
+                ON queue_run_seals(sealed_at);
+
+            INSERT OR IGNORE INTO queue_run_seals(campaign_id,run_key,sealed_at,job_count)
+            SELECT campaign_id,run_key,MAX(created_at),COUNT(*)
+            FROM queue
+            WHERE run_key IS NOT NULL AND run_key<>''
+            GROUP BY campaign_id,run_key;
+
+            CREATE TRIGGER IF NOT EXISTS trg_queue_block_sealed_run
+            BEFORE INSERT ON queue
+            WHEN NEW.run_key IS NOT NULL
+             AND NEW.run_key<>''
+             AND EXISTS(
+                SELECT 1 FROM queue_run_seals rs
+                WHERE rs.campaign_id=NEW.campaign_id AND rs.run_key=NEW.run_key
+             )
+            BEGIN
+                SELECT RAISE(ABORT, 'UNIQUE sealed campaign run');
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS trg_campaign_seal_completed_run
+            AFTER UPDATE OF completed_cycles ON campaigns
+            WHEN NEW.completed_cycles > OLD.completed_cycles
+            BEGIN
+                INSERT OR IGNORE INTO queue_run_seals(campaign_id,run_key,sealed_at,job_count)
+                SELECT NEW.campaign_id,q.run_key,MAX(q.created_at),COUNT(*)
+                FROM queue q
+                WHERE q.campaign_id=NEW.campaign_id
+                  AND q.run_key IS NOT NULL
+                  AND q.run_key<>''
+                GROUP BY q.run_key;
+            END;
             """
         )
 
