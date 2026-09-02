@@ -1,3 +1,4 @@
+import json
 import sys
 import tempfile
 import types
@@ -76,6 +77,18 @@ class Stage1FoundationEngineTests(unittest.TestCase):
             row = con.execute("SELECT status,error_kind FROM queue WHERE job_key='sending'").fetchone()
         self.assertEqual(row["status"], "uncertain")
         self.assertEqual(row["error_kind"], "interrupted_send")
+
+    def test_post_send_persistence_failure_is_uncertain_not_retry(self):
+        self._job("acked", -1001, "sending")
+        with self.db.connect() as con:
+            job = dict(con.execute("SELECT q.*, d.group_name FROM queue q JOIN destinations d ON d.group_id=q.group_id WHERE q.job_key='acked'").fetchone())
+        Worker(self.db, None).mark_post_send_uncertain(job, "primary", [701, 702], RuntimeError("disk busy"))
+        with self.db.connect() as con:
+            row = con.execute("SELECT status,error_kind,telegram_message_ids,attempts FROM queue WHERE job_key='acked'").fetchone()
+        self.assertEqual(row["status"], "uncertain")
+        self.assertEqual(row["error_kind"], "post_send_persistence")
+        self.assertEqual(json.loads(row["telegram_message_ids"]), [701, 702])
+        self.assertEqual(row["attempts"], 1)
 
     def test_retry_due_time_grows_after_repeated_failures(self):
         self._job("retry-backoff", -1001, "sending", attempts=1)
