@@ -1,8 +1,10 @@
+import asyncio
 import html
 import logging
 import re
 import secrets
 import sys
+from contextlib import suppress
 from datetime import timezone
 from pathlib import Path
 
@@ -18,6 +20,7 @@ from telegram.ext import (
 
 from core import Store, parse_query
 from envutil import load_env
+from watches import WatchStore
 
 BASE = Path(__file__).resolve().parent
 ROOT = BASE.parents[1]
@@ -27,6 +30,7 @@ if str(ROOT) not in sys.path:
 from shared.vm_core.publisher import BotEventPublisher
 
 publisher = BotEventPublisher("Universal_Search", ROOT)
+logger = logging.getLogger("universal_search")
 
 ENV = load_env(BASE / ".env")
 TOKEN = ENV.get("BOT_TOKEN", "").strip()
@@ -39,6 +43,7 @@ ADMIN_FILE = STATE / "admin_id.txt"
 CLAIM_FILE = STATE / "claim_code.txt"
 DB = BASE / "data" / "universal_search.db"
 store = Store(DB)
+watch_store = WatchStore(DB)
 
 
 def admin_id():
@@ -116,7 +121,6 @@ def render_page(rows, page):
     text = heading + ("\n\n" + "\n\n".join(blocks) if blocks else "")
     if len(text) <= 3900:
         return text
-    # Defensive fallback: preserve valid HTML rather than slicing through tags/entities.
     kept = []
     for block in blocks:
         candidate = heading + "\n\n" + "\n\n".join(kept + [block])
@@ -155,7 +159,6 @@ async def _send_search_page(
     if force_ads:
         effective_raw = (effective_raw + " --ads --available").strip()
     q = parse_query(effective_raw)
-    # Telegram result pages are intentionally bounded even if a larger --limit is supplied.
     q.limit = min(q.limit, 10)
     if page_override is not None:
         q.page = max(1, int(page_override))
@@ -283,9 +286,130 @@ async def recent_searches_cmd(update, context):
     await update.effective_message.reply_text("\n".join(lines)[:3900])
 
 
+def _watch_query_valid(raw_query):
+    q = parse_query(raw_query)
+    return bool(q.has_text_query or q.ads or q.media or q.user or q.available)
+
+
+async def watch_cmd(update, context):
+    if not update.effective_user or not update.effective_chat:
+        return
+    raw = " ".join(context.args).strip()
+    global_requested = bool(re.search(r"(?:^|\s)--global(?:\s|$)", raw, flags=re.I))
+    raw = re.sub(r"(?:^|\s)--global(?:\s|$)", " ", raw, flags=re.I).strip()
+    if "::" not in raw:
+        await update.effective_message.reply_text(
+            "Use /watch name :: query\nExample: /watch iphone-deals :: \"iphone 15\" --ads"
+        )
+        return
+    name, raw_query = (part.strip() for part in raw.split("::", 1))
+    if not name or len(name) > 40 or any(ord(ch) < 32 for ch in name):
+        await update.effective_message.reply_text("Watch name must be 1-40 normal characters.")
+        return
+    if not _watch_query_valid(raw_query):
+        await update.effective_message.reply_text("The watch needs a searchable term or supported filter.")
+        return
+
+    if global_requested:
+        if not is_admin(update):
+            await update.effective_message.reply_text("Only the claimed admin can create global watches.")
+            return
+        chat_scope = None
+    elif update.effective_chat.type == "private":
+        if not is_admin(update):
+            await update.effective_message.reply_text(
+                "Create this watch from the target group, or ask the admin to create a global watch."
+            )
+            return
+        chat_scope = None
+    else:
+        chat_scope = update.effective_chat.id
+
+    if watch_store.count_for_owner(update.effective_user.id) >= 50:
+        existing = {row["name"] for row in watch_store.list_for_owner(update.effective_user.id)}
+        if name not in existing:
+            await update.effective_message.reply_text("Watch limit reached (50). Delete an old watch first.")
+            return
+
+    row = watch_store.save(update.effective_user.id, name, raw_query, chat_scope)
+    scope = "all indexed chats" if row["chat_scope"] is None else f"chat {row['chat_scope']}"
+    await update.effective_message.reply_text(
+        f"✅ Watch #{row['id']} saved: {row['name']}\n"
+        f"Scope: {scope}\n"
+        f"Query: {row['raw_query']}\n\n"
+        "Matching new messages will be delivered here as private bot alerts. "
+        "Make sure you have started a private chat with this bot."
+    )
+
+
+async def watches_cmd(update, context):
+    if not update.effective_user:
+        return
+    rows = watch_store.list_for_owner(update.effective_user.id)
+    if not rows:
+        await update.effective_message.reply_text("No saved watches. Use /watch name :: query")
+        return
+    lines = ["Saved watches:"]
+    for row in rows[:50]:
+        state = "ON" if row["enabled"] else "PAUSED"
+        scope = "GLOBAL" if row["chat_scope"] is None else str(row["chat_scope"])
+        failures = f" | failures={row['failure_count']}" if row["failure_count"] else ""
+        lines.append(
+            f"#{row['id']} [{state}] {row['name']} | scope={scope}{failures}\n  {row['raw_query']}"
+        )
+    await update.effective_message.reply_text("\n".join(lines)[:3900])
+
+
+async def _watch_state_cmd(update, context, enabled):
+    if not update.effective_user or not context.args or not context.args[0].isdigit():
+        await update.effective_message.reply_text(
+            "Provide the watch ID, e.g. /pausewatch 3" if not enabled else "Provide the watch ID, e.g. /resumewatch 3"
+        )
+        return
+    watch_id = int(context.args[0])
+    changed = watch_store.set_enabled(update.effective_user.id, watch_id, enabled)
+    if not changed:
+        await update.effective_message.reply_text("Watch not found or not owned by you.")
+        return
+    await update.effective_message.reply_text(
+        f"✅ Watch #{watch_id} {'resumed' if enabled else 'paused'}."
+    )
+
+
+async def pause_watch_cmd(update, context):
+    await _watch_state_cmd(update, context, False)
+
+
+async def resume_watch_cmd(update, context):
+    await _watch_state_cmd(update, context, True)
+
+
+async def delete_watch_cmd(update, context):
+    if not update.effective_user or not context.args or not context.args[0].isdigit():
+        await update.effective_message.reply_text("Provide the watch ID, e.g. /deletewatch 3")
+        return
+    watch_id = int(context.args[0])
+    if watch_store.delete(update.effective_user.id, watch_id):
+        await update.effective_message.reply_text(f"✅ Watch #{watch_id} deleted.")
+    else:
+        await update.effective_message.reply_text("Watch not found or not owned by you.")
+
+
+async def alert_status_cmd(update, context):
+    if not update.effective_user:
+        return
+    rows = watch_store.queue_status_for_owner(update.effective_user.id)
+    counts = {row["status"]: row["count"] for row in rows}
+    await update.effective_message.reply_text(
+        "Alert queue:\n"
+        f"pending={counts.get('pending', 0)} | retry={counts.get('retry', 0)} | "
+        f"sent={counts.get('sent', 0)} | failed={counts.get('failed', 0)}"
+    )
+
+
 async def search_help_cmd(update, context):
     await update.effective_message.reply_text(
-        "Universal Search v1.2 query guide:\n\n"
+        "Universal Search v1.3 guide:\n\n"
         "/search iphone 15\n"
         "/search \"iphone 15 pro\"\n"
         "/search iphone OR samsung\n"
@@ -294,7 +418,10 @@ async def search_help_cmd(update, context):
         "/search exhaust --media --sort newest\n"
         "/crosssearch query   (admin)\n"
         "/findads query       (admin)\n\n"
-        "Sort: relevant, newest, oldest. Results support Previous/Next pagination."
+        "Passive alerts:\n"
+        "/watch name :: query\n"
+        "/watch name :: query --global   (admin)\n"
+        "/watches\n/pausewatch ID\n/resumewatch ID\n/deletewatch ID\n/alertstatus"
     )
 
 
@@ -302,11 +429,13 @@ async def health(update, context):
     total = store.count()
     live = store.count("live")
     historical = store.count("backfill")
+    watches = watch_store.count_for_owner(update.effective_user.id) if update.effective_user else 0
     await update.effective_message.reply_text(
-        f"✅ Universal Search v1.2\n"
+        f"✅ Universal Search v1.3\n"
         f"Indexed: {total} messages\n"
         f"Live: {live} | Historical: {historical}\n"
-        f"FTS5 ranking: {'enabled' if store.fts_enabled else 'fallback LIKE mode'}"
+        f"FTS5 ranking: {'enabled' if store.fts_enabled else 'fallback LIKE mode'}\n"
+        f"Your saved watches: {watches}"
     )
 
 
@@ -355,6 +484,95 @@ async def index_message(update, context):
         bool(message.effective_attachment),
         source="live",
     )
+    row = watch_store.get_message(update.effective_chat.id, message.message_id)
+    queued = watch_store.enqueue_matches(row)
+    if queued:
+        publisher.signal(
+            "saved_search_matches_queued",
+            subject_type="chat",
+            subject_id=update.effective_chat.id,
+            score=min(100, queued * 20),
+            confidence=0.95,
+            rationale="New Telegram message matched saved Universal Search watches",
+            queued_alerts=queued,
+            message_id=message.message_id,
+        )
+
+
+async def alert_worker(application):
+    while True:
+        try:
+            alerts = watch_store.due_alerts(20)
+            if not alerts:
+                await asyncio.sleep(10)
+                continue
+            for alert in alerts:
+                title = html.escape(_short(alert["watch_name"], 60))
+                body = f"🔔 <b>Watch matched: {title}</b>\n\n{fmt_row(alert)}"
+                try:
+                    await application.bot.send_message(
+                        chat_id=alert["owner_user_id"],
+                        text=body,
+                        parse_mode="HTML",
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    status, due = watch_store.mark_retry(
+                        alert["alert_id"], exc, alert["attempts"]
+                    )
+                    logger.warning(
+                        "Saved-search alert delivery failed alert=%s status=%s due=%s error=%s",
+                        alert["alert_id"], status, due, type(exc).__name__,
+                    )
+                    if status == "failed":
+                        publisher.incident(
+                            "saved_search_alert_failed",
+                            "Saved-search alert exhausted retries",
+                            severity="WARNING",
+                            alert_id=alert["alert_id"],
+                            watch_id=alert["watch_id"],
+                            error_type=type(exc).__name__,
+                        )
+                else:
+                    watch_store.mark_sent(alert["alert_id"], alert["watch_id"])
+                    publisher.signal(
+                        "saved_search_alert_sent",
+                        subject_type="user",
+                        subject_id=alert["owner_user_id"],
+                        score=50,
+                        confidence=1.0,
+                        rationale="Passive Universal Search watch delivered",
+                        watch_id=alert["watch_id"],
+                        source_chat_id=alert["chat_id"],
+                        source_message_id=alert["message_id"],
+                    )
+            await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception("Saved-search alert worker loop failed")
+            publisher.incident(
+                "saved_search_worker_error",
+                "Universal Search passive alert worker recovered from an error",
+                severity="ERROR",
+                error_type=type(exc).__name__,
+            )
+            await asyncio.sleep(15)
+
+
+async def post_init(application):
+    application.bot_data["alert_worker_task"] = asyncio.create_task(
+        alert_worker(application), name="universal-search-alert-worker"
+    )
+
+
+async def post_shutdown(application):
+    task = application.bot_data.get("alert_worker_task")
+    if task:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 def main():
@@ -362,12 +580,24 @@ def main():
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
-    app = Application.builder().token(TOKEN).build()
+    app = (
+        Application.builder()
+        .token(TOKEN)
+        .post_init(post_init)
+        .post_shutdown(post_shutdown)
+        .build()
+    )
     app.add_handler(CommandHandler("claim", claim))
     app.add_handler(CommandHandler("search", cmd_search))
     app.add_handler(CommandHandler("crosssearch", cmd_cross))
     app.add_handler(CommandHandler("findads", cmd_ads))
     app.add_handler(CommandHandler("recentsearches", recent_searches_cmd))
+    app.add_handler(CommandHandler("watch", watch_cmd))
+    app.add_handler(CommandHandler("watches", watches_cmd))
+    app.add_handler(CommandHandler("pausewatch", pause_watch_cmd))
+    app.add_handler(CommandHandler("resumewatch", resume_watch_cmd))
+    app.add_handler(CommandHandler("deletewatch", delete_watch_cmd))
+    app.add_handler(CommandHandler("alertstatus", alert_status_cmd))
     app.add_handler(CommandHandler("searchhelp", search_help_cmd))
     app.add_handler(CommandHandler("health", health))
     app.add_handler(CommandHandler("backfillstatus", backfill_status_cmd))
@@ -375,8 +605,12 @@ def main():
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, index_message))
     if not admin_id():
         print(f"[CLAIM CODE] Send /claim {claim_code()} to this bot from your Telegram account.")
-    print("[READY] VM Universal Search v1.2")
-    publisher.started(indexed_messages=store.count(), fts_enabled=store.fts_enabled)
+    print("[READY] VM Universal Search v1.3")
+    publisher.started(
+        indexed_messages=store.count(),
+        fts_enabled=store.fts_enabled,
+        passive_alerts=True,
+    )
     try:
         app.run_polling(allowed_updates=Update.ALL_TYPES)
     except BaseException as exc:
