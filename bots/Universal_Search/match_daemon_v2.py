@@ -176,7 +176,7 @@ def parse_args(argv=None):
 
 
 async def run(args):
-    from match_daemon import BASE, DB
+    from match_daemon import DB
 
     interval = max(10, min(int(args.interval), 300))
     min_score = max(0.0, min(float(args.min_score), 100.0))
@@ -209,6 +209,12 @@ async def run(args):
         await bot.initialize()
         initialized = True
         bootstrap = await asyncio.to_thread(engine.bootstrap_v2, min_score=min_score)
+        # bootstrap_v2 already performs full pair and WTB-expiry reconciliation.
+        # Start periodic timers here so startup does not immediately repeat both scans.
+        reconciled_at = time.monotonic()
+        last_full_refresh = reconciled_at
+        last_expiry_refresh = reconciled_at
+
         current_owner = admin_id()
         if current_owner:
             await asyncio.to_thread(engine.cancel_wrong_owner_alerts, current_owner)
@@ -242,12 +248,12 @@ async def run(args):
                     logger=logger,
                 )
                 now_mono = time.monotonic()
-                if last_expiry_refresh == 0.0 or now_mono - last_expiry_refresh >= expiry_refresh_seconds:
+                if now_mono - last_expiry_refresh >= expiry_refresh_seconds:
                     status["wtb_expiry_refresh"] = await asyncio.to_thread(
                         engine.refresh_wtb_expiry
                     )
                     last_expiry_refresh = now_mono
-                if last_full_refresh == 0.0 or now_mono - last_full_refresh >= full_refresh_seconds:
+                if now_mono - last_full_refresh >= full_refresh_seconds:
                     status["full_reconciliation"] = await asyncio.to_thread(
                         engine.refresh_all, min_score=min_score
                     )
