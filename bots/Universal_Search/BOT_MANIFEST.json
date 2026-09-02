@@ -9,7 +9,8 @@
   "launchers": [
     "START.ps1",
     "BACKFILL.ps1",
-    "MARKETPLACE.ps1"
+    "MARKETPLACE.ps1",
+    "VALIDATE.ps1"
   ],
   "requirements": "requirements.txt",
   "pyproject": null,
@@ -61,7 +62,8 @@
     "marketplace_lifecycle_status",
     "marketplace_repost_grouping",
     "marketplace_statistics",
-    "marketplace_lifecycle_reconciliation"
+    "marketplace_lifecycle_reconciliation",
+    "local_quality_gate"
   ],
   "lifecycle": {
     "managed_by_vm": true,
