@@ -21,6 +21,7 @@ from telegram.ext import (
 from core import Store, parse_query
 from envutil import load_env
 from marketplace import MarketplaceStore, parse_market_query
+from marketplace_reconcile import reconcile_marketplace_message
 from marketplace_ui import MarketplaceSessionStore, money, render_market_page
 from watches import WatchStore
 
@@ -687,15 +688,14 @@ async def index_message(update, context):
         source="live",
     )
 
-    market_row = market_store.ingest(
+    reconcile_marketplace_message(
+        market_store,
         update.effective_chat.id,
         message.message_id,
         user.id if user else None,
         dt,
         text,
     )
-    if market_row is None:
-        market_store.remove_for_message(update.effective_chat.id, message.message_id)
 
     row = watch_store.get_message(update.effective_chat.id, message.message_id)
     queued = watch_store.enqueue_matches(row)
