@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from shared.vm_core.publisher import BotEventPublisher
+from shared.vm_core.security import owner_authorized, central_owner_ids
 
 publisher = BotEventPublisher("Universal_Search", ROOT)
 
@@ -57,8 +58,10 @@ def claim_code():
 
 
 def is_admin(update):
-    a = admin_id()
-    return bool(a and update.effective_user and update.effective_user.id == a)
+    if not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    return bool((admin_id() and uid == admin_id()) or owner_authorized(uid, ROOT))
 
 
 def private_admin(update):
@@ -70,13 +73,15 @@ def private_admin(update):
 
 
 async def deny(update):
-    # Shared groups should not expose admin/control state to ordinary members.
     if update.effective_chat and update.effective_chat.type == "private" and update.effective_message:
         await update.effective_message.reply_text("Not authorised.")
 
 
 async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_chat or update.effective_chat.type != "private":
+        return
+    if central_owner_ids(ROOT):
+        await update.effective_message.reply_text("Central VM owner identity is configured; local claim is disabled.")
         return
     if admin_id():
         await update.effective_message.reply_text("Admin already claimed.")
@@ -294,7 +299,7 @@ async def search_help_cmd(update, context):
     if not private_admin(update):
         return await deny(update)
     await update.effective_message.reply_text(
-        "Universal Search v1.3 private-owner query guide:\n\n"
+        "Universal Search v1.4 private-owner query guide:\n\n"
         "/search iphone 15\n"
         "/search \"iphone 15 pro\"\n"
         "/search iphone OR samsung\n"
@@ -314,7 +319,7 @@ async def health(update, context):
     live = store.count("live")
     historical = store.count("backfill")
     await update.effective_message.reply_text(
-        f"✅ Universal Search v1.3\n"
+        f"✅ Universal Search v1.4\n"
         f"Indexed: {total} messages\n"
         f"Live: {live} | Historical: {historical}\n"
         f"FTS5 ranking: {'enabled' if store.fts_enabled else 'fallback LIKE mode'}"
@@ -383,10 +388,10 @@ def main():
     app.add_handler(CommandHandler("backfillstatus", backfill_status_cmd))
     app.add_handler(CallbackQueryHandler(search_page_callback, pattern=r"^us:"))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, index_message))
-    if not admin_id():
+    if not admin_id() and not central_owner_ids(ROOT):
         print(f"[CLAIM CODE] Send /claim {claim_code()} to this bot in a PRIVATE chat from your Telegram account.")
-    print("[READY] VM Universal Search v1.3 — passive indexing in groups, private-owner control only")
-    publisher.started(indexed_messages=store.count(), fts_enabled=store.fts_enabled, control_scope="private_owner_only")
+    print("[READY] VM Universal Search v1.4 — passive indexing in groups, central/private-owner control only")
+    publisher.started(indexed_messages=store.count(), fts_enabled=store.fts_enabled, control_scope="private_owner_only", central_owner_configured=bool(central_owner_ids(ROOT)))
     try:
         app.run_polling(allowed_updates=Update.ALL_TYPES)
     except BaseException as exc:

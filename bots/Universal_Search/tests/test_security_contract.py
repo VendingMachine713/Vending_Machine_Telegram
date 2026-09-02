@@ -9,13 +9,18 @@ SOURCE = (ROOT / "main.py").read_text(encoding="utf-8")
 class UniversalSearchSecurityContractTests(unittest.TestCase):
     def test_private_admin_requires_private_chat_and_numeric_owner(self):
         self.assertIn('update.effective_chat.type == "private"', SOURCE)
-        self.assertIn('update.effective_user.id == a', SOURCE)
+        self.assertIn("def is_admin(update):", SOURCE)
+        self.assertIn("uid = update.effective_user.id", SOURCE)
+        self.assertIn("uid == admin_id()", SOURCE)
+        self.assertIn("owner_authorized(uid, ROOT)", SOURCE)
 
     def test_claim_is_private_only(self):
         claim_start = SOURCE.index("async def claim")
         next_def = SOURCE.index("\ndef _short", claim_start)
         claim_source = SOURCE[claim_start:next_def]
         self.assertIn('update.effective_chat.type != "private"', claim_source)
+        self.assertIn("central_owner_ids(ROOT)", claim_source)
+        self.assertIn("local claim is disabled", claim_source)
 
     def test_all_user_control_commands_use_private_admin(self):
         guarded_functions = (

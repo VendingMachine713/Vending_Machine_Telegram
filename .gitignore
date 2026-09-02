@@ -132,6 +132,9 @@ bots/Universal_Search/state/*
 bots/VM_Guard/state/*
 !bots/VM_Guard/state/.gitkeep
 
+# Central platform owner identity (numeric Telegram IDs; local-only)
+state/security/owner_user_ids.txt
+
 # Generated support bundles
 state/support/*
 !state/support/.gitkeep
@@ -184,6 +187,7 @@ shared/backups/
 shared/exports/
 **/state/admin_id.txt
 **/state/claim_code.txt
+state/security/owner_user_ids.txt
 
 # Generated / local-only
 diagnostics/*_latest.txt
