@@ -56,7 +56,7 @@ Matching messages are placed into a durable SQLite alert queue and delivered pri
 The alert pipeline includes:
 
 - configure-once saved searches;
-- local-chat or admin global scope;
+- local-chat or global scope;
 - duplicate suppression per watch/message pair;
 - persistent pending/retry/sent/failed delivery state;
 - exponential retry backoff;
@@ -65,9 +65,12 @@ The alert pipeline includes:
 - automatic watch pause after repeated terminal delivery failures;
 - pause/resume/delete controls;
 - queue status reporting;
-- original-message links in alerts when available.
+- original-message links in alerts when available;
+- automatic retention cleanup for old sent/failed delivery records.
 
 A successful alert resets the watch failure counter.
+
+**v1.3 keeps saved watches admin-only.** Per-user group subscriptions are intentionally deferred until membership-safe delivery checks are implemented, so a former group member cannot continue receiving private alerts from a group after losing access.
 
 ## Bot commands
 
@@ -77,8 +80,8 @@ A successful alert resets the watch failure counter.
 /findads <query>         admin only
 /recentsearches
 
-/watch name :: query
-/watch name :: query --global    global scope is admin only
+/watch name :: query              admin only
+/watch name :: query --global     admin only
 /watches
 /pausewatch <id>
 /resumewatch <id>
@@ -148,17 +151,19 @@ The Telegram result message also provides Previous/Next buttons when additional 
 
 ## Saved-watch examples
 
-Create a watch scoped to the group where the command is sent:
+Create an admin watch scoped to the group where the command is sent:
 
 ```text
 /watch iphone-deals :: "iphone 15" --ads
 ```
 
-Create a global watch across all indexed chats. The `--global` option requires the claimed admin:
+Create a global admin watch across all indexed chats:
 
 ```text
 /watch hilux-global :: hilux -wanted --global
 ```
+
+When the claimed admin creates a watch from the bot's private chat, the scope defaults to global.
 
 List watches:
 
@@ -184,8 +189,6 @@ View delivery queue counts:
 ```text
 /alertstatus
 ```
-
-Private delivery requires the watch owner to have started a private chat with the bot. If delivery repeatedly fails, the queue backs off automatically rather than retrying aggressively.
 
 ## Configuration
 
@@ -278,10 +281,11 @@ If the local SQLite build does not provide FTS5, search remains available throug
 - Media files are not downloaded by the backfill worker.
 - Historical backfill does not create old-message alerts.
 - Cross-chat searches require the claimed admin.
-- Global saved watches require the claimed admin.
+- Saved watches are admin-only in v1.3.
 - Pagination sessions are bound to the user who initiated the search and expire after 24 hours.
 - Saved-watch delivery records prevent duplicate alerts for the same watch/message pair.
 - Delivery failures back off exponentially instead of busy-looping Telegram.
+- Old sent delivery records are pruned after 30 days and old failed records after 90 days on startup.
 - Bot tokens, API hashes and Telegram sessions remain local-only.
 
 ## Testing
