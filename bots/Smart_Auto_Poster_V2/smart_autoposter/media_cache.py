@@ -44,14 +44,21 @@ class MediaCache:
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp.replace(self.path)
 
+    @staticmethod
+    def _already_uploaded(progress_callback: Callable[[float, float], None] | None) -> None:
+        if progress_callback is not None:
+            progress_callback(1.0, 1.0)
+
     async def get(self, media: list[str], progress_callback: Callable[[float, float], None] | None = None):
         if not self.staging_chat_id or not media:
             return None
         fp = fingerprint(media)
         if fp in self._memory:
+            self._already_uploaded(progress_callback)
             return self._memory[fp]
         async with self._lock:
             if fp in self._memory:
+                self._already_uploaded(progress_callback)
                 return self._memory[fp]
             state = self._load_state()
             item = state["items"].get(fp)
@@ -63,6 +70,7 @@ class MediaCache:
                     if len(msgs) == len(ids) and all(m is not None and getattr(m, "media", None) is not None for m in msgs):
                         refs = [m.media for m in msgs]
                         self._memory[fp] = refs
+                        self._already_uploaded(progress_callback)
                         return refs
             messages = await self.client.send_file(
                 self.staging_chat_id,
