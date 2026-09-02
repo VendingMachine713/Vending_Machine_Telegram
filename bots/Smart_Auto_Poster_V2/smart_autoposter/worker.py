@@ -20,21 +20,100 @@ class Worker:
         self.safety = safety
         self.notifier = notifier
         self.stop_requested = False
+        self._startup_recovery_done = False
+        self.last_recovery_summary = None
 
     def recover_interrupted_sends(self):
-        """Never blindly retry a job that was in-flight when the process stopped.
+        """Perform one fail-closed startup recovery pass.
 
-        Telegram may have accepted it just before the local process died. Marking it
-        uncertain avoids accidental duplicate posting.
+        Any job left in ``sending`` may already have reached Telegram, so it is moved
+        to UNCERTAIN and never blindly retried. Work belonging to terminal campaigns
+        is expired, while pending/retry/deferred jobs for active *or paused* campaigns
+        are deliberately preserved so a restart/resume continues from existing state.
+
+        The pass is idempotent within a Worker instance because the CLI worker path can
+        invoke startup recovery before ``run_forever`` invokes it again.
         """
+        if self._startup_recovery_done:
+            return 0
+
         now = utcnow()
         with self.db.connect() as con:
-            rows = con.execute("SELECT id,campaign_id,group_id FROM queue WHERE status='sending'").fetchall()
-            if rows:
-                con.execute("UPDATE queue SET status='uncertain',error_kind='interrupted_send',last_error='process interrupted during send; verify before retry',updated_at=? WHERE status='sending'", (now,))
-        for r in rows:
-            self.db.event("WARNING", "uncertain_send", "Process stopped while this job was sending; automatic retry suppressed", group_id=r["group_id"], campaign_id=r["campaign_id"])
-        return len(rows)
+            con.execute("BEGIN IMMEDIATE")
+            interrupted = con.execute(
+                "SELECT id,campaign_id,group_id FROM queue WHERE status='sending' ORDER BY id"
+            ).fetchall()
+            if interrupted:
+                con.execute(
+                    """UPDATE queue
+                       SET status='uncertain',error_kind='interrupted_send',
+                           last_error='process interrupted during send; verify before retry',
+                           resolved_at=NULL,updated_at=?
+                       WHERE status='sending'""",
+                    (now,),
+                )
+
+            expired = con.execute(
+                """UPDATE queue
+                   SET status='expired',error_kind='campaign_ineligible',
+                       last_error='campaign archived or end date passed',
+                       resolved_at=?,updated_at=?
+                   WHERE status IN ('pending','retry','deferred')
+                     AND campaign_id IN (
+                        SELECT campaign_id FROM campaigns
+                        WHERE lifecycle_state='archived'
+                           OR (end_at IS NOT NULL AND end_at<?)
+                     )""",
+                (now, now, now),
+            ).rowcount
+
+            counts = {
+                r["status"]: int(r["n"])
+                for r in con.execute(
+                    "SELECT status,COUNT(*) AS n FROM queue GROUP BY status"
+                ).fetchall()
+            }
+            resumable_active = con.execute(
+                """SELECT COUNT(*) FROM queue q JOIN campaigns c ON c.campaign_id=q.campaign_id
+                   WHERE q.status IN ('pending','retry','deferred')
+                     AND c.lifecycle_state='active' AND c.enabled=1"""
+            ).fetchone()[0]
+            preserved_paused = con.execute(
+                """SELECT COUNT(*) FROM queue q JOIN campaigns c ON c.campaign_id=q.campaign_id
+                   WHERE q.status IN ('pending','retry','deferred')
+                     AND c.lifecycle_state='paused'"""
+            ).fetchone()[0]
+            uncertain_total = con.execute(
+                "SELECT COUNT(*) FROM queue WHERE status='uncertain'"
+            ).fetchone()[0]
+
+        for row in interrupted:
+            self.db.event(
+                "WARNING",
+                "uncertain_send",
+                "Process stopped while this job was sending; automatic retry suppressed",
+                group_id=row["group_id"],
+                campaign_id=row["campaign_id"],
+            )
+
+        summary = {
+            "interrupted_to_uncertain": len(interrupted),
+            "terminal_campaign_jobs_expired": int(expired),
+            "resumable_active_jobs": int(resumable_active),
+            "preserved_paused_jobs": int(preserved_paused),
+            "uncertain_total": int(uncertain_total),
+            "queue_status": counts,
+        }
+        self.last_recovery_summary = summary
+        self._startup_recovery_done = True
+        if interrupted or expired:
+            self.db.event(
+                "WARNING" if interrupted else "INFO",
+                "startup_recovery",
+                "Startup queue recovery completed",
+                details=json.dumps(summary, sort_keys=True),
+            )
+        return len(interrupted)
 
     def sync_accounts(self, auth: dict, session_names: dict[str, str] | None = None):
         session_names = session_names or {}
