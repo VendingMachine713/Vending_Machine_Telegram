@@ -1,13 +1,8 @@
-from match_engine_v2 import MatchEngineV2
+from match_engine_v2 import MatchEngineV2, _parse_dt
 
 
 class HardenedMatchEngineV2(MatchEngineV2):
-    """Canonical v2 runtime with portability/security hardening.
-
-    MatchEngineV2 owns the incremental architecture. This layer contains narrow
-    runtime fixes that should remain independently testable and easy to remove
-    once the core implementation is consolidated at the next release boundary.
-    """
+    """Canonical v2 runtime with portability and no-flood hardening."""
 
     def candidate_demands_for_supply(self, supply, *, limit=500):
         """Pre-filter active WTBs whose explicit budget can afford supply.
@@ -43,20 +38,46 @@ class HardenedMatchEngineV2(MatchEngineV2):
             rows = c.execute(sql, args).fetchall()
         return self._dedupe_logical(rows)
 
+    def ensure_wtb_expiry(
+        self,
+        demand,
+        *,
+        ttl_days=30,
+        reminder_lead_days=7,
+        baseline_mode=False,
+    ):
+        """Schedule WTB lifecycle without flooding reminders for backfill.
+
+        Once v2 has established its baseline, any WTB whose original first-seen
+        timestamp is at or before that baseline is historical even if the row is
+        imported later by a Telethon/backfill pass. Such rows are allowed to
+        participate in matching immediately, but overdue reminder state is
+        baselined rather than queued as a new notification.
+        """
+        baseline_completed = _parse_dt(self.get_v2_state("baseline_completed_utc"))
+        first_seen = _parse_dt(demand["first_seen_utc"] or demand["date_utc"])
+        historical_import = bool(
+            baseline_completed and first_seen and first_seen <= baseline_completed
+        )
+        return super().ensure_wtb_expiry(
+            demand,
+            ttl_days=ttl_days,
+            reminder_lead_days=reminder_lead_days,
+            baseline_mode=bool(baseline_mode or historical_import),
+        )
+
     def cancel_stale_wtb_expiry_alerts(self, owner_user_id=None):
         """Cancel invalid reminder deliveries using conservative SQLite syntax."""
-        clauses = [
-            "status IN ('pending','retry')",
+        invalid_clause = (
             "NOT EXISTS("
             "SELECT 1 FROM marketplace_wtb_expiry e "
             "JOIN marketplace_listings l ON l.id=e.listing_id "
             "WHERE e.demand_logical_id=marketplace_wtb_expiry_alert_queue.demand_logical_id "
             "AND e.status='scheduled' "
             "AND l.listing_type='wanted' AND l.status='wanted'"
-            ")",
-        ]
+            ")"
+        )
         args = []
-        invalid_clause = clauses[1]
         if owner_user_id:
             invalid_clause = f"({invalid_clause} OR owner_user_id<>?)"
             args.append(int(owner_user_id))
