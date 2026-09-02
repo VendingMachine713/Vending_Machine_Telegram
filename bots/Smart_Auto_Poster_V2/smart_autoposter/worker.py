@@ -6,6 +6,12 @@ from datetime import datetime, timedelta, timezone
 
 from .db import Database, utcnow
 from .core import record_content_sent
+from .delivery_ledger import (
+    finish_attempt,
+    mark_acknowledged,
+    reconcile_open_attempts_from_queue,
+    start_attempt,
+)
 from .telegram_io import classify_exception
 from .time_rules import quiet_until
 
@@ -20,21 +26,103 @@ class Worker:
         self.safety = safety
         self.notifier = notifier
         self.stop_requested = False
+        self._startup_recovery_done = False
+        self.last_recovery_summary = None
 
     def recover_interrupted_sends(self):
-        """Never blindly retry a job that was in-flight when the process stopped.
+        """Perform one fail-closed startup recovery pass.
 
-        Telegram may have accepted it just before the local process died. Marking it
-        uncertain avoids accidental duplicate posting.
+        Any job left in ``sending`` may already have reached Telegram, so it is moved
+        to UNCERTAIN and never blindly retried. Work belonging to terminal campaigns
+        is expired, while pending/retry/deferred jobs for active *or paused* campaigns
+        are deliberately preserved so a restart/resume continues from existing state.
+
+        The pass is idempotent within a Worker instance because the CLI worker path can
+        invoke startup recovery before ``run_forever`` invokes it again.
         """
+        if self._startup_recovery_done:
+            return 0
+
         now = utcnow()
         with self.db.connect() as con:
-            rows = con.execute("SELECT id,campaign_id,group_id FROM queue WHERE status='sending'").fetchall()
-            if rows:
-                con.execute("UPDATE queue SET status='uncertain',error_kind='interrupted_send',last_error='process interrupted during send; verify before retry',updated_at=? WHERE status='sending'", (now,))
-        for r in rows:
-            self.db.event("WARNING", "uncertain_send", "Process stopped while this job was sending; automatic retry suppressed", group_id=r["group_id"], campaign_id=r["campaign_id"])
-        return len(rows)
+            con.execute("BEGIN IMMEDIATE")
+            interrupted = con.execute(
+                "SELECT id,campaign_id,group_id FROM queue WHERE status='sending' ORDER BY id"
+            ).fetchall()
+            if interrupted:
+                con.execute(
+                    """UPDATE queue
+                       SET status='uncertain',error_kind='interrupted_send',
+                           last_error='process interrupted during send; verify before retry',
+                           resolved_at=NULL,updated_at=?
+                       WHERE status='sending'""",
+                    (now,),
+                )
+
+            expired = con.execute(
+                """UPDATE queue
+                   SET status='expired',error_kind='campaign_ineligible',
+                       last_error='campaign archived or end date passed',
+                       resolved_at=?,updated_at=?
+                   WHERE status IN ('pending','retry','deferred')
+                     AND campaign_id IN (
+                        SELECT campaign_id FROM campaigns
+                        WHERE lifecycle_state='archived'
+                           OR (end_at IS NOT NULL AND end_at<?)
+                     )""",
+                (now, now, now),
+            ).rowcount
+
+            counts = {
+                r["status"]: int(r["n"])
+                for r in con.execute(
+                    "SELECT status,COUNT(*) AS n FROM queue GROUP BY status"
+                ).fetchall()
+            }
+            resumable_active = con.execute(
+                """SELECT COUNT(*) FROM queue q JOIN campaigns c ON c.campaign_id=q.campaign_id
+                   WHERE q.status IN ('pending','retry','deferred')
+                     AND c.lifecycle_state='active' AND c.enabled=1"""
+            ).fetchone()[0]
+            preserved_paused = con.execute(
+                """SELECT COUNT(*) FROM queue q JOIN campaigns c ON c.campaign_id=q.campaign_id
+                   WHERE q.status IN ('pending','retry','deferred')
+                     AND c.lifecycle_state='paused'"""
+            ).fetchone()[0]
+            uncertain_total = con.execute(
+                "SELECT COUNT(*) FROM queue WHERE status='uncertain'"
+            ).fetchone()[0]
+
+        ledger_reconciled = reconcile_open_attempts_from_queue(self.db)
+
+        for row in interrupted:
+            self.db.event(
+                "WARNING",
+                "uncertain_send",
+                "Process stopped while this job was sending; automatic retry suppressed",
+                group_id=row["group_id"],
+                campaign_id=row["campaign_id"],
+            )
+
+        summary = {
+            "interrupted_to_uncertain": len(interrupted),
+            "terminal_campaign_jobs_expired": int(expired),
+            "resumable_active_jobs": int(resumable_active),
+            "preserved_paused_jobs": int(preserved_paused),
+            "uncertain_total": int(uncertain_total),
+            "delivery_attempts_reconciled": ledger_reconciled,
+            "queue_status": counts,
+        }
+        self.last_recovery_summary = summary
+        self._startup_recovery_done = True
+        if interrupted or expired or any(ledger_reconciled.values()):
+            self.db.event(
+                "WARNING" if interrupted else "INFO",
+                "startup_recovery",
+                "Startup queue recovery completed",
+                details=json.dumps(summary, sort_keys=True),
+            )
+        return len(interrupted)
 
     def sync_accounts(self, auth: dict, session_names: dict[str, str] | None = None):
         session_names = session_names or {}
@@ -175,15 +263,8 @@ class Worker:
                         (account, due_at, reason[:1000], utcnow(), job["id"]))
         self.db.event("INFO", "job_deferred", reason[:800], account_key=account, group_id=job["group_id"], campaign_id=job["campaign_id"])
 
-    def mark_post_send_uncertain(self, job, account: str, message_ids, exc: Exception):
-        """Suppress automatic retry when Telegram succeeded but local persistence did not.
-
-        Once pool.send() has returned message IDs, Telegram has acknowledged the send.
-        A subsequent database/account/history write failure must therefore fail closed:
-        record UNCERTAIN when possible and never route the job through retry logic.
-        If this best-effort update also fails, the row remains `sending` and startup
-        recovery will convert it to UNCERTAIN after restart.
-        """
+    def mark_post_send_uncertain(self, job, account: str, message_ids, exc: Exception, attempt_id: int | None = None):
+        """Suppress automatic retry when Telegram succeeded but local persistence did not."""
         now = utcnow()
         detail = f"post-send persistence failed; Telegram acknowledged delivery: {exc}"
         try:
@@ -194,10 +275,22 @@ class Worker:
                             (account, json.dumps(message_ids), detail[:1000], now, job["id"]))
         except Exception:
             pass
+        if attempt_id is not None:
+            try:
+                finish_attempt(
+                    self.db,
+                    attempt_id,
+                    "uncertain",
+                    error_kind="post_send_persistence",
+                    error_text=detail,
+                    message_ids=message_ids,
+                )
+            except Exception:
+                pass
         try:
             self.db.event("WARNING", "uncertain_send", detail[:800], account_key=account,
                           group_id=job["group_id"], campaign_id=job["campaign_id"],
-                          details=json.dumps({"job_id": job["id"], "telegram_message_ids": message_ids}))
+                          details=json.dumps({"job_id": job["id"], "telegram_message_ids": message_ids, "delivery_attempt_id": attempt_id}))
         except Exception:
             pass
         if self.notifier is not None:
@@ -211,6 +304,19 @@ class Worker:
                 )
             except Exception:
                 pass
+
+    def _ledger_warning(self, job, account, message: str):
+        try:
+            self.db.event(
+                "WARNING",
+                "delivery_ledger_warning",
+                message[:800],
+                account_key=account,
+                group_id=job["group_id"],
+                campaign_id=job["campaign_id"],
+            )
+        except Exception:
+            pass
 
     async def run_once(self, auth):
         if self.safety is not None and self.safety.status().paused:
@@ -240,17 +346,35 @@ class Worker:
             return True
 
         try:
+            attempt = start_attempt(self.db, job["id"], account)
+            attempt_id = int(attempt["id"])
+        except Exception as exc:
+            due = (datetime.now(timezone.utc) + timedelta(seconds=30)).isoformat(timespec="seconds")
+            self.defer_job(job, due, f"delivery ledger unavailable before send: {exc}")
+            return True
+
+        try:
             media = json.loads(job["media_json"] or "[]")
             ids = await self.pool.send(account, job["group_id"], job["caption"], media, job["mode"], job["topic_id"])
         except Exception as exc:
             kind, retry_at, permanent = classify_exception(exc)
+            try:
+                finish_attempt(self.db, attempt_id, "failed", error_kind=kind, error_text=str(exc))
+            except Exception as ledger_exc:
+                self._ledger_warning(job, account, f"Could not finalize failed delivery attempt #{attempt_id}: {ledger_exc}")
             self.finish_error(job, f"{kind}: {exc}", permanent=permanent, retry_at=retry_at, account=account, kind=kind)
             return True
 
         try:
-            now = utcnow()
-            interval = max(int(job.get("min_interval_seconds") or 0), int(job.get("campaign_interval") or 0))
-            next_eligible = (datetime.now(timezone.utc) + timedelta(seconds=interval)).isoformat(timespec="seconds") if interval > 0 else None
+            mark_acknowledged(self.db, attempt_id, ids)
+        except Exception as exc:
+            self.mark_post_send_uncertain(job, account, ids, exc, attempt_id)
+            return True
+
+        now = utcnow()
+        interval = max(int(job.get("min_interval_seconds") or 0), int(job.get("campaign_interval") or 0))
+        next_eligible = (datetime.now(timezone.utc) + timedelta(seconds=interval)).isoformat(timespec="seconds") if interval > 0 else None
+        try:
             with self.db.connect() as con:
                 changed = con.execute("UPDATE queue SET status='sent',account_key=?,attempts=attempts+1,telegram_message_ids=?,error_kind=NULL,last_error=NULL,resolved_at=?,updated_at=? WHERE id=? AND status='sending'",
                                       (account, json.dumps(ids), now, now, job["id"]))
@@ -260,10 +384,24 @@ class Worker:
                             (now, next_eligible, now, job["group_id"]))
                 con.execute("UPDATE accounts SET cooldown_until=NULL,consecutive_failures=0,last_error=NULL,last_success_at=?,last_heartbeat_at=?,health_score=MIN(100,health_score+2),updated_at=? WHERE account_key=?",
                             (now, now, now, account))
-            record_content_sent(self.db, job["campaign_id"], job["group_id"], job["content_id"], now)
-            self.db.event("INFO", "send_success", f"Sent {job['campaign_id']} / {job['content_id']} to {job['group_name']}", account_key=account, group_id=job["group_id"], campaign_id=job["campaign_id"])
         except Exception as exc:
-            self.mark_post_send_uncertain(job, account, ids, exc)
+            self.mark_post_send_uncertain(job, account, ids, exc, attempt_id)
+            return True
+
+        try:
+            finish_attempt(self.db, attempt_id, "sent", message_ids=ids)
+        except Exception as exc:
+            self._ledger_warning(job, account, f"Queue is SENT but delivery attempt #{attempt_id} could not be finalized: {exc}")
+
+        try:
+            record_content_sent(self.db, job["campaign_id"], job["group_id"], job["content_id"], now)
+        except Exception as exc:
+            self._ledger_warning(job, account, f"Send confirmed but content usage bookkeeping failed: {exc}")
+
+        try:
+            self.db.event("INFO", "send_success", f"Sent {job['campaign_id']} / {job['content_id']} to {job['group_name']}", account_key=account, group_id=job["group_id"], campaign_id=job["campaign_id"], details=json.dumps({"delivery_attempt_id": attempt_id, "telegram_message_ids": ids}))
+        except Exception:
+            pass
         return True
 
     def finish_error(self, job, error, permanent=False, retry_at=None, account=None, kind: str | None = None):
