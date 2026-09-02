@@ -126,6 +126,51 @@ class WatchTests(unittest.TestCase):
             self.assertEqual(current["failure_count"], 1)
             self.assertEqual(current["enabled"], 1)
 
+    def test_three_terminal_failures_auto_pause_watch(self):
+        with tempfile.TemporaryDirectory() as d:
+            core, watches = self.make_stores(d)
+            watch = watches.save(10, "iphone", "iphone", -1001)
+            for message_id in (1, 2, 3):
+                self.seed_message(core, message_id=message_id)
+                watches.enqueue_matches(watches.get_message(-1001, message_id))
+            alerts = watches.due_alerts(10)
+            self.assertEqual(len(alerts), 3)
+            for alert in alerts:
+                attempts = 0
+                for _ in range(5):
+                    watches.mark_retry(alert["alert_id"], "blocked", attempts)
+                    attempts += 1
+            current = watches.list_for_owner(10)[0]
+            self.assertEqual(current["failure_count"], 3)
+            self.assertEqual(current["enabled"], 0)
+            self.assertEqual(current["id"], watch["id"])
+
+    def test_cleanup_alert_history_removes_only_expired_terminal_records(self):
+        with tempfile.TemporaryDirectory() as d:
+            core, watches = self.make_stores(d)
+            watch = watches.save(10, "iphone", "iphone", -1001)
+            self.seed_message(core, message_id=1)
+            self.seed_message(core, message_id=2)
+            watches.enqueue_matches(watches.get_message(-1001, 1))
+            watches.enqueue_matches(watches.get_message(-1001, 2))
+            alerts = watches.due_alerts(10)
+            watches.mark_sent(alerts[0]["alert_id"], watch["id"])
+            attempts = 0
+            for _ in range(5):
+                watches.mark_retry(alerts[1]["alert_id"], "network", attempts)
+                attempts += 1
+            with watches.conn() as c:
+                c.execute(
+                    "UPDATE alert_queue SET sent_utc='2020-01-01T00:00:00+00:00' WHERE id=?",
+                    (alerts[0]["alert_id"],),
+                )
+                c.execute(
+                    "UPDATE alert_queue SET created_utc='2020-01-01T00:00:00+00:00' WHERE id=?",
+                    (alerts[1]["alert_id"],),
+                )
+            self.assertEqual(watches.cleanup_alert_history(), 2)
+            self.assertEqual(watches.queue_status_for_owner(10), [])
+
 
 if __name__ == "__main__":
     unittest.main()
