@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sqlite3
+import sys
 import time
 import uuid
 from contextlib import contextmanager
@@ -17,6 +18,12 @@ from match_runtime import HardenedMatchEngine
 from match_ui import format_match_alert
 
 BASE = Path(__file__).resolve().parent
+ROOT = BASE.parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from shared.vm_core.security import central_owner_ids
+
 DB = BASE / "data" / "universal_search.db"
 STATE = BASE / "state"
 STATUS_FILE = STATE / "match_engine_status.json"
@@ -50,10 +57,19 @@ def parse_dt(value):
 
 
 def admin_id():
+    """Legacy local-owner compatibility during central-owner migration."""
     try:
         return int(ADMIN_FILE.read_text(encoding="utf-8").strip())
     except Exception:
         return None
+
+
+def authorized_owner_ids():
+    owners = set(central_owner_ids(ROOT))
+    local = admin_id()
+    if local:
+        owners.add(local)
+    return tuple(sorted(int(value) for value in owners if int(value) > 0))
 
 
 class DaemonLease:
@@ -153,22 +169,27 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Passive VM Universal Search demand-match daemon.")
     parser.add_argument("--interval", type=int, default=30, help="Refresh interval in seconds (10-600).")
     parser.add_argument("--min-score", type=float, default=45.0, help="Minimum score retained as a match.")
-    parser.add_argument("--alert-score", type=float, default=65.0, help="Minimum score for private admin alerts.")
+    parser.add_argument("--alert-score", type=float, default=65.0, help="Minimum score for private owner alerts.")
     parser.add_argument("--once", action="store_true", help="Run one safe refresh cycle and exit.")
     return parser.parse_args(argv)
 
 
-async def deliver_due(bot, engine, logger):
+async def deliver_due(bot, engine, logger, owners):
     delivered = 0
     failed = 0
-    for alert in engine.due_alerts(20):
+    for alert in engine.due_alerts_for_owners(owners, 20):
         match = engine.get_match(alert["id"])
         if not match:
             engine.cancel_stale_alerts(alert["id"])
             continue
+        owner = int(alert["owner_user_id"])
+        if owner not in owners:
+            # The owner set may have changed between the queue read and send.
+            engine.reconcile_alert_owners(authorized_owner_ids())
+            continue
         try:
             await bot.send_message(
-                chat_id=alert["owner_user_id"],
+                chat_id=owner,
                 text=format_match_alert(match),
                 parse_mode="HTML",
                 disable_web_page_preview=True,
@@ -190,25 +211,28 @@ async def deliver_due(bot, engine, logger):
 
 async def cycle(engine, bot, *, min_score, alert_score, logger):
     refresh = await asyncio.to_thread(engine.refresh_all, min_score=min_score)
-    owner = admin_id()
+    owners = authorized_owner_ids()
+    cancelled_wrong_owner = await asyncio.to_thread(
+        engine.reconcile_alert_owners, owners
+    )
     queued = 0
     delivered = 0
     failed = 0
-    cancelled_wrong_owner = 0
-    if owner:
-        cancelled_wrong_owner = await asyncio.to_thread(
-            engine.cancel_wrong_owner_alerts, owner
-        )
-    if owner and engine.notifications_enabled():
+    if owners and engine.notifications_enabled():
         queued = await asyncio.to_thread(
-            engine.enqueue_new_alerts, owner, min_score=alert_score, limit=50
+            engine.enqueue_new_alerts_for_owners,
+            owners,
+            min_score=alert_score,
+            limit=50,
         )
-        delivered, failed = await deliver_due(bot, engine, logger)
+        delivered, failed = await deliver_due(bot, engine, logger, set(owners))
     totals, _ = await asyncio.to_thread(engine.stats)
     queue = await asyncio.to_thread(engine.queue_status)
     return {
         "state": "healthy",
-        "admin_configured": bool(owner),
+        "admin_configured": bool(owners),
+        "authorized_owner_count": len(owners),
+        "central_owner_configured": bool(central_owner_ids(ROOT)),
         "notifications_enabled": engine.notifications_enabled(),
         "refresh": refresh,
         "cancelled_wrong_owner_alerts": cancelled_wrong_owner,
@@ -240,11 +264,11 @@ async def run(args):
     engine = HardenedMatchEngine(DB)
 
     lease = DaemonLease(DB)
-    acquired, owner = lease.acquire()
+    acquired, lease_owner = lease.acquire()
     if not acquired:
-        write_status(state="duplicate_blocked", existing_owner=owner)
+        write_status(state="duplicate_blocked", existing_owner=lease_owner)
         raise SystemExit(
-            f"Another match daemon lease is active (pid={owner.get('pid') if owner else '?'})."
+            f"Another match daemon lease is active (pid={lease_owner.get('pid') if lease_owner else '?'})."
         )
 
     logger = logging.getLogger("universal_search.match_daemon")
@@ -255,12 +279,10 @@ async def run(args):
         initialized = True
         bootstrap = await asyncio.to_thread(engine.bootstrap, min_score=min_score)
         cancelled = await asyncio.to_thread(engine.cancel_stale_alerts)
-        current_owner = admin_id()
-        cancelled_wrong_owner = 0
-        if current_owner:
-            cancelled_wrong_owner = await asyncio.to_thread(
-                engine.cancel_wrong_owner_alerts, current_owner
-            )
+        owners = authorized_owner_ids()
+        cancelled_wrong_owner = await asyncio.to_thread(
+            engine.reconcile_alert_owners, owners
+        )
         pruned = await asyncio.to_thread(engine.cleanup_alert_history)
         write_status(
             state="starting",
@@ -268,6 +290,9 @@ async def run(args):
             cancelled_stale_alerts=cancelled,
             cancelled_wrong_owner_alerts=cancelled_wrong_owner,
             pruned_alert_records=pruned,
+            admin_configured=bool(owners),
+            authorized_owner_count=len(owners),
+            central_owner_configured=bool(central_owner_ids(ROOT)),
             notifications_enabled=engine.notifications_enabled(),
             alert_queue=engine.queue_status(),
         )
@@ -295,7 +320,12 @@ async def run(args):
                 raise
             except Exception as exc:
                 logger.exception("Match daemon cycle failed")
-                write_status(state="degraded", error_type=type(exc).__name__, error=str(exc)[:1000])
+                write_status(
+                    state="degraded",
+                    error_type=type(exc).__name__,
+                    error=str(exc)[:1000],
+                    authorized_owner_count=len(authorized_owner_ids()),
+                )
             if args.once:
                 return
             elapsed = time.monotonic() - started
