@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .db import Database, utcnow
+from .queue_capacity import enforce_queue_limits_on_connection
 from .time_rules import parse_hhmm
 
 ROTATION_MODES = {"sequential", "random", "least_recent", "weighted"}
@@ -379,6 +380,10 @@ def campaign_preview(db: Database, campaign_id: str):
 def enqueue_campaign(db: Database, campaign_id: str, dry_run=False, run_key: str | None = None, limits: dict | None = None):
     now = utcnow()
     with db.connect() as con:
+        if not dry_run:
+            # Serialize capacity check + selection + insertion + cycle/run-seal update.
+            # This closes the check-then-insert race between scheduler/manual enqueues.
+            con.execute("BEGIN IMMEDIATE")
         camp = con.execute("SELECT * FROM campaigns WHERE campaign_id=?", (campaign_id,)).fetchone()
         if not camp:
             raise RuntimeError(f"Unknown campaign: {campaign_id}")
@@ -401,9 +406,11 @@ def enqueue_campaign(db: Database, campaign_id: str, dry_run=False, run_key: str
             return {"selected": len(selected), "inserted": 0, "duplicates": 0, "run_key": key, "preview": preview}
 
         if limits:
-            from .operations import enforce_queue_limits
-            enforce_queue_limits(
-                db, add_count=len(selected), campaign_id=campaign_id, group_ids=[int(d["group_id"]) for d in selected],
+            enforce_queue_limits_on_connection(
+                con,
+                add_count=len(selected),
+                campaign_id=campaign_id,
+                group_ids=[int(d["group_id"]) for d in selected],
                 max_queue_size=int(limits.get("max_queue_size", 50000)),
                 max_pending_per_campaign=int(limits.get("max_pending_per_campaign", 10000)),
                 max_pending_per_destination=int(limits.get("max_pending_per_destination", 100)),
