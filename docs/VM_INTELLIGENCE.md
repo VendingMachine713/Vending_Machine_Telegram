@@ -108,30 +108,62 @@ The calibration engine:
 - caps any proposed score delta to +/-10 points
 - never applies a proposal automatically
 
-Calibration proposals are therefore recommendations about the intelligence rules themselves, not active configuration changes.
+Calibration proposals are recommendations about the intelligence rules themselves, not active configuration changes.
+
+## Governed rule registry
+
+VM Core v1.7.0 adds `shared.vm_core.rule_registry` as the controlled boundary between calibration advice and future scoring changes.
+
+The registry provides:
+
+- durable calibration change proposals
+- explicit `APPROVED` / `REJECTED` governance before activation
+- immutable per-rule registry versions
+- parent-version lineage
+- bounded score deltas capped at +/-10 points
+- deterministic staged rollout percentages
+- activation audit events
+- rollback to the prior active registry version
+- passive registry summaries
+
+Proposal lifecycle:
+
+`PROPOSED -> APPROVED -> ACTIVATED -> ROLLED_BACK`
+
+or:
+
+`PROPOSED -> REJECTED`
+
+Approval and activation are deliberately separate operations. An approved proposal does nothing until an operator explicitly activates it. Registry activation records a governed calibration version and rollout policy; it does not send Telegram messages, alter Smart Auto Poster queues, or grant external-action authority.
+
+`effective_score_delta()` exposes the staged, governed adjustment for recommendation-scoring integration. The rule registry itself does not bypass the existing recommendation, governance or safety layers.
 
 Operator tool:
 
 ```powershell
-python tools/vm_brain_calibration.py summary
-python tools/vm_brain_calibration.py report
+python tools/vm_brain_rules.py summary
+python tools/vm_brain_rules.py sync
+python tools/vm_brain_rules.py list
+python tools/vm_brain_rules.py approve 1 --actor admin
+python tools/vm_brain_rules.py activate 1 --actor admin --rollout 10
+python tools/vm_brain_rules.py rollback 1 --actor admin
 ```
 
-`automatic_application` and `automatic_execution` remain `False`.
+Automatic approval, automatic activation and automatic external execution remain disabled.
 
 ## Authority model
 
-VM Intelligence does not automatically perform consequential actions in v1.6.0.
+VM Intelligence does not automatically perform consequential external actions in v1.7.0.
 
 The progression is now:
 
-`Observe -> Correlate -> Recommend -> Govern -> Verify -> Learn -> Calibrate -> Governed Change`
+`Observe -> Correlate -> Recommend -> Govern -> Verify -> Learn -> Calibrate -> Governed Change -> Stage -> Verify -> Roll Back if needed`
 
-A calibration proposal is not authority to alter a production rule. Future rule changes must be versioned, explicitly governed, reversible and separately tested before activation.
+A calibration proposal is not authority to alter a rule. Approval is not activation. Registry activation is versioned, bounded and reversible, and it still does not authorize Telegram execution.
 
 ## Admin surface
 
-The Admin Command Centre exposes read-only `/intelligence` and `/brain` views. Calibration remains passive at this stage and is available through the operator tool.
+The Admin Command Centre exposes read-only `/intelligence` and `/brain` views. Rule-registry administration remains available through the operator tool at this stage.
 
 ## Adding a new bot signal
 
