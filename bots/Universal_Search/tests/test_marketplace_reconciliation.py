@@ -74,6 +74,47 @@ class MarketplaceReconciliationTests(unittest.TestCase):
             self.assertEqual(available["status"], "available")
             self.assertEqual(available["logical_listing_id"], first["logical_listing_id"])
 
+    def test_full_price_edit_with_available_updates_price_and_history(self):
+        with tempfile.TemporaryDirectory() as d:
+            _, market = self.make_stores(d)
+            first = reconcile_marketplace_message(
+                market,
+                -1001,
+                1,
+                10,
+                "2026-09-02T00:00:00+00:00",
+                "For sale iPhone 15 Pro $900 available",
+            )
+            second = reconcile_marketplace_message(
+                market,
+                -1001,
+                1,
+                10,
+                "2026-09-02T01:00:00+00:00",
+                "For sale iPhone 15 Pro $850 available",
+            )
+            self.assertEqual(second["price_cents"], 85000)
+            self.assertEqual(second["logical_listing_id"], first["logical_listing_id"])
+            listing, history = market.price_history_for_listing(second["id"])
+            self.assertEqual(listing["price_cents"], 85000)
+            self.assertEqual([row["price_cents"] for row in history], [90000, 85000])
+
+    def test_short_explicit_relisting_is_reparsed_not_status_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            _, market = self.make_stores(d)
+            first = reconcile_marketplace_message(
+                market, -1001, 1, 10, "2026-09-02T00:00:00+00:00",
+                "For sale phone $500 available",
+            )
+            relisted = reconcile_marketplace_message(
+                market, -1001, 1, 10, "2026-09-02T01:00:00+00:00",
+                "For sale phone available pickup Marion",
+            )
+            self.assertEqual(relisted["listing_type"], "sale")
+            self.assertEqual(relisted["status"], "available")
+            self.assertIsNone(relisted["price_cents"])
+            self.assertNotEqual(relisted["fingerprint"], first["fingerprint"])
+
     def test_rebuild_reconciles_current_raw_index(self):
         with tempfile.TemporaryDirectory() as d:
             core, market = self.make_stores(d)
