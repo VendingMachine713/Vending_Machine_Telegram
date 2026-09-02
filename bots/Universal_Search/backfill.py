@@ -7,6 +7,7 @@ from pathlib import Path
 from core import Store
 from envutil import load_env
 from marketplace import MarketplaceStore
+from marketplace_reconcile import reconcile_marketplace_message
 
 BASE = Path(__file__).resolve().parent
 DB = BASE / "data" / "universal_search.db"
@@ -139,11 +140,11 @@ async def backfill_chat(
                 text, bool(message.media),
                 source="backfill",
             )
-            market_row = market.ingest(chat_id, message.id, sender_id, date_utc, text)
+            market_row = reconcile_marketplace_message(
+                market, chat_id, message.id, sender_id, date_utc, text
+            )
             if market_row:
                 marketplace_this_run += 1
-            else:
-                market.remove_for_message(chat_id, message.id)
             total_this_run += 1
             scanned_since_checkpoint += 1
             oldest_seen = message.id if oldest_seen is None else min(oldest_seen, message.id)
