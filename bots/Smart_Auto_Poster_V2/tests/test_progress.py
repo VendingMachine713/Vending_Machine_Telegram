@@ -31,6 +31,17 @@ class FakePool:
         return [12345]
 
 
+class LegacyPool:
+    """Compatibility double matching the pre-progress pool method signature."""
+
+    def __init__(self):
+        self.calls = 0
+
+    async def send(self, account_key, group_id, caption, media, mode, topic_id=None):
+        self.calls += 1
+        return [54321]
+
+
 class ProgressTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -72,6 +83,12 @@ class ProgressTests(unittest.TestCase):
                 (gid,),
             ).fetchone()
         return dict(row)
+
+    def _auth(self):
+        return {
+            "primary": {"authorized": True, "identity": "primary", "user_id": 1},
+            "secondary": {"authorized": True, "identity": "secondary", "user_id": 2},
+        }
 
     def test_bar_fill_correlates_with_numeric_percentage(self):
         bar36 = render_bar(36, width=100)
@@ -128,10 +145,7 @@ class ProgressTests(unittest.TestCase):
         stream = io.StringIO()
         reporter = TerminalProgressReporter(self.db, stream=stream, min_percent_step=1)
         worker = Worker(self.db, pool, progress_reporter=reporter)
-        auth = {
-            "primary": {"authorized": True, "identity": "primary", "user_id": 1},
-            "secondary": {"authorized": True, "identity": "secondary", "user_id": 2},
-        }
+        auth = self._auth()
         worker.sync_accounts(auth, {"primary": "p", "secondary": "s"})
         worked = asyncio.run(worker.run_once(auth))
         self.assertTrue(worked)
@@ -149,6 +163,17 @@ class ProgressTests(unittest.TestCase):
         self.assertIn("[RUN]", output)
         self.assertIn("posted 1/4", output)
         self.assertIn("left 3", output)
+
+    def test_worker_accepts_legacy_pool_without_progress_keyword(self):
+        pool = LegacyPool()
+        worker = Worker(self.db, pool, min_send_gap_seconds=0)
+        auth = self._auth()
+        worker.sync_accounts(auth, {"primary": "p", "secondary": "s"})
+        worked = asyncio.run(worker.run_once(auth))
+        self.assertTrue(worked)
+        self.assertEqual(pool.calls, 1)
+        with self.db.connect() as con:
+            self.assertEqual(con.execute("SELECT COUNT(*) FROM queue WHERE status='sent'").fetchone()[0], 1)
 
 
 if __name__ == "__main__":
