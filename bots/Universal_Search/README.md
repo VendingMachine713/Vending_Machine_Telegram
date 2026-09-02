@@ -1,16 +1,16 @@
 # VM Universal Search
 
-Universal Search indexes Telegram messages into a local SQLite database and provides searchable access and passive match alerts through Telegram.
+Universal Search indexes Telegram messages into a local SQLite database and provides searchable access, passive match alerts, historical backfill, and structured marketplace intelligence through Telegram.
 
 ## Current version
 
-**v1.3.0**
+**v1.4.0**
 
 ## Core capabilities
 
 ### Live indexing
 
-The Bot API process indexes new messages it receives into the local SQLite database.
+The Bot API process indexes new messages it receives into the local SQLite database. New live messages are also evaluated for passive watches and structured marketplace extraction.
 
 ### Historical backfill
 
@@ -24,9 +24,10 @@ The worker:
 - stores message text/caption and media-presence metadata;
 - checkpoints progress so interrupted scans can resume;
 - uses the same Bot API-style marked chat IDs (`-100...`) as the live index;
-- upserts by `(chat_id, message_id)` so live and historical indexing do not duplicate records.
+- upserts by `(chat_id, message_id)` so live and historical indexing do not duplicate records;
+- extracts structured marketplace metadata while historical messages are indexed.
 
-Historical backfill does **not** generate passive watch alerts. Alerts are generated from new live messages only, preventing a newly configured bot from flooding the admin with old historical matches.
+Historical backfill does **not** generate passive watch alerts, preventing old-message alert floods.
 
 ### Search Engine v2
 
@@ -45,32 +46,58 @@ Search supports:
 - Previous/Next pagination;
 - persistent 24-hour pagination sessions;
 - recent search history;
-- links back to the original Telegram message when a link can be constructed.
+- original-message links when constructible.
 
 ### Passive saved-search alerts
 
-v1.3 adds durable saved watches. A watch reuses the same query syntax as `/search` and evaluates each newly indexed live message.
-
-Matching messages are placed into a durable SQLite alert queue and delivered privately through the bot.
+Durable saved watches reuse the search query grammar and evaluate newly indexed live messages.
 
 The alert pipeline includes:
 
-- configure-once saved searches;
-- local-chat or global scope;
+- admin-managed local-chat or global watches;
 - duplicate suppression per watch/message pair;
-- persistent pending/retry/sent/failed delivery state;
-- exponential retry backoff;
-- five delivery attempts per alert before terminal failure;
-- watch-level consecutive failure tracking;
-- automatic watch pause after repeated terminal delivery failures;
+- durable pending/retry/sent/failed state;
+- bounded exponential retry backoff;
+- five delivery attempts per alert;
+- automatic watch pause after repeated terminal failures;
 - pause/resume/delete controls;
 - queue status reporting;
-- original-message links in alerts when available;
-- automatic retention cleanup for old sent/failed delivery records.
+- automatic retention cleanup.
 
-A successful alert resets the watch failure counter.
+Saved watches remain admin-only until membership-safe per-user delivery checks are implemented.
 
-**v1.3 keeps saved watches admin-only.** Per-user group subscriptions are intentionally deferred until membership-safe delivery checks are implemented, so a former group member cannot continue receiving private alerts from a group after losing access.
+### Marketplace intelligence
+
+v1.4 adds a structured marketplace layer beside the raw message index.
+
+It automatically extracts conservative marketplace signals from both live and historical messages, including:
+
+- listing type: sale, wanted, trade, service;
+- lifecycle state: available, wanted, pending, sold, unavailable;
+- AUD prices including `$900`, `$1,250`, `AUD 850`, and `1.5k`-style values;
+- category;
+- condition;
+- location hints;
+- confidence score;
+- seller identity when available;
+- logical listing identity across exact/safe reposts;
+- repost counts;
+- price history.
+
+Marketplace data is stored in separate SQLite tables so the proven FTS search engine remains independent.
+
+Structured marketplace searches support:
+
+- text terms;
+- listing type;
+- category;
+- lifecycle status;
+- seller username;
+- minimum and maximum price;
+- relevance/newest/oldest/price sorting;
+- user-bound 24-hour Previous/Next pagination;
+- local-chat scope by default;
+- admin-only `--global` scope.
 
 ## Bot commands
 
@@ -79,6 +106,11 @@ A successful alert resets the watch failure counter.
 /crosssearch <query>     admin only
 /findads <query>         admin only
 /recentsearches
+
+/market <query>
+/listing <id>
+/pricehistory <id>
+/marketstats [--global]
 
 /watch name :: query              admin only
 /watch name :: query --global     admin only
@@ -93,100 +125,79 @@ A successful alert resets the watch failure counter.
 /backfillstatus          admin only
 ```
 
-Cross-chat search is deliberately restricted to the claimed Universal Search admin. This prevents the bot-owned index from exposing messages from one indexed group to arbitrary users in another context.
+Cross-chat raw search and global marketplace search are restricted to the claimed Universal Search admin.
 
-## Query examples
-
-Basic search:
+## Search examples
 
 ```text
 /search iphone 15
-```
-
-Exact phrase:
-
-```text
 /search "iphone 15 pro"
-```
-
-OR search:
-
-```text
 /search iphone OR samsung
-```
-
-Exclude a term:
-
-```text
 /search hilux -wanted
-```
-
-Sender and date filter:
-
-```text
 /search wheels --user @seller --days 30
+/search exhaust --media --sort newest
 ```
 
-Media-only results:
+## Marketplace examples
+
+Available marketplace listings in the current chat:
 
 ```text
-/search exhaust --media
+/market
 ```
 
-Sorting:
+Search current-chat sale listings:
 
 ```text
-/search iphone --sort relevant
-/search iphone --sort newest
-/search iphone --sort oldest
+/market iphone --type sale --status available
 ```
 
-Result size and explicit page:
+Price range and sorting:
 
 ```text
-/search iphone --limit 10 --page 2
+/market hilux --min 500 --max 5000 --sort price-asc
 ```
 
-The Telegram result message also provides Previous/Next buttons when additional pages are available.
+Filter by category or seller:
+
+```text
+/market wheels --category vehicles_parts --user @seller
+```
+
+Search all indexed chats as admin:
+
+```text
+/market iphone --global
+```
+
+Inspect one structured listing:
+
+```text
+/listing 12
+```
+
+View price history for that logical listing:
+
+```text
+/pricehistory 12
+```
+
+Marketplace statistics:
+
+```text
+/marketstats
+/marketstats --global
+```
 
 ## Saved-watch examples
 
-Create an admin watch scoped to the group where the command is sent:
-
 ```text
 /watch iphone-deals :: "iphone 15" --ads
-```
-
-Create a global admin watch across all indexed chats:
-
-```text
 /watch hilux-global :: hilux -wanted --global
-```
-
-When the claimed admin creates a watch from the bot's private chat, the scope defaults to global.
-
-List watches:
-
-```text
 /watches
-```
-
-Pause and resume without deleting the configuration:
-
-```text
 /pausewatch 3
 /resumewatch 3
-```
-
-Delete permanently:
-
-```text
 /deletewatch 3
-```
-
-View delivery queue counts:
-
-```text
 /alertstatus
 ```
 
@@ -224,45 +235,43 @@ py -m pip install -r requirements.txt
 .\START.ps1
 ```
 
-The passive alert worker starts and stops with the normal polling application. It does not require APScheduler or the optional `python-telegram-bot[job-queue]` dependency.
-
 ## Historical backfill
-
-Show current progress without connecting to Telegram:
 
 ```powershell
 .\BACKFILL.ps1 -Mode Status
-```
-
-List accessible groups/channels:
-
-```powershell
 .\BACKFILL.ps1 -Mode ListChats
-```
-
-Backfill one chat:
-
-```powershell
 .\BACKFILL.ps1 -Mode Chat -Chat "-1001234567890" -Limit 5000
-```
-
-Backfill accessible groups/channels:
-
-```powershell
 .\BACKFILL.ps1 -Mode All -Limit 5000
-```
-
-Limit history to a date window:
-
-```powershell
 .\BACKFILL.ps1 -Mode All -Limit 10000 -Days 90
 ```
 
-On the first Telethon login, Telegram may require an interactive login code. After the dedicated local session is authorised, later backfills reuse it.
+On first Telethon login, Telegram may require an interactive login code. Later backfills reuse the dedicated ignored local session.
+
+## Marketplace maintenance
+
+Rebuild structured marketplace data from the existing raw message index:
+
+```powershell
+.\MARKETPLACE.ps1 -Mode Rebuild
+```
+
+Search from PowerShell:
+
+```powershell
+.\MARKETPLACE.ps1 -Mode Search -Query "iphone --type sale --max 1000"
+```
+
+Statistics:
+
+```powershell
+.\MARKETPLACE.ps1 -Mode Stats
+```
+
+The rebuild is idempotent by `(chat_id, message_id)` and is useful after upgrading an existing v1.3 database so already-indexed historical messages gain v1.4 marketplace metadata without repeating Telegram history downloads.
 
 ## Database migration behaviour
 
-Database upgrades are automatic and idempotent when the stores open the existing database.
+Database upgrades are automatic and idempotent when stores open the existing database.
 
 They preserve existing data and add, as required:
 
@@ -270,22 +279,22 @@ They preserve existing data and add, as required:
 - FTS5 index and synchronisation triggers;
 - search sessions and recent-search history;
 - saved-search definitions;
-- durable alert queue and retry metadata.
-
-If the local SQLite build does not provide FTS5, search remains available through the slower LIKE fallback and `/health` reports the fallback mode.
+- durable alert queue and retry metadata;
+- structured marketplace listings;
+- marketplace price history;
+- marketplace pagination sessions.
 
 ## Safety and privacy
 
-- Historical backfill is isolated from Bot API polling.
-- Telegram history access is read-only.
-- Media files are not downloaded by the backfill worker.
-- Historical backfill does not create old-message alerts.
-- Cross-chat searches require the claimed admin.
-- Saved watches are admin-only in v1.3.
-- Pagination sessions are bound to the user who initiated the search and expire after 24 hours.
-- Saved-watch delivery records prevent duplicate alerts for the same watch/message pair.
-- Delivery failures back off exponentially instead of busy-looping Telegram.
-- Old sent delivery records are pruned after 30 days and old failed records after 90 days on startup.
+- Historical Telegram access is read-only.
+- Media files are not downloaded by backfill.
+- Historical backfill never creates passive alerts.
+- Cross-chat raw searches require the claimed admin.
+- Global marketplace searches/statistics require the claimed admin.
+- `/listing` and `/pricehistory` only expose another chat's record to the claimed admin.
+- Search and marketplace pagination sessions are user-bound and expire after 24 hours.
+- Saved watches remain admin-only.
+- Alert delivery failures back off instead of busy-looping Telegram.
 - Bot tokens, API hashes and Telegram sessions remain local-only.
 
 ## Testing
@@ -295,4 +304,4 @@ py -m unittest discover -s tests -q
 py -m compileall -q .
 ```
 
-The repository GitHub Actions workflow also compiles Universal Search and runs its unit tests on Windows with Python 3.12 before merge.
+Repository CI compiles and tests Universal Search on Python 3.12. A dedicated Linux Universal Search workflow is also present to provide a second execution path when the repository's Windows runner pool is unavailable.
