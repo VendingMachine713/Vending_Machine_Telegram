@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 from telethon import TelegramClient, errors
 
@@ -101,7 +101,17 @@ class TelegramPool:
             })
         return rows
 
-    async def send(self, account_key: str, group_id: int, caption: str, media: Iterable[str], mode: str, topic_id: int | None = None):
+    async def send(
+        self,
+        account_key: str,
+        group_id: int,
+        caption: str,
+        media: Iterable[str],
+        mode: str,
+        topic_id: int | None = None,
+        progress_callback: Callable[[float, float], None] | None = None,
+    ):
+        """Send one post and optionally report real Telegram transfer progress."""
         c = self.clients[account_key]
         entity = await c.get_entity(group_id)
         kwargs = {}
@@ -110,13 +120,21 @@ class TelegramPool:
             kwargs["reply_to"] = int(topic_id)
         if mode == "text":
             msg = await c.send_message(entity, caption, **kwargs)
+            if progress_callback is not None:
+                progress_callback(1.0, 1.0)
             return [msg.id]
         files = [str(Path(x)) for x in media]
         if not files:
             raise RuntimeError("Photo-mode destination has no media files")
-        cached = await self.media_caches[account_key].get(files)
+        cached = await self.media_caches[account_key].get(files, progress_callback=progress_callback)
         send_files = cached if cached else files
-        messages = await c.send_file(entity, send_files, caption=caption or None, **kwargs)
+        messages = await c.send_file(
+            entity,
+            send_files,
+            caption=caption or None,
+            progress_callback=progress_callback,
+            **kwargs,
+        )
         if not isinstance(messages, list):
             messages = [messages]
         return [m.id for m in messages]
