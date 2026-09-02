@@ -8,8 +8,8 @@ class HardenedMatchEngine(MatchEngine):
     """Operational hardening around the v1.5 matching core.
 
     The base MatchEngine owns scoring and match persistence. This subclass keeps
-    the alert queue aligned with match lifecycle state and provides explicit
-    operator recovery controls without changing the matching algorithm.
+    the alert queue aligned with match lifecycle and admin ownership while
+    providing explicit operator recovery controls without changing scoring.
     """
 
     def cancel_stale_alerts(self, match_id=None):
@@ -39,6 +39,19 @@ class HardenedMatchEngine(MatchEngine):
                 ids,
             )
         return len(ids)
+
+    def cancel_wrong_owner_alerts(self, owner_user_id):
+        """Cancel live queued alerts addressed to a superseded admin account."""
+        if not owner_user_id:
+            return 0
+        with self.conn() as c:
+            cur = c.execute(
+                """UPDATE marketplace_match_alert_queue
+                   SET status='cancelled',last_error='admin ownership changed'
+                   WHERE status IN ('pending','retry') AND owner_user_id<>?""",
+                (int(owner_user_id),),
+            )
+        return int(cur.rowcount)
 
     def refresh_all(self, *, min_score=45.0, force_baseline=False):
         result = super().refresh_all(min_score=min_score, force_baseline=force_baseline)
