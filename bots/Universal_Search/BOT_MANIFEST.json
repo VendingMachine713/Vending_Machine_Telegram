@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "name": "Universal_Search",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "status": "existing",
   "classification": "CANONICAL",
   "entrypoint": "main.py",
@@ -17,7 +17,8 @@
   ],
   "tests": [
     "tests\\test_core.py",
-    "tests\\test_backfill.py"
+    "tests\\test_backfill.py",
+    "tests\\test_watches.py"
   ],
   "vm_core": {
     "compatible": true,
@@ -43,7 +44,12 @@
     "search_filters",
     "result_pagination",
     "original_message_links",
-    "recent_search_history"
+    "recent_search_history",
+    "saved_searches",
+    "passive_match_alerts",
+    "durable_alert_queue",
+    "alert_retry_backoff",
+    "watch_pause_resume"
   ],
   "lifecycle": {
     "managed_by_vm": true,
