@@ -6,9 +6,9 @@ $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
 Write-Host "============================================================"
-Write-Host " VM UNIVERSAL SEARCH - LOCAL QUALITY GATE"
+Write-Host " VM UNIVERSAL SEARCH v1.6 - LOCAL QUALITY GATE"
 Write-Host "============================================================"
-Write-Host "Safety: compile/tests/read-only DB checks only. No Telegram sends."
+Write-Host "Safety: compile/tests/temp-schema/read-only DB checks only. No Telegram sends."
 Write-Host ""
 
 function Invoke-Step([string]$Name, [scriptblock]$Action) {
@@ -33,10 +33,92 @@ $manifest = Get-Content '.\BOT_MANIFEST.json' -Raw | ConvertFrom-Json
 if (-not $manifest.name -or $manifest.name -ne 'Universal_Search') {
     throw 'BOT_MANIFEST.json has an unexpected bot name.'
 }
-if (-not $manifest.version) {
-    throw 'BOT_MANIFEST.json version is missing.'
+if ($manifest.version -ne '1.6.0') {
+    throw "BOT_MANIFEST.json expected version 1.6.0, found $($manifest.version)."
+}
+$RequiredCapabilities = @(
+    'event_driven_two_way_matching',
+    'sql_candidate_prefiltering',
+    'candidate_window_safe_revalidation',
+    'wtb_expiry_reminders',
+    'historical_wtb_reminder_baseline',
+    'advisory_match_threshold_calibration',
+    'admin_match_commands'
+)
+foreach ($capability in $RequiredCapabilities) {
+    if ($manifest.capabilities -notcontains $capability) {
+        throw "BOT_MANIFEST.json missing v1.6 capability: $capability"
+    }
 }
 Write-Host ("[OK] BOT_MANIFEST.json name={0} version={1}" -f $manifest.name, $manifest.version)
+
+Write-Host "> Validate required v1.6 files"
+$RequiredFiles = @(
+    '.\match_engine_v2.py',
+    '.\match_engine_v2_runtime.py',
+    '.\match_daemon_v2.py',
+    '.\match_cli_v2.py',
+    '.\match_commands_v2.py',
+    '.\match_ui_v2.py',
+    '.\migrations\__init__.py',
+    '.\migrations\0007_match_feedback.py',
+    '.\tests\test_match_engine_v2.py',
+    '.\tests\test_match_engine_v2_backfill.py',
+    '.\tests\test_match_engine_v2_candidate_window.py'
+)
+foreach ($file in $RequiredFiles) {
+    if (-not (Test-Path $file)) {
+        throw "Required v1.6 file missing: $file"
+    }
+}
+Write-Host "[OK] Required v1.6 files present"
+
+Invoke-Step "Match Engine v2 temporary-schema smoke check" {
+    $Python = @'
+import sqlite3
+import tempfile
+from pathlib import Path
+from core import Store
+from marketplace import MarketplaceStore
+from match_engine_v2_runtime import HardenedMatchEngineV2
+
+with tempfile.TemporaryDirectory() as d:
+    db = Path(d) / 'quality_gate.db'
+    Store(db)
+    MarketplaceStore(db)
+    HardenedMatchEngineV2(db)
+    con = sqlite3.connect(db)
+    try:
+        tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        triggers = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
+        required_tables = {
+            'marketplace_matches',
+            'marketplace_match_feedback',
+            'marketplace_match_events',
+            'marketplace_wtb_expiry',
+            'marketplace_wtb_expiry_alert_queue',
+            'marketplace_match_v2_state',
+        }
+        required_triggers = {
+            'marketplace_match_event_ai',
+            'marketplace_match_event_au',
+            'marketplace_match_event_bd',
+        }
+        missing_tables = sorted(required_tables - tables)
+        missing_triggers = sorted(required_triggers - triggers)
+        integrity = con.execute('PRAGMA integrity_check').fetchall()
+    finally:
+        con.close()
+    if missing_tables or missing_triggers or integrity != [('ok',)]:
+        raise SystemExit({
+            'missing_tables': missing_tables,
+            'missing_triggers': missing_triggers,
+            'integrity': integrity,
+        })
+    print({'tables': len(tables), 'triggers': len(triggers), 'integrity': 'ok'})
+'@
+    $Python | & py -
+}
 
 Write-Host "> Parse PowerShell launchers"
 $PowerShellFiles = @(
@@ -98,5 +180,5 @@ if integrity != [('ok',)] or fk:
 
 Write-Host ""
 Write-Host "============================================================"
-Write-Host " UNIVERSAL SEARCH QUALITY GATE PASSED"
+Write-Host " UNIVERSAL SEARCH v1.6 QUALITY GATE PASSED"
 Write-Host "============================================================"
