@@ -146,6 +146,9 @@ class ProgressTests(unittest.TestCase):
         self.assertIn("36%", output)
         self.assertIn("50%", output)
         self.assertIn("Posted successfully", output)
+        self.assertIn("[RUN]", output)
+        self.assertIn("posted 1/4", output)
+        self.assertIn("left 3", output)
 
 
 if __name__ == "__main__":
