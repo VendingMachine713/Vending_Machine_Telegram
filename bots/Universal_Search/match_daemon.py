@@ -9,7 +9,9 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from core import Store
 from envutil import load_env
+from marketplace import MarketplaceStore
 from match_runtime import HardenedMatchEngine
 from match_ui import format_match_alert
 
@@ -179,6 +181,11 @@ async def cycle(engine, bot, *, min_score, alert_score, logger):
     queued = 0
     delivered = 0
     failed = 0
+    cancelled_wrong_owner = 0
+    if owner:
+        cancelled_wrong_owner = await asyncio.to_thread(
+            engine.cancel_wrong_owner_alerts, owner
+        )
     if owner and engine.notifications_enabled():
         queued = await asyncio.to_thread(
             engine.enqueue_new_alerts, owner, min_score=alert_score, limit=50
@@ -191,6 +198,7 @@ async def cycle(engine, bot, *, min_score, alert_score, logger):
         "admin_configured": bool(owner),
         "notifications_enabled": engine.notifications_enabled(),
         "refresh": refresh,
+        "cancelled_wrong_owner_alerts": cancelled_wrong_owner,
         "alerts_queued": queued,
         "alerts_delivered": delivered,
         "alerts_failed_this_cycle": failed,
@@ -209,7 +217,15 @@ async def run(args):
     min_score = max(0.0, min(float(args.min_score), 100.0))
     alert_score = max(min_score, min(float(args.alert_score), 100.0))
     token = load_token()
+
+    # The sidecar must be able to start safely before the main bot in a fresh
+    # process/session. Open the core and marketplace stores first so all joined
+    # tables exist before the matching engine refreshes them.
+    DB.parent.mkdir(parents=True, exist_ok=True)
+    Store(DB)
+    MarketplaceStore(DB)
     engine = HardenedMatchEngine(DB)
+
     lease = DaemonLease(DB)
     acquired, owner = lease.acquire()
     if not acquired:
@@ -220,15 +236,24 @@ async def run(args):
 
     logger = logging.getLogger("universal_search.match_daemon")
     bot = Bot(token=token)
+    initialized = False
     try:
         await bot.initialize()
+        initialized = True
         bootstrap = await asyncio.to_thread(engine.bootstrap, min_score=min_score)
         cancelled = await asyncio.to_thread(engine.cancel_stale_alerts)
+        current_owner = admin_id()
+        cancelled_wrong_owner = 0
+        if current_owner:
+            cancelled_wrong_owner = await asyncio.to_thread(
+                engine.cancel_wrong_owner_alerts, current_owner
+            )
         pruned = await asyncio.to_thread(engine.cleanup_alert_history)
         write_status(
             state="starting",
             baseline=bootstrap,
             cancelled_stale_alerts=cancelled,
+            cancelled_wrong_owner_alerts=cancelled_wrong_owner,
             pruned_alert_records=pruned,
             notifications_enabled=engine.notifications_enabled(),
             alert_queue=engine.queue_status(),
@@ -265,7 +290,8 @@ async def run(args):
     finally:
         lease.release()
         try:
-            await bot.shutdown()
+            if initialized:
+                await bot.shutdown()
         finally:
             write_status(state="stopped")
 
