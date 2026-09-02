@@ -153,7 +153,6 @@ def clone_campaign(db: Database, source_id: str, new_id: str, new_name: str | No
                         (new_id, r["content_id"], r["position"], r["weight"], r["enabled"], now))
         sched = con.execute("SELECT * FROM campaign_schedules WHERE campaign_id=?", (source_id,)).fetchone()
         if sched:
-            # Clone schedule settings but leave it disabled and recalculate only when explicitly enabled/configured.
             con.execute('''INSERT INTO campaign_schedules(campaign_id,mode,interval_seconds,daily_times_json,days_json,timezone,
                            next_run_at,last_run_at,jitter_seconds,enabled,updated_at) VALUES(?,?,?,?,?,?,?,?,?,0,?)''',
                         (new_id, sched["mode"], sched["interval_seconds"], sched["daily_times_json"], sched["days_json"],
@@ -188,7 +187,6 @@ def _select_content(con, camp, group_id: int):
     state = con.execute("SELECT last_content_id,last_used_at FROM campaign_destination_state WHERE campaign_id=? AND group_id=?",
                         (camp["campaign_id"], group_id)).fetchone()
     last_content = state["last_content_id"] if state else None
-    # Also consider the newest queued job, preventing repeated variants before prior jobs have sent.
     qlast = con.execute('''SELECT content_id FROM queue WHERE campaign_id=? AND group_id=? AND content_id IS NOT NULL
                            AND status NOT IN ('cancelled','failed') ORDER BY id DESC LIMIT 1''',
                         (camp["campaign_id"], group_id)).fetchone()
@@ -231,7 +229,6 @@ def _select_content(con, camp, group_id: int):
             stamp = x["last_used"] or datetime.min.replace(tzinfo=timezone.utc)
             return (stamp, x["use_count"], int(x["row"]["position"]))
         return min(allowed, key=key)["row"]["content_id"]
-    # sequential: choose the first position after the last queued/sent variant, wrapping around.
     ordered = sorted(allowed, key=lambda x: (int(x["row"]["position"]), x["row"]["content_id"]))
     full = [x["row"]["content_id"] for x in sorted(candidates, key=lambda x: (int(x["row"]["position"]), x["row"]["content_id"]))]
     if last_content in full:
@@ -266,7 +263,6 @@ def _eligible_destinations(con, camp):
         direct_match = (not include_tags) or bool(include_tags.intersection(dtags))
         collection_match = any(destination_matches_collection(dict(d), dtags, c) for c in collections)
         if collection_ids:
-            # Direct tags and collections are a union; with only collections configured, at least one must match.
             if include_tags:
                 target_match = direct_match or collection_match
             else:
@@ -279,7 +275,6 @@ def _eligible_destinations(con, camp):
             continue
         if exclude_tags and exclude_tags.intersection(dtags):
             skipped["exclude_tags"] += 1; continue
-        # Campaign protected override still applies when selected directly. Collections may explicitly include protected.
         collection_allows_protected = collection_match and any(c.get("include_protected") for c in collections if destination_matches_collection(dict(d), dtags, c))
         if d["protected"] and not camp["allow_protected"] and not collection_allows_protected:
             skipped["protected"] += 1; continue
@@ -311,7 +306,6 @@ def _next_due(con, d, camp, base_iso: str, salt: str = ""):
             base = max(base, eligible)
         except Exception:
             pass
-    # Optional cross-campaign minimum-gap rules for the same destination.
     relations = con.execute("SELECT related_campaign_id,min_gap_seconds FROM campaign_relations WHERE campaign_id=? AND relation_type='min_gap'", (camp["campaign_id"],)).fetchall()
     for rel in relations:
         gap = max(0, int(rel["min_gap_seconds"] or 0))
@@ -379,10 +373,11 @@ def campaign_preview(db: Database, campaign_id: str):
 
 def enqueue_campaign(db: Database, campaign_id: str, dry_run=False, run_key: str | None = None, limits: dict | None = None):
     now = utcnow()
+    if not dry_run:
+        from .delivery_ledger import ensure_delivery_ledger
+        ensure_delivery_ledger(db)
     with db.connect() as con:
         if not dry_run:
-            # Serialize capacity check + selection + insertion + cycle/run-seal update.
-            # This closes the check-then-insert race between scheduler/manual enqueues.
             con.execute("BEGIN IMMEDIATE")
         camp = con.execute("SELECT * FROM campaigns WHERE campaign_id=?", (campaign_id,)).fetchone()
         if not camp:
@@ -462,7 +457,6 @@ def record_content_sent(db: Database, campaign_id: str, group_id: int, content_i
 
 
 def refresh_system_tags(db: Database):
-    """Rebuild AUTO_* tags from current destination access/type state."""
     changed = 0
     with db.connect() as con:
         rows = con.execute("SELECT * FROM destinations").fetchall()
@@ -485,7 +479,6 @@ def refresh_system_tags(db: Database):
 
 
 def repair_routing_preferences(db: Database):
-    """Repair stale account preferences after a live access scan."""
     now = utcnow()
     changed_primary = 0
     changed_secondary = 0
@@ -539,9 +532,6 @@ def validate(db: Database):
                 except ValueError as exc:
                     problems.append(f"destination {d['group_id']}: {exc}")
 
-        # Structural campaign references must be valid even while a campaign is still a draft.
-        # Drafts may be incomplete in content/scheduling, but they must not silently retain
-        # references to collections that no longer exist or impossible cycle limits.
         for camp in con.execute("SELECT * FROM campaigns"):
             if "max_cycles" in camp.keys() and int(camp["max_cycles"] or 0) < 0:
                 problems.append(f"campaign {camp['campaign_id']} max_cycles cannot be negative")
