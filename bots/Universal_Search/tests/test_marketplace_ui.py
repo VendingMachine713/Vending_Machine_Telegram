@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from core import Store
-from marketplace import MarketplaceStore
+from marketplace import MarketplaceStore, parse_market_query
 from marketplace_ui import MarketplaceSessionStore, money, original_message_link, render_market_page
 
 
@@ -33,7 +33,7 @@ class MarketplaceUiTests(unittest.TestCase):
             "2026-09-02T00:00:00+00:00",
             "For sale iPhone 15 Pro $900 brand new pickup from Marion",
         )
-        rows, _ = market.search(__import__("marketplace").parse_market_query("iphone"), -1001234567890)
+        rows, _ = market.search(parse_market_query("iphone"), -1001234567890)
         return path, sessions, rows[0]
 
     def test_money(self):
