@@ -9,13 +9,18 @@ SOURCE = (ROOT / "main.py").read_text(encoding="utf-8")
 class VMGuardSecurityContractTests(unittest.TestCase):
     def test_private_admin_requires_private_chat_and_numeric_owner(self):
         self.assertIn('update.effective_chat.type=="private"', SOURCE)
-        self.assertIn('update.effective_user.id==admin_id()', SOURCE)
+        self.assertIn("def is_admin(update):", SOURCE)
+        self.assertIn("uid=update.effective_user.id", SOURCE)
+        self.assertIn("uid==admin_id()", SOURCE)
+        self.assertIn("owner_authorized(uid,ROOT)", SOURCE)
 
     def test_claim_is_private_only(self):
         start = SOURCE.index("async def claim")
         following = SOURCE.index("\nasync def guard", start)
         claim_source = SOURCE[start:following]
         self.assertIn('update.effective_chat.type!="private"', claim_source)
+        self.assertIn("central_owner_ids(ROOT)", claim_source)
+        self.assertIn("local claim is disabled", claim_source)
 
     def test_control_commands_use_private_admin(self):
         for name in ("guard", "enable", "disable", "health"):
