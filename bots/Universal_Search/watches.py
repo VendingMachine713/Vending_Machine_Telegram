@@ -274,6 +274,34 @@ class WatchStore:
                 (owner_user_id,),
             ).fetchall()
 
+    def reconcile_owner(self, owner_user_id):
+        """Fail closed when the claimed admin changes.
+
+        Watches belonging to a previous owner are disabled and any undelivered
+        alerts for that owner are cancelled before the delivery worker reads
+        the queue. Historical sent/failed records remain for diagnostics.
+        """
+        if not owner_user_id:
+            return {"disabled_watches": 0, "cancelled_alerts": 0}
+        now = utc_now()
+        with self.conn() as c:
+            disabled = c.execute(
+                """UPDATE saved_searches
+                   SET enabled=0,last_error='owner superseded',updated_utc=?
+                   WHERE owner_user_id<>? AND enabled=1""",
+                (now, int(owner_user_id)),
+            ).rowcount
+            cancelled = c.execute(
+                """UPDATE alert_queue
+                   SET status='cancelled',last_error='owner superseded'
+                   WHERE owner_user_id<>? AND status IN ('pending','retry')""",
+                (int(owner_user_id),),
+            ).rowcount
+        return {
+            "disabled_watches": max(0, int(disabled)),
+            "cancelled_alerts": max(0, int(cancelled)),
+        }
+
     def cleanup_alert_history(self, sent_days=30, failed_days=90):
         sent_cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(sent_days)))).isoformat()
         failed_cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(failed_days)))).isoformat()
@@ -286,4 +314,8 @@ class WatchStore:
                 "DELETE FROM alert_queue WHERE status='failed' AND created_utc<?",
                 (failed_cutoff,),
             ).rowcount
-        return max(0, sent) + max(0, failed)
+            cancelled = c.execute(
+                "DELETE FROM alert_queue WHERE status='cancelled' AND created_utc<?",
+                (sent_cutoff,),
+            ).rowcount
+        return max(0, sent) + max(0, failed) + max(0, cancelled)
