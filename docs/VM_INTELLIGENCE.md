@@ -51,21 +51,7 @@ The publisher is failure-isolated: database/telemetry errors are recorded in `la
 
 ## Intelligence materialisation
 
-`shared.vm_core.intelligence.materialize_intelligence()` reads shared evidence and creates two durable projections:
-
-### Incidents
-
-Operational conditions requiring attention. Incident keys are idempotent so repeated observations update an existing case instead of creating noise.
-
-### Signals
-
-Evidence-backed observations or opportunities with:
-
-- score
-- confidence
-- rationale
-- subject
-- evidence references
+`shared.vm_core.intelligence.materialize_intelligence()` reads shared evidence and creates durable incidents and signals.
 
 Initial cross-bot reasoning includes:
 
@@ -77,61 +63,75 @@ Initial cross-bot reasoning includes:
 
 ## Evidence-governed recommendations
 
-VM Core schema version 3 turns active cross-bot signals into durable recommendations. Each recommendation records:
+VM Core schema version 3 turns active cross-bot signals into durable recommendations. Each recommendation records a stable key, type, subject, priority, confidence, action, rationale, producing rule and supporting evidence.
 
-- a stable idempotency key, type, subject, priority and confidence
-- the proposed action and human-readable rationale
-- the rule ID and rule version that produced it
-- the supporting signal IDs and safety controls
-- a lifecycle state: `PROPOSED`, `BLOCKED`, `ACCEPTED`, `DISMISSED`, `COMPLETED` or `EXPIRED`
-
-Current rules recommend safe delivery reconciliation, relationship review and guard-risk review. A guard signal on the same chat blocks relationship outreach. Recommendations never execute Telegram actions, and uncertain Smart Auto Poster jobs remain protected from automatic retry.
-
-Run `python -m shared.vm_core.cli intelligence` to refresh and display the shared view.
+Current rules recommend safe delivery reconciliation, relationship review and guard-risk review. Recommendations never execute Telegram actions, and uncertain Smart Auto Poster jobs remain protected from automatic retry.
 
 ## Recommendation governance
 
-VM Brain now includes an explicit operator-governance layer in `shared.vm_core.governance`.
+VM Brain includes explicit operator governance in `shared.vm_core.governance`.
 
-Allowed state transitions are deliberately conservative:
+Allowed transitions are deliberately conservative:
 
 - `PROPOSED -> ACCEPTED` or `DISMISSED`
 - `BLOCKED -> DISMISSED`
 - `ACCEPTED -> COMPLETED` or `DISMISSED`
-- `DISMISSED`, `COMPLETED` and `EXPIRED` are terminal
+- terminal states cannot be silently reopened
 
-A blocked recommendation cannot be accepted. Every valid decision writes an auditable `recommendation.*` event correlated to the recommendation record. Governance transitions change VM Intelligence metadata only; they do not send Telegram messages, retry posting jobs, modify bot-owned databases or execute the recommended action.
+Every decision writes an auditable correlated event. Governance changes metadata only and does not execute Telegram actions.
+
+## Verification and learning
+
+Completed recommendations may receive one verified outcome through `shared.vm_core.learning`.
+
+Outcome types:
+
+- `POSITIVE`
+- `NEUTRAL`
+- `NEGATIVE`
+- `UNKNOWN`
+
+Outcome data includes bounded value score, confidence, actor, note and evidence. Rule performance is descriptive and grouped by rule ID/version. VM Brain does not self-modify rules from these outcomes.
+
+## Controlled calibration
+
+VM Core v1.6.0 adds advisory calibration in `shared.vm_core.calibration`.
+
+The calibration engine:
+
+- requires at least 8 known outcomes before proposing a scoring adjustment
+- evaluates positive-rate evidence and confidence-weighted value
+- uses a conservative Wilson lower-bound test before marking a rule `STRONG`
+- identifies persistently weak rules as `WEAK`
+- identifies material confidence underperformance as `OVERCONFIDENT`
+- marks evidence-consistent rules `STABLE`
+- caps any proposed score delta to +/-10 points
+- never applies a proposal automatically
+
+Calibration proposals are therefore recommendations about the intelligence rules themselves, not active configuration changes.
 
 Operator tool:
 
 ```powershell
-python tools/vm_brain_governance.py summary
-python tools/vm_brain_governance.py list
-python tools/vm_brain_governance.py accept "recommendation:relationship_activity:123" --actor admin
-python tools/vm_brain_governance.py complete "recommendation:relationship_activity:123" --actor admin
-python tools/vm_brain_governance.py history "recommendation:relationship_activity:123"
+python tools/vm_brain_calibration.py summary
+python tools/vm_brain_calibration.py report
 ```
 
-The tool is intentionally separate from Telegram action execution. `automatic_execution` remains `False` throughout this stage.
+`automatic_application` and `automatic_execution` remain `False`.
 
 ## Authority model
 
-VM Intelligence does not automatically perform consequential actions in v1.4.0.
+VM Intelligence does not automatically perform consequential actions in v1.6.0.
 
-The intended progression is:
+The progression is now:
 
-`Observe -> Correlate -> Recommend -> Govern -> Governed Action -> Verify -> Learn`
+`Observe -> Correlate -> Recommend -> Govern -> Verify -> Learn -> Calibrate -> Governed Change`
 
-Future automatic actions must declare their evidence requirements, allowed authority, rollback behaviour and fail-closed conditions. No recommendation status change is itself permission to perform an external action.
+A calibration proposal is not authority to alter a production rule. Future rule changes must be versioned, explicitly governed, reversible and separately tested before activation.
 
 ## Admin surface
 
-The Admin Command Centre exposes:
-
-- `/intelligence`
-- `/brain`
-
-Both refresh the materialised view and show service health, open incidents and active signals without changing bot state.
+The Admin Command Centre exposes read-only `/intelligence` and `/brain` views. Calibration remains passive at this stage and is available through the operator tool.
 
 ## Adding a new bot signal
 
