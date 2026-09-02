@@ -306,6 +306,9 @@ def main(argv=None):
         asyncio.run(run(args))
     except KeyboardInterrupt:
         pass
+    except Exception as exc:
+        write_status(state="crashed", error_type=type(exc).__name__, error=str(exc)[:1000])
+        raise
 
 
 if __name__ == "__main__":
