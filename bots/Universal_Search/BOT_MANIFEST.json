@@ -1,14 +1,15 @@
 {
   "schema_version": 3,
   "name": "Universal_Search",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "status": "existing",
   "classification": "CANONICAL",
   "entrypoint": "main.py",
   "entrypoint_confidence": "high",
   "launchers": [
     "START.ps1",
-    "BACKFILL.ps1"
+    "BACKFILL.ps1",
+    "MARKETPLACE.ps1"
   ],
   "requirements": "requirements.txt",
   "pyproject": null,
@@ -18,7 +19,9 @@
   "tests": [
     "tests\\test_core.py",
     "tests\\test_backfill.py",
-    "tests\\test_watches.py"
+    "tests\\test_watches.py",
+    "tests\\test_marketplace.py",
+    "tests\\test_marketplace_ui.py"
   ],
   "vm_core": {
     "compatible": true,
@@ -49,7 +52,14 @@
     "passive_match_alerts",
     "durable_alert_queue",
     "alert_retry_backoff",
-    "watch_pause_resume"
+    "watch_pause_resume",
+    "marketplace_listing_extraction",
+    "marketplace_structured_search",
+    "marketplace_price_filters",
+    "marketplace_price_history",
+    "marketplace_lifecycle_status",
+    "marketplace_repost_grouping",
+    "marketplace_statistics"
   ],
   "lifecycle": {
     "managed_by_vm": true,
