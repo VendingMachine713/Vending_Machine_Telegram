@@ -4,14 +4,13 @@ import json
 import logging
 import os
 import sqlite3
-import sys
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from envutil import load_env
-from match_engine import MatchEngine
+from match_runtime import HardenedMatchEngine
 from match_ui import format_match_alert
 
 BASE = Path(__file__).resolve().parent
@@ -150,6 +149,7 @@ async def deliver_due(bot, engine, logger):
     for alert in engine.due_alerts(20):
         match = engine.get_match(alert["id"])
         if not match:
+            engine.cancel_stale_alerts(alert["id"])
             continue
         try:
             await bot.send_message(
@@ -185,6 +185,7 @@ async def cycle(engine, bot, *, min_score, alert_score, logger):
         )
         delivered, failed = await deliver_due(bot, engine, logger)
     totals, _ = await asyncio.to_thread(engine.stats)
+    queue = await asyncio.to_thread(engine.queue_status)
     return {
         "state": "healthy",
         "admin_configured": bool(owner),
@@ -193,6 +194,7 @@ async def cycle(engine, bot, *, min_score, alert_score, logger):
         "alerts_queued": queued,
         "alerts_delivered": delivered,
         "alerts_failed_this_cycle": failed,
+        "alert_queue": queue,
         "matches_total": totals["total"] or 0,
         "matches_active": totals["active"] or 0,
         "matches_new": totals["new_count"] or 0,
@@ -207,7 +209,7 @@ async def run(args):
     min_score = max(0.0, min(float(args.min_score), 100.0))
     alert_score = max(min_score, min(float(args.alert_score), 100.0))
     token = load_token()
-    engine = MatchEngine(DB)
+    engine = HardenedMatchEngine(DB)
     lease = DaemonLease(DB)
     acquired, owner = lease.acquire()
     if not acquired:
@@ -221,13 +223,17 @@ async def run(args):
     try:
         await bot.initialize()
         bootstrap = await asyncio.to_thread(engine.bootstrap, min_score=min_score)
+        cancelled = await asyncio.to_thread(engine.cancel_stale_alerts)
         pruned = await asyncio.to_thread(engine.cleanup_alert_history)
         write_status(
             state="starting",
             baseline=bootstrap,
+            cancelled_stale_alerts=cancelled,
             pruned_alert_records=pruned,
             notifications_enabled=engine.notifications_enabled(),
+            alert_queue=engine.queue_status(),
         )
+        cleanup_counter = 0
         while True:
             started = time.monotonic()
             if not lease.renew():
@@ -240,6 +246,12 @@ async def run(args):
                     alert_score=alert_score,
                     logger=logger,
                 )
+                cleanup_counter += 1
+                if cleanup_counter >= max(1, int(3600 / interval)):
+                    status["pruned_alert_records"] = await asyncio.to_thread(
+                        engine.cleanup_alert_history
+                    )
+                    cleanup_counter = 0
                 write_status(**status)
             except asyncio.CancelledError:
                 raise
