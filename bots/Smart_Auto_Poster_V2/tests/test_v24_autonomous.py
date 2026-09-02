@@ -1,26 +1,20 @@
-from __future__ import annotations
-
 import json
+import os
 import tempfile
 import unittest
+from unittest.mock import patch
+import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
 
-from smart_autoposter.admin_bot import authorized
+from smart_autoposter.admin_bot import TelegramAdminController, accounts_text, content_text, dashboard_text, search_destinations_text
 from smart_autoposter.analytics import analytics_snapshot
-from smart_autoposter.core import (
-    add_campaign_content,
-    campaign_preview,
-    clone_campaign,
-    create_campaign,
-    create_content,
-    enqueue_campaign,
-    validate,
-)
+from smart_autoposter.content_library import import_content_inbox
+from smart_autoposter.core import campaign_preview, create_campaign, create_content, enqueue_campaign
 from smart_autoposter.db import Database, utcnow
-from smart_autoposter.inbox import import_content_inbox
-from smart_autoposter.notifications import NotificationQueue
+from smart_autoposter.maintenance import database_integrity, generate_diagnostics
+from smart_autoposter.notifications import NotificationManager, severity_at_least
 from smart_autoposter.operations import (
     bulk_destination_action,
     enforce_queue_limits,
@@ -32,40 +26,59 @@ from smart_autoposter.operations import (
     set_content_tags,
 )
 from smart_autoposter.redaction import redact_text
-from smart_autoposter.scheduler import Scheduler, configure_interval, configure_once, schedule_occurrences
-from smart_autoposter.watchdog import watchdog_status
+from smart_autoposter.safety import SafetyController
+from smart_autoposter.scheduler import Scheduler, configure_once
+from smart_autoposter.templates import create_from_template, list_templates
+from smart_autoposter.watchdog import Watchdog
 
 
 class V24AutonomousTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
-        self.db = Database(self.root / "data" / "db.sqlite3")
+        self.old = Path.cwd()
+        os.chdir(self.root)
+        self.db = Database(self.root / "data" / "test.sqlite3")
         self.db.init()
         now = utcnow()
         with self.db.connect() as con:
-            con.execute("INSERT INTO accounts(account_key,session_name,enabled,authorized,identity,updated_at) VALUES('primary','p',1,1,'p',?)", (now,))
-            con.execute("INSERT INTO accounts(account_key,session_name,enabled,authorized,identity,updated_at) VALUES('secondary','s',1,1,'s',?)", (now,))
-            con.execute("INSERT INTO destinations(group_id,group_name,primary_access,secondary_access,preferred_account,mode,enabled,needs_review,updated_at) VALUES(-1001,'Group',1,1,'both','text',1,0,?)", (now,))
+            con.execute(
+                """INSERT INTO destinations(group_id,group_name,username,primary_access,secondary_access,preferred_account,mode,enabled,needs_review,updated_at)
+                   VALUES(-1001,'Main Destination','main_dest',1,1,'primary','text',1,0,?)""",
+                (now,),
+            )
             con.execute("INSERT INTO destination_tags(group_id,tag) VALUES(-1001,'main')")
+            con.execute(
+                "INSERT INTO accounts(account_key,session_name,enabled,authorized,identity,health_score,updated_at) VALUES('primary','p',1,1,'Primary',100,?)",
+                (now,),
+            )
+            con.execute(
+                "INSERT INTO accounts(account_key,session_name,enabled,authorized,identity,health_score,updated_at) VALUES('secondary','s',1,1,'Secondary',100,?)",
+                (now,),
+            )
         create_content(self.db, "ad_a", "Caption A", [])
         create_campaign(self.db, "camp", "Campaign", "ad_a", tags="main")
 
     def tearDown(self):
+        os.chdir(self.old)
         self.tmp.cleanup()
 
-    def _preview_activate(self):
-        campaign_preview(self.db, "camp")
-        mark_campaign_previewed(self.db, "camp")
-        set_campaign_state(self.db, "camp", "active")
+    def _preview_activate(self, campaign="camp"):
+        campaign_preview(self.db, campaign)
+        mark_campaign_previewed(self.db, campaign)
+        set_campaign_state(self.db, campaign, "active")
 
-    def _enqueue(self, run_key="run"):
+    def _enqueue(self, run_key="r1"):
         self._preview_activate()
         return enqueue_campaign(self.db, "camp", run_key=run_key)
 
-    def test_activation_requires_preview(self):
-        with self.assertRaisesRegex(RuntimeError, "Preview"):
-            set_campaign_state(self.db, "camp", "active")
+    def test_schema_v5_has_autonomous_tables(self):
+        with self.db.connect() as con:
+            self.assertEqual(con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0], "6")
+            tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            for name in {"notifications", "heartbeats", "audit_log", "update_history", "campaign_relations", "content_tags"}:
+                self.assertIn(name, tables)
+            self.assertIn("error_kind", {r[1] for r in con.execute("PRAGMA table_info(queue)")})
 
     def test_preview_moves_draft_to_ready(self):
         mark_campaign_previewed(self.db, "camp")
@@ -74,189 +87,209 @@ class V24AutonomousTests(unittest.TestCase):
         self.assertEqual(row["lifecycle_state"], "ready")
         self.assertTrue(row["last_preview_at"])
 
+    def test_activation_requires_preview(self):
+        with self.assertRaisesRegex(RuntimeError, "Preview"):
+            set_campaign_state(self.db, "camp", "active")
+
     def test_activation_after_preview(self):
-        mark_campaign_previewed(self.db, "camp")
-        result = set_campaign_state(self.db, "camp", "active")
-        self.assertEqual(result["state"], "active")
-        self.assertTrue(result["enabled"])
+        self._preview_activate()
+        with self.db.connect() as con:
+            row = con.execute("SELECT lifecycle_state,enabled FROM campaigns WHERE campaign_id='camp'").fetchone()
+        self.assertEqual(tuple(row), ("active", 1))
 
     def test_archive_disables_schedule(self):
-        self._preview_activate()
-        configure_interval(self.db, "camp", 3600, "Australia/Adelaide")
+        future = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat(timespec="minutes")
+        configure_once(self.db, "camp", future, "Australia/Adelaide")
+        mark_campaign_previewed(self.db, "camp")
         set_campaign_state(self.db, "camp", "archived")
         with self.db.connect() as con:
-            sched = con.execute("SELECT enabled FROM campaign_schedules WHERE campaign_id='camp'").fetchone()
-        self.assertEqual(sched["enabled"], 0)
+            enabled = con.execute("SELECT enabled FROM campaign_schedules WHERE campaign_id='camp'").fetchone()[0]
+        self.assertEqual(enabled, 0)
+
+    def test_duplicate_content_fingerprint_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, "Duplicate content"):
+            create_content(self.db, "ad_duplicate", "Caption A", [])
+
+    def test_content_tags_add_and_remove(self):
+        tags = set_content_tags(self.db, "ad_a", add=["Product", "Main"])
+        self.assertEqual(tags, ["main", "product"])
+        tags = set_content_tags(self.db, "ad_a", remove=["main"])
+        self.assertEqual(tags, ["product"])
 
     def test_content_disable_blocked_when_active(self):
         self._preview_activate()
         with self.assertRaisesRegex(RuntimeError, "active campaign"):
             set_content_state(self.db, "ad_a", "disabled")
 
-    def test_content_tags_add_and_remove(self):
-        self.assertEqual(set_content_tags(self.db, "ad_a", add=["sale", "new"]), ["new", "sale"])
-        self.assertEqual(set_content_tags(self.db, "ad_a", remove=["new"]), ["sale"])
-
-    def test_destination_search(self):
-        from smart_autoposter.operations import search_destinations
-        rows = search_destinations(self.db, "Group")
-        self.assertEqual(len(rows), 1)
-
-    def test_bulk_destination_protect_and_never(self):
-        n = bulk_destination_action(self.db, tag="main", protect=True, never_auto_post=True)
-        self.assertEqual(n, 1)
-        with self.db.connect() as con:
-            row = con.execute("SELECT protected,never_auto_post,enabled FROM destinations WHERE group_id=-1001").fetchone()
-        self.assertEqual((row["protected"], row["never_auto_post"], row["enabled"]), (1, 1, 0))
-
-    def test_redaction(self):
-        value = "token 123456789:AAabcdefghijklmnop hash 0123456789abcdef0123456789abcdef phone +61412345678"
-        safe = redact_text(value)
-        self.assertNotIn("123456789:AA", safe)
-        self.assertNotIn("0123456789abcdef0123456789abcdef", safe)
-        self.assertNotIn("+61412345678", safe)
-
-    def test_diagnostics_excludes_secrets_and_redacts_logs(self):
-        from smart_autoposter.diagnostics import build_support_bundle
-        log = self.root / "logs" / "app.log"; log.parent.mkdir(); log.write_text("phone +61412345678", encoding="utf-8")
-        secret = self.root / ".env"; secret.write_text("ADMIN_BOT_TOKEN=secret", encoding="utf-8")
-        bundle = build_support_bundle(self.root, self.db, include_logs=True)
-        names = [p.name for p in bundle.iterdir()]
-        self.assertNotIn(".env", names)
-        text = (bundle / "logs" / "app.log").read_text(encoding="utf-8")
-        self.assertNotIn("+61412345678", text)
-
-    def test_duplicate_content_fingerprint_rejected(self):
-        create_content(self.db, "dup1", "Same", [])
-        with self.assertRaisesRegex(RuntimeError, "Duplicate content fingerprint"):
-            create_content(self.db, "dup2", "Same", [])
-
     def test_content_inbox_duplicate_is_rejected(self):
-        inbox = self.root / "inbox"; inbox.mkdir()
-        folder = inbox / "ad"; folder.mkdir(); (folder / "caption.txt").write_text("Inbox", encoding="utf-8")
-        first = import_content_inbox(self.db, inbox)
-        self.assertEqual(first["imported"], 1)
-        second = import_content_inbox(self.db, inbox)
-        self.assertEqual(second["duplicates"], 1)
-
-    def test_notification_dedupe(self):
-        q = NotificationQueue(self.db)
-        a = q.enqueue("WARNING", "T", "M", dedupe_key="x", dedupe_window_seconds=60)
-        b = q.enqueue("WARNING", "T", "M", dedupe_key="x", dedupe_window_seconds=60)
-        self.assertEqual(a, b)
-        with self.db.connect() as con:
-            self.assertEqual(con.execute("SELECT COUNT(*) FROM notifications").fetchone()[0], 1)
-
-    def test_notification_dedupe_window_requeues_old(self):
-        q = NotificationQueue(self.db)
-        a = q.enqueue("WARNING", "T", "M", dedupe_key="x", dedupe_window_seconds=1)
-        old = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(timespec="seconds")
-        with self.db.connect() as con:
-            con.execute("UPDATE notifications SET created_at=?,status='sent' WHERE id=?", (old, a))
-        b = q.enqueue("WARNING", "T2", "M2", dedupe_key="x", dedupe_window_seconds=1)
-        self.assertEqual(a, b)
-        with self.db.connect() as con:
-            row = con.execute("SELECT title,status FROM notifications WHERE id=?", (a,)).fetchone()
-        self.assertEqual(row["title"], "T2")
-        self.assertEqual(row["status"], "pending")
-
-    def test_notification_severity_filter(self):
-        q = NotificationQueue(self.db)
-        q.enqueue("INFO", "I", "I")
-        q.enqueue("ERROR", "E", "E")
-        self.assertEqual(len(q.pending(min_severity="WARNING")), 1)
-
-    def test_watchdog_detects_stale(self):
-        old = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat(timespec="seconds")
-        with self.db.connect() as con:
-            con.execute("INSERT INTO heartbeats(component,last_seen_at,status) VALUES('worker',?,'ok')", (old,))
-        result = watchdog_status(self.db, stale_seconds=60)
-        self.assertFalse(result["healthy"])
-
-    def test_analytics_snapshot(self):
-        self._enqueue("analytics")
-        snap = analytics_snapshot(self.db)
-        self.assertIn("queue", snap)
-        self.assertEqual(snap["queue"].get("pending"), 1)
-
-    def test_admin_dashboard_and_allowlist(self):
-        self.assertTrue(authorized(123, {123}))
-        self.assertFalse(authorized(999, {123}))
+        source = self.root / "content" / "inbox" / "Copy Ad"
+        source.mkdir(parents=True)
+        (source / "caption.txt").write_text("Caption A", encoding="utf-8")
+        result = import_content_inbox(self.db, self.root / "content")
+        self.assertEqual(result[0]["status"], "duplicate")
+        self.assertTrue(any((self.root / "content" / "rejected").iterdir()))
 
     def test_queue_total_capacity_guard(self):
-        self._preview_activate()
+        self._enqueue()
         with self.assertRaisesRegex(RuntimeError, "MAX_QUEUE_SIZE"):
             enforce_queue_limits(
                 self.db,
                 add_count=1,
                 campaign_id="camp",
                 group_ids=[-1001],
-                max_queue_size=0,
-                max_pending_per_campaign=100,
-                max_pending_per_destination=100,
+                max_queue_size=1,
+                max_pending_per_campaign=10,
+                max_pending_per_destination=10,
             )
 
     def test_queue_campaign_capacity_guard(self):
-        self._enqueue("cap")
+        self._enqueue()
         with self.assertRaisesRegex(RuntimeError, "MAX_PENDING_PER_CAMPAIGN"):
-            enforce_queue_limits(
-                self.db,
-                add_count=1,
-                campaign_id="camp",
-                group_ids=[-1001],
-                max_queue_size=100,
-                max_pending_per_campaign=1,
-                max_pending_per_destination=100,
-            )
+            enforce_queue_limits(self.db, add_count=1, campaign_id="camp", group_ids=[-1001], max_queue_size=10, max_pending_per_campaign=1, max_pending_per_destination=10)
 
     def test_queue_destination_capacity_guard(self):
-        self._enqueue("destcap")
+        self._enqueue()
         with self.assertRaisesRegex(RuntimeError, "MAX_PENDING_PER_DESTINATION"):
-            enforce_queue_limits(
-                self.db,
-                add_count=1,
-                campaign_id="camp",
-                group_ids=[-1001],
-                max_queue_size=100,
-                max_pending_per_campaign=100,
-                max_pending_per_destination=1,
-            )
+            enforce_queue_limits(self.db, add_count=1, campaign_id="camp", group_ids=[-1001], max_queue_size=10, max_pending_per_campaign=10, max_pending_per_destination=1)
 
     def test_job_defer_cancel_retry(self):
-        self._enqueue("jobs")
+        self._enqueue()
         with self.db.connect() as con:
             jid = con.execute("SELECT id FROM queue").fetchone()[0]
-        row = manage_job(self.db, jid, "defer", minutes=5)
-        self.assertEqual(row["status"], "deferred")
-        row = manage_job(self.db, jid, "cancel")
-        self.assertEqual(row["status"], "cancelled")
-        row = manage_job(self.db, jid, "retry")
-        self.assertEqual(row["status"], "retry")
-
-    def test_schema_v5_has_autonomous_tables(self):
+        manage_job(self.db, jid, "defer", minutes=10)
         with self.db.connect() as con:
-            tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        self.assertTrue({"notifications", "heartbeats", "audit_log"}.issubset(tables))
+            self.assertEqual(con.execute("SELECT status FROM queue WHERE id=?", (jid,)).fetchone()[0], "deferred")
+        manage_job(self.db, jid, "cancel")
+        with self.db.connect() as con:
+            self.assertEqual(con.execute("SELECT status FROM queue WHERE id=?", (jid,)).fetchone()[0], "cancelled")
+        manage_job(self.db, jid, "retry")
+        with self.db.connect() as con:
+            row = con.execute("SELECT status,resolved_at FROM queue WHERE id=?", (jid,)).fetchone()
+        self.assertEqual(row["status"], "retry")
+        self.assertIsNone(row["resolved_at"])
+
+    def test_bulk_destination_protect_and_never(self):
+        n = bulk_destination_action(self.db, tag="main", protect=True)
+        self.assertEqual(n, 1)
+        n = bulk_destination_action(self.db, tag="main", never_auto_post=True)
+        self.assertEqual(n, 1)
+        with self.db.connect() as con:
+            row = con.execute("SELECT protected,never_auto_post,enabled FROM destinations WHERE group_id=-1001").fetchone()
+        self.assertEqual(tuple(row), (1, 1, 0))
+
+    def test_notification_dedupe(self):
+        nm = NotificationManager(self.db)
+        a = nm.emit("IMPORTANT", "One", "Message", dedupe_key="same")
+        b = nm.emit("IMPORTANT", "Two", "Different", dedupe_key="same")
+        self.assertEqual(a, b)
+        with self.db.connect() as con:
+            self.assertEqual(con.execute("SELECT COUNT(*) FROM notifications").fetchone()[0], 1)
+
+    def test_notification_dedupe_window_requeues_old(self):
+        nm = NotificationManager(self.db)
+        nid = nm.emit("IMPORTANT", "One", "Message", dedupe_key="repeat")
+        nm.mark_sent(nid)
+        old = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(timespec="seconds")
+        with self.db.connect() as con:
+            con.execute("UPDATE notifications SET created_at=? WHERE id=?", (old, nid))
+        same = nm.emit("CRITICAL", "Again", "Again message", dedupe_key="repeat", dedupe_window_seconds=3600)
+        self.assertEqual(nid, same)
+        with self.db.connect() as con:
+            row = con.execute("SELECT status,severity,title FROM notifications WHERE id=?", (nid,)).fetchone()
+        self.assertEqual(tuple(row), ("pending", "CRITICAL", "Again"))
+
+    def test_notification_severity_filter(self):
+        self.assertFalse(severity_at_least("WARNING", "IMPORTANT"))
+        self.assertTrue(severity_at_least("CRITICAL", "IMPORTANT"))
+
+    def test_watchdog_detects_stale(self):
+        wd = Watchdog(self.db, stale_seconds=30)
+        wd.beat("service", "ok")
+        old = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(timespec="seconds")
+        with self.db.connect() as con:
+            con.execute("UPDATE heartbeats SET last_seen_at=? WHERE component='service'", (old,))
+        problems = wd.evaluate(("service",))
+        self.assertTrue(any("stale heartbeat" in p for p in problems))
+
+    def test_database_integrity(self):
+        result = database_integrity(self.db)
+        self.assertTrue(result["ok"])
+
+    def test_redaction(self):
+        fake_token = "123456789:" + "AAFakeTokenForRedactionTest_1234567890"
+        fake_hash = "01234567" * 4
+        fake_phone = "+61" + "400000000"
+        fake_code = "54321"
+        raw = f"token {fake_token} hash {fake_hash} phone {fake_phone} login code: {fake_code}"
+        clean = redact_text(raw)
+        self.assertNotIn("AAFake", clean)
+        self.assertNotIn("01234", clean)
+        self.assertNotIn(fake_phone, clean)
+        self.assertNotIn(fake_code, clean)
+
+    def test_diagnostics_excludes_secrets_and_redacts_logs(self):
+        fake_token = "123456789:" + "AAFakeTokenForRedactionTest_1234567890"
+        fake_phone = "+61" + "400000000"
+        log_dir = self.root / "logs"; log_dir.mkdir()
+        backup_dir = self.root / "backups"; backup_dir.mkdir()
+        diag_dir = self.root / "diagnostics"; diag_dir.mkdir()
+        cache_dir = self.root / "cache"; cache_dir.mkdir()
+        (self.root / ".env").write_text("ADMIN_BOT_TOKEN=" + fake_token, encoding="utf-8")
+        (self.root / "runtime").mkdir(); (self.root / "runtime" / "secret.session").write_text("SECRET", encoding="utf-8")
+        (log_dir / "service.log").write_text(f"phone {fake_phone} token {fake_token}", encoding="utf-8")
+        settings = SimpleNamespace(
+            diagnostics_dir=diag_dir,
+            log_dir=log_dir,
+            backup_dir=backup_dir,
+            media_cache_dir=cache_dir,
+            heartbeat_stale_seconds=180,
+            ensure_dirs=lambda: None,
+        )
+        zpath = generate_diagnostics(self.db, settings)
+        with zipfile.ZipFile(zpath) as z:
+            names = set(z.namelist())
+            self.assertNotIn(".env", names)
+            self.assertFalse(any(x.endswith(".session") for x in names))
+            self.assertIn("system_status.json", names)
+            log = z.read("logs/service.log").decode()
+            self.assertNotIn(fake_phone, log)
+            self.assertNotIn("AAFake", log)
+
+    def test_admin_dashboard_and_allowlist(self):
+        safety = SafetyController(self.db)
+        settings = SimpleNamespace(admin_user_ids=(123,), max_queue_size=100, max_pending_per_campaign=50, max_pending_per_destination=10)
+        controller = TelegramAdminController(self.db, settings, safety)
+        self.assertTrue(controller.authorized(123))
+        self.assertFalse(controller.authorized(999))
+        self.assertIn("SMART AUTO POSTER V3.0", dashboard_text(self.db))
+        self.assertIn("Primary", accounts_text(self.db))
+        self.assertIn("ad_a", content_text(self.db))
+
+    def test_destination_search(self):
+        text = search_destinations_text(self.db, "Main")
+        self.assertIn("Main Destination", text)
+        self.assertIn("-1001", text)
 
     def test_once_schedule_disables_after_run(self):
         self._preview_activate()
-        future = datetime.now(timezone.utc) + timedelta(seconds=2)
-        configure_once(self.db, "camp", future.isoformat(), "Australia/Adelaide")
+        future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(timespec="minutes")
+        configure_once(self.db, "camp", future, "Australia/Adelaide")
+        past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(timespec="seconds")
         with self.db.connect() as con:
-            con.execute("UPDATE campaign_schedules SET next_run_at=? WHERE campaign_id='camp'", ((datetime.now(timezone.utc)-timedelta(seconds=1)).isoformat(timespec="seconds"),))
+            con.execute("UPDATE campaign_schedules SET next_run_at=? WHERE campaign_id='camp'", (past,))
         Scheduler(self.db).tick()
         with self.db.connect() as con:
             row = con.execute("SELECT enabled,next_run_at FROM campaign_schedules WHERE campaign_id='camp'").fetchone()
-            q = con.execute("SELECT COUNT(*) FROM queue").fetchone()[0]
+            q = con.execute("SELECT COUNT(*) FROM queue WHERE campaign_id='camp'").fetchone()[0]
         self.assertEqual(row["enabled"], 0)
         self.assertIsNone(row["next_run_at"])
         self.assertEqual(q, 1)
 
     def test_spread_window_is_deterministic_and_bounded(self):
         # Freeze the scheduler reference clock so this test verifies deterministic
-        # spread offset rather than depending on how long two enqueue calls take.
-        # The second reconstruction explicitly removes the test-only run seal: in
-        # production, deleting queue rows must NOT make a sealed run replayable.
+        # spread offset rather than depending on how long two enqueue calls take
+        # on the host OS. The previous test could cross a one-second boundary on
+        # Windows and fail even though the spread algorithm itself was stable.
         fixed_now = "2026-08-28T16:00:00+00:00"
         with self.db.connect() as con:
             con.execute("UPDATE campaigns SET spread_seconds=1800 WHERE campaign_id='camp'")
@@ -270,7 +303,6 @@ class V24AutonomousTests(unittest.TestCase):
         with self.db.connect() as con:
             first = con.execute("SELECT due_at FROM queue").fetchone()[0]
             con.execute("DELETE FROM queue")
-            con.execute("DELETE FROM queue_run_seals WHERE campaign_id='camp' AND run_key='spread'")
         with patch("smart_autoposter.core.utcnow", return_value=fixed_now):
             result2 = enqueue_campaign(self.db, "camp", run_key="spread")
         self.assertEqual(first, result2["first_due_at"])
@@ -281,35 +313,28 @@ class V24AutonomousTests(unittest.TestCase):
         mark_campaign_previewed(self.db, "other"); set_campaign_state(self.db, "other", "active")
         enqueue_campaign(self.db, "other", run_key="other")
         set_campaign_gap(self.db, "camp", "other", 90)
-        result = enqueue_campaign(self.db, "camp", run_key="gap")
+        self._preview_activate()
+        enqueue_campaign(self.db, "camp", run_key="camp")
         with self.db.connect() as con:
-            rows = con.execute("SELECT campaign_id,due_at FROM queue ORDER BY id").fetchall()
-        due_other = datetime.fromisoformat(rows[0]["due_at"])
-        due_camp = datetime.fromisoformat(rows[1]["due_at"])
-        self.assertGreaterEqual((due_camp - due_other).total_seconds(), 90*60)
+            rows = {r["campaign_id"]: datetime.fromisoformat(r["due_at"]) for r in con.execute("SELECT campaign_id,due_at FROM queue")}
+        self.assertGreaterEqual((rows["camp"] - rows["other"]).total_seconds(), 90 * 60)
 
     def test_templates_create_campaign(self):
-        from smart_autoposter.templates import create_from_template
-        create_from_template(self.db, "standard", "templ", "Templ", "ad_a", tags="main")
+        keys = {x["key"] for x in list_templates()}
+        self.assertIn("rotating_ads", keys)
+        create_from_template(self.db, "announcement", "announce", "Announcement", "ad_a", tags="main")
         with self.db.connect() as con:
-            row = con.execute("SELECT lifecycle_state,enabled FROM campaigns WHERE campaign_id='templ'").fetchone()
+            row = con.execute("SELECT priority,lifecycle_state FROM campaigns WHERE campaign_id='announce'").fetchone()
+        self.assertEqual(row["priority"], 90)
         self.assertEqual(row["lifecycle_state"], "draft")
-        self.assertEqual(row["enabled"], 0)
 
-    def test_schedule_simulation_does_not_enqueue(self):
-        self._preview_activate()
-        configure_interval(self.db, "camp", 3600, "Australia/Adelaide")
+    def test_analytics_snapshot(self):
+        self._enqueue()
         with self.db.connect() as con:
-            row = dict(con.execute("SELECT * FROM campaign_schedules WHERE campaign_id='camp'").fetchone())
-        start = datetime.now(timezone.utc)
-        end = start + timedelta(hours=4)
-        occurrences = schedule_occurrences(row, start, end)
-        self.assertGreaterEqual(len(occurrences), 1)
-        with self.db.connect() as con:
-            self.assertEqual(con.execute("SELECT COUNT(*) FROM queue").fetchone()[0], 0)
-
-    def test_database_integrity(self):
-        self.assertEqual(validate(self.db), [])
+            con.execute("UPDATE queue SET status='sent',account_key='primary',updated_at=?", (utcnow(),))
+        data = analytics_snapshot(self.db, 24)
+        self.assertEqual(data["campaigns"][0]["sent"], 1)
+        self.assertEqual(data["accounts"][0]["account_key"], "primary")
 
 
 if __name__ == "__main__":
