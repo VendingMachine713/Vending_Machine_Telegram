@@ -2,9 +2,16 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
-from shared.vm_core.progress import GroupProgress, clamp_percent, plain_status, render_bar
+try:
+    from shared.vm_core.progress import GroupProgress, clamp_percent, plain_status, render_bar
+except ModuleNotFoundError:
+    ROOT = Path(__file__).resolve().parents[3]
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from shared.vm_core.progress import GroupProgress, clamp_percent, plain_status, render_bar
 
 from .db import Database, utcnow
 
@@ -25,11 +32,16 @@ CREATE TABLE IF NOT EXISTS live_progress (
 CREATE INDEX IF NOT EXISTS idx_live_progress_run_updated ON live_progress(run_key, updated_at);
 CREATE INDEX IF NOT EXISTS idx_live_progress_campaign_updated ON live_progress(campaign_id, updated_at);
 '''
+_SCHEMA_READY: set[str] = set()
 
 
 def ensure_progress_schema(db: Database) -> None:
+    key = str(db.path.resolve())
+    if key in _SCHEMA_READY:
+        return
     with db.connect() as con:
         con.executescript(_PROGRESS_SCHEMA)
+    _SCHEMA_READY.add(key)
 
 
 def set_group_progress(
