@@ -128,11 +128,15 @@ class TelegramPool:
             raise RuntimeError("Photo-mode destination has no media files")
         cached = await self.media_caches[account_key].get(files, progress_callback=progress_callback)
         send_files = cached if cached else files
+        # Cached media has already been uploaded (or restored from Telegram), so a
+        # second callback can restart from zero and make a visual bar move backward.
+        # Only track destination send progress when raw files are being uploaded here.
+        send_callback = None if cached else progress_callback
         messages = await c.send_file(
             entity,
             send_files,
             caption=caption or None,
-            progress_callback=progress_callback,
+            progress_callback=send_callback,
             **kwargs,
         )
         if not isinstance(messages, list):
