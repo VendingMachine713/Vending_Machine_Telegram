@@ -20,6 +20,8 @@ from telegram.ext import (
 
 from core import Store, parse_query
 from envutil import load_env
+from marketplace import MarketplaceStore, parse_market_query
+from marketplace_ui import MarketplaceSessionStore, money, render_market_page
 from watches import WatchStore
 
 BASE = Path(__file__).resolve().parent
@@ -44,6 +46,8 @@ CLAIM_FILE = STATE / "claim_code.txt"
 DB = BASE / "data" / "universal_search.db"
 store = Store(DB)
 watch_store = WatchStore(DB)
+market_store = MarketplaceStore(DB)
+market_sessions = MarketplaceSessionStore(DB)
 
 
 def admin_id():
@@ -137,6 +141,15 @@ def search_keyboard(token, page, has_more):
         buttons.append(InlineKeyboardButton("◀ Previous", callback_data=f"us:{token}:{page - 1}"))
     if has_more:
         buttons.append(InlineKeyboardButton("Next ▶", callback_data=f"us:{token}:{page + 1}"))
+    return InlineKeyboardMarkup([buttons]) if buttons else None
+
+
+def market_keyboard(token, page, has_more):
+    buttons = []
+    if page > 1:
+        buttons.append(InlineKeyboardButton("◀ Previous", callback_data=f"mk:{token}:{page - 1}"))
+    if has_more:
+        buttons.append(InlineKeyboardButton("Next ▶", callback_data=f"mk:{token}:{page + 1}"))
     return InlineKeyboardMarkup([buttons]) if buttons else None
 
 
@@ -296,7 +309,7 @@ async def watch_cmd(update, context):
         return
     if not is_admin(update):
         await update.effective_message.reply_text(
-            "Saved watches are admin-only in v1.3. Local user subscriptions will be added only with membership-safe delivery checks."
+            "Saved watches are admin-only in v1.4. Local user subscriptions will be added only with membership-safe delivery checks."
         )
         return
     raw = " ".join(context.args).strip()
@@ -401,9 +414,194 @@ async def alert_status_cmd(update, context):
     )
 
 
+def _market_global_requested(raw):
+    return bool(re.search(r"(?:^|\s)--global(?:\s|$)", raw, flags=re.I))
+
+
+def _strip_market_global(raw):
+    return re.sub(r"(?:^|\s)--global(?:\s|$)", " ", raw, flags=re.I).strip()
+
+
+async def _send_market_page(
+    update,
+    *,
+    raw,
+    chat_scope,
+    global_search,
+    session_token=None,
+    page_override=None,
+):
+    user = update.effective_user
+    if not user:
+        return
+    q = parse_market_query(raw)
+    q.limit = min(q.limit, 10)
+    if page_override is not None:
+        q.page = max(1, int(page_override))
+    if not raw.strip():
+        q.status = "available"
+
+    rows, has_more = market_store.search(q, chat_scope)
+    if not session_token:
+        session_token = market_sessions.create(user.id, chat_scope, raw, global_search)
+    text = render_market_page(rows, q.page)
+    keyboard = market_keyboard(session_token, q.page, has_more)
+
+    publisher.signal(
+        "marketplace_search",
+        subject_type="chat",
+        subject_id=update.effective_chat.id if update.effective_chat else None,
+        score=min(100, len(rows) * 10),
+        confidence=0.9,
+        rationale="Structured Universal Search marketplace query completed",
+        result_count=len(rows),
+        global_search=bool(global_search),
+        page=q.page,
+        listing_type=q.listing_type,
+        category=q.category,
+        status=q.status,
+    )
+
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+    else:
+        await update.effective_message.reply_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+
+
+async def market_cmd(update, context):
+    if not update.effective_user or not update.effective_chat:
+        return
+    raw_with_scope = " ".join(context.args).strip()
+    global_search = _market_global_requested(raw_with_scope)
+    if global_search and not is_admin(update):
+        await update.effective_message.reply_text("Only the claimed admin can search marketplace data across chats.")
+        return
+    raw = _strip_market_global(raw_with_scope)
+    chat_scope = None if global_search else update.effective_chat.id
+    await _send_market_page(
+        update,
+        raw=raw,
+        chat_scope=chat_scope,
+        global_search=global_search,
+    )
+
+
+async def market_page_callback(update, context):
+    query = update.callback_query
+    match = re.fullmatch(r"mk:([A-Za-z0-9_-]+):(\d+)", query.data or "")
+    if not match:
+        await query.answer("Invalid marketplace session.", show_alert=True)
+        return
+    token, page_text = match.groups()
+    session = market_sessions.get(token)
+    if not session:
+        await query.answer("This marketplace search expired. Run it again.", show_alert=True)
+        return
+    if not update.effective_user or update.effective_user.id != session["user_id"]:
+        await query.answer("This marketplace search belongs to another user.", show_alert=True)
+        return
+    global_search = bool(session["global_search"])
+    if global_search and not is_admin(update):
+        await query.answer("Admin access is required.", show_alert=True)
+        return
+    await _send_market_page(
+        update,
+        raw=session["raw_query"],
+        chat_scope=session["chat_scope"],
+        global_search=global_search,
+        session_token=token,
+        page_override=int(page_text),
+    )
+
+
+def _listing_visible_to_update(update, row):
+    if not row or not update.effective_chat:
+        return False
+    return is_admin(update) or row["chat_id"] == update.effective_chat.id
+
+
+async def listing_cmd(update, context):
+    if not context.args or not context.args[0].isdigit():
+        await update.effective_message.reply_text("Use /listing ID")
+        return
+    row = market_store.get_listing(int(context.args[0]))
+    if not _listing_visible_to_update(update, row):
+        await update.effective_message.reply_text("Listing not found in this chat or not accessible.")
+        return
+    seller = "@" + row["sender_username"] if row["sender_username"] else (
+        row["display_name"] or str(row["sender_id"] or "?")
+    )
+    link = message_link(row)
+    details = [
+        f"<b>Listing #{row['id']}: {html.escape(_short(row['title'] or 'Marketplace listing', 120))}</b>",
+        f"Type: {html.escape(str(row['listing_type']))}",
+        f"Status: {html.escape(str(row['status']))}",
+        f"Category: {html.escape(str(row['category']).replace('_', ' '))}",
+        f"Price: {html.escape(money(row['price_cents'], row['currency']))}",
+        f"Seller: {html.escape(_short(seller, 70))}",
+        f"Confidence: {float(row['confidence']):.0%}",
+        f"Reposts: {row['repost_count']}",
+    ]
+    if row["condition"]:
+        details.append(f"Condition: {html.escape(str(row['condition']).replace('_', ' '))}")
+    if row["location_hint"]:
+        details.append(f"Location hint: {html.escape(str(row['location_hint']))}")
+    if link:
+        details.append(f'<a href="{html.escape(link, quote=True)}">Open original message</a>')
+    await update.effective_message.reply_text("\n".join(details)[:3900], parse_mode="HTML")
+
+
+async def price_history_cmd(update, context):
+    if not context.args or not context.args[0].isdigit():
+        await update.effective_message.reply_text("Use /pricehistory ID")
+        return
+    listing, rows = market_store.price_history_for_listing(int(context.args[0]))
+    if not _listing_visible_to_update(update, listing):
+        await update.effective_message.reply_text("Listing not found in this chat or not accessible.")
+        return
+    if not rows:
+        await update.effective_message.reply_text("No price history recorded for this listing yet.")
+        return
+    lines = [f"Price history — listing #{listing['id']}:"]
+    for row in rows[-20:]:
+        lines.append(f"• {row['observed_utc']}: {money(row['price_cents'], row['currency'])}")
+    await update.effective_message.reply_text("\n".join(lines)[:3900])
+
+
+async def market_stats_cmd(update, context):
+    if not update.effective_chat:
+        return
+    global_requested = any(arg.lower() == "--global" for arg in context.args)
+    if global_requested and not is_admin(update):
+        await update.effective_message.reply_text("Only the claimed admin can view global marketplace statistics.")
+        return
+    scope = None if global_requested else update.effective_chat.id
+    totals, categories = market_store.stats(scope)
+    lines = [
+        "Marketplace intelligence:",
+        f"Listings: {totals['total'] or 0}",
+        f"Available: {totals['available'] or 0}",
+        f"Wanted: {totals['wanted'] or 0}",
+    ]
+    if categories:
+        lines.append("Top categories:")
+        lines.extend(f"• {row['category'].replace('_', ' ')}: {row['count']}" for row in categories)
+    await update.effective_message.reply_text("\n".join(lines)[:3900])
+
+
 async def search_help_cmd(update, context):
     await update.effective_message.reply_text(
-        "Universal Search v1.3 guide:\n\n"
+        "Universal Search v1.4 guide:\n\n"
+        "Search:\n"
         "/search iphone 15\n"
         "/search \"iphone 15 pro\"\n"
         "/search iphone OR samsung\n"
@@ -412,6 +610,13 @@ async def search_help_cmd(update, context):
         "/search exhaust --media --sort newest\n"
         "/crosssearch query   (admin)\n"
         "/findads query       (admin)\n\n"
+        "Marketplace intelligence:\n"
+        "/market iphone --type sale --status available\n"
+        "/market hilux --min 500 --max 5000 --sort price-asc\n"
+        "/market iphone --global   (admin)\n"
+        "/listing ID\n"
+        "/pricehistory ID\n"
+        "/marketstats [--global]\n\n"
         "Passive alerts (admin):\n"
         "/watch name :: query\n"
         "/watch name :: query --global\n"
@@ -424,12 +629,15 @@ async def health(update, context):
     live = store.count("live")
     historical = store.count("backfill")
     watches = watch_store.count_for_owner(update.effective_user.id) if update.effective_user else 0
+    scope = None if is_admin(update) else (update.effective_chat.id if update.effective_chat else None)
+    market_totals, _ = market_store.stats(scope)
     await update.effective_message.reply_text(
-        f"✅ Universal Search v1.3\n"
+        f"✅ Universal Search v1.4\n"
         f"Indexed: {total} messages\n"
         f"Live: {live} | Historical: {historical}\n"
         f"FTS5 ranking: {'enabled' if store.fts_enabled else 'fallback LIKE mode'}\n"
-        f"Your saved watches: {watches}"
+        f"Saved watches: {watches}\n"
+        f"Structured marketplace listings: {market_totals['total'] or 0}"
     )
 
 
@@ -478,6 +686,17 @@ async def index_message(update, context):
         bool(message.effective_attachment),
         source="live",
     )
+
+    market_row = market_store.ingest(
+        update.effective_chat.id,
+        message.message_id,
+        user.id if user else None,
+        dt,
+        text,
+    )
+    if market_row is None:
+        market_store.remove_for_message(update.effective_chat.id, message.message_id)
+
     row = watch_store.get_message(update.effective_chat.id, message.message_id)
     queued = watch_store.enqueue_matches(row)
     if queued:
@@ -557,6 +776,7 @@ async def alert_worker(application):
 
 async def post_init(application):
     pruned = watch_store.cleanup_alert_history()
+    market_sessions.cleanup()
     if pruned:
         logger.info("Pruned %s expired passive-alert delivery records", pruned)
     application.bot_data["alert_worker_task"] = asyncio.create_task(
@@ -595,18 +815,24 @@ def main():
     app.add_handler(CommandHandler("resumewatch", resume_watch_cmd))
     app.add_handler(CommandHandler("deletewatch", delete_watch_cmd))
     app.add_handler(CommandHandler("alertstatus", alert_status_cmd))
+    app.add_handler(CommandHandler("market", market_cmd))
+    app.add_handler(CommandHandler("listing", listing_cmd))
+    app.add_handler(CommandHandler("pricehistory", price_history_cmd))
+    app.add_handler(CommandHandler("marketstats", market_stats_cmd))
     app.add_handler(CommandHandler("searchhelp", search_help_cmd))
     app.add_handler(CommandHandler("health", health))
     app.add_handler(CommandHandler("backfillstatus", backfill_status_cmd))
     app.add_handler(CallbackQueryHandler(search_page_callback, pattern=r"^us:"))
+    app.add_handler(CallbackQueryHandler(market_page_callback, pattern=r"^mk:"))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, index_message))
     if not admin_id():
         print(f"[CLAIM CODE] Send /claim {claim_code()} to this bot from your Telegram account.")
-    print("[READY] VM Universal Search v1.3")
+    print("[READY] VM Universal Search v1.4")
     publisher.started(
         indexed_messages=store.count(),
         fts_enabled=store.fts_enabled,
         passive_alerts=True,
+        marketplace_intelligence=True,
     )
     try:
         app.run_polling(allowed_updates=Update.ALL_TYPES)
