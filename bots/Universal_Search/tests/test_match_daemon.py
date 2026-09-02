@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -34,7 +35,9 @@ class MatchDaemonLeaseTests(unittest.TestCase):
             first = DaemonLease(path, ttl_seconds=60)
             self.assertTrue(first.acquire()[0])
             expired = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
-            with sqlite3.connect(path) as c:
+            # sqlite3.Connection.__exit__ does not close the OS handle. Use
+            # closing() so this regression test exercises Windows file cleanup.
+            with closing(sqlite3.connect(path)) as c:
                 c.execute(
                     "UPDATE marketplace_match_daemon_lease SET expires_utc=? WHERE singleton=1",
                     (expired,),
