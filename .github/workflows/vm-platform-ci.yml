@@ -7,10 +7,88 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: vm-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    name: Detect affected components
+    runs-on: ubuntu-latest
+    outputs:
+      platform: ${{ steps.filter.outputs.platform }}
+      universal_search: ${{ steps.filter.outputs.universal_search }}
+      vm_guard: ${{ steps.filter.outputs.vm_guard }}
+      admin_command_centre: ${{ steps.filter.outputs.admin_command_centre }}
+      smart_auto_poster: ${{ steps.filter.outputs.smart_auto_poster }}
+      repository_health: ${{ steps.filter.outputs.repository_health }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect changed paths
+        id: filter
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            base="$BASE_SHA"
+          elif [[ -n "${BEFORE_SHA:-}" && ! "$BEFORE_SHA" =~ ^0+$ ]]; then
+            base="$BEFORE_SHA"
+          else
+            base="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+          fi
+
+          git diff --name-only "$base" "$HEAD_SHA" > changed-files.txt
+          echo "Changed files:"
+          cat changed-files.txt
+
+          match_any() {
+            local pattern
+            for pattern in "$@"; do
+              if grep -Eq "$pattern" changed-files.txt; then
+                echo true
+                return
+              fi
+            done
+            echo false
+          }
+
+          platform=$(match_any '^shared/' '^tests/' '^tools/ci/' '^tools/(PREFLIGHT_ADMIN_RUNTIME_CUTOVER|CUTOVER_ADMIN_RUNTIME|RECOVER_ADMIN_COMMAND_CENTRE)\.ps1$' '^vm\.py$')
+          universal_search=$(match_any '^bots/Universal_Search/')
+          vm_guard=$(match_any '^bots/VM_Guard/')
+          admin_command_centre=$(match_any '^bots/Admin_Command_Centre/')
+          smart_auto_poster=$(match_any '^bots/Smart_Auto_Poster_V2/')
+          repository_health=$(match_any '^\.github/' '^\.gitignore$' '^README\.md$' '^tools/ci/validate_repository\.py$')
+
+          # Shared/platform changes can affect bot integration boundaries, so preserve
+          # the broader gate only when common code actually changed.
+          if [[ "$platform" == "true" ]]; then
+            universal_search=true
+            vm_guard=true
+            admin_command_centre=true
+          fi
+
+          {
+            echo "platform=$platform"
+            echo "universal_search=$universal_search"
+            echo "vm_guard=$vm_guard"
+            echo "admin_command_centre=$admin_command_centre"
+            echo "smart_auto_poster=$smart_auto_poster"
+            echo "repository_health=$repository_health"
+          } >> "$GITHUB_OUTPUT"
+
   platform:
     name: Platform validation
-    runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.platform == 'true'
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,7 +102,7 @@ jobs:
       - name: Lint CI and repository validation code
         run: ruff check tools/ci --output-format=github
       - name: Validate Windows admin cutover scripts
-        shell: powershell
+        shell: pwsh
         run: |
           $files = @(
             'tools/PREFLIGHT_ADMIN_RUNTIME_CUTOVER.ps1',
@@ -43,31 +121,62 @@ jobs:
       - name: Platform tests
         run: python -m unittest discover -s tests -p "test_*.py" -v
 
-  bot-core:
-    name: Bot core tests (${{ matrix.bot }})
-    runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        bot:
-          - Universal_Search
-          - VM_Guard
-          - Admin_Command_Centre
+  universal-search:
+    name: Bot core tests (Universal_Search)
+    needs: changes
+    if: needs.changes.outputs.universal_search == 'true'
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Compile bot
-        working-directory: bots/${{ matrix.bot }}
+        working-directory: bots/Universal_Search
         run: python -m compileall -q .
       - name: Run bot tests
-        working-directory: bots/${{ matrix.bot }}
+        working-directory: bots/Universal_Search
         run: python -m unittest discover -s tests -p "test_*.py" -v
 
-  smart-auto-poster-core:
-    name: Smart Auto Poster core quality gate
-    runs-on: windows-latest
+  vm-guard:
+    name: Bot core tests (VM_Guard)
+    needs: changes
+    if: needs.changes.outputs.vm_guard == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile bot
+        working-directory: bots/VM_Guard
+        run: python -m compileall -q .
+      - name: Run bot tests
+        working-directory: bots/VM_Guard
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+
+  admin-command-centre:
+    name: Bot core tests (Admin_Command_Centre)
+    needs: changes
+    if: needs.changes.outputs.admin_command_centre == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile bot
+        working-directory: bots/Admin_Command_Centre
+        run: python -m compileall -q .
+      - name: Run bot tests
+        working-directory: bots/Admin_Command_Centre
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+
+  smart-auto-poster:
+    name: Smart Auto Poster quality gate
+    needs: changes
+    if: needs.changes.outputs.smart_auto_poster == 'true'
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -84,25 +193,15 @@ jobs:
       - name: Run Smart Auto Poster tests
         working-directory: bots/Smart_Auto_Poster_V2
         run: python -m unittest discover -s tests -p "test_*.py" -v
-
-  smart-auto-poster-separation:
-    name: Smart Auto Poster admin separation
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Compile separation boundary
-        working-directory: bots/Smart_Auto_Poster_V2
-        run: python -m compileall -q smart_autoposter/settings.py tests/test_admin_separation.py
-      - name: Test embedded admin remains disabled
+      - name: Verify embedded admin remains disabled
         working-directory: bots/Smart_Auto_Poster_V2
         run: python -m unittest tests.test_admin_separation -v
 
   repository-health:
     name: Repository health
-    runs-on: windows-latest
+    needs: changes
+    if: needs.changes.outputs.repository_health == 'true'
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
