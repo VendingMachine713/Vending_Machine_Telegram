@@ -23,6 +23,7 @@ from envutil import load_env
 from marketplace import MarketplaceStore, parse_market_query
 from marketplace_reconcile import reconcile_marketplace_message
 from marketplace_ui import MarketplaceSessionStore, money, render_market_page
+from match_commands_v2 import register_match_commands_v2
 from watches import WatchStore
 
 BASE = Path(__file__).resolve().parent
@@ -310,7 +311,7 @@ async def watch_cmd(update, context):
         return
     if not is_admin(update):
         await update.effective_message.reply_text(
-            "Saved watches are admin-only in v1.4. Local user subscriptions will be added only with membership-safe delivery checks."
+            "Saved watches are admin-only in v1.6. Local user subscriptions will be added only with membership-safe delivery checks."
         )
         return
     raw = " ".join(context.args).strip()
@@ -601,7 +602,7 @@ async def market_stats_cmd(update, context):
 
 async def search_help_cmd(update, context):
     await update.effective_message.reply_text(
-        "Universal Search v1.4 guide:\n\n"
+        "Universal Search v1.6 guide:\n\n"
         "Search:\n"
         "/search iphone 15\n"
         "/search \"iphone 15 pro\"\n"
@@ -618,6 +619,12 @@ async def search_help_cmd(update, context):
         "/listing ID\n"
         "/pricehistory ID\n"
         "/marketstats [--global]\n\n"
+        "Demand intelligence (admin):\n"
+        "/matches [min_score] [limit]\n"
+        "/match ID\n"
+        "/matchfeedback ID good|bad|accepted|ignore [note]\n"
+        "/demandstats\n"
+        "/matchalerts\n\n"
         "Passive alerts (admin):\n"
         "/watch name :: query\n"
         "/watch name :: query --global\n"
@@ -633,12 +640,13 @@ async def health(update, context):
     scope = None if is_admin(update) else (update.effective_chat.id if update.effective_chat else None)
     market_totals, _ = market_store.stats(scope)
     await update.effective_message.reply_text(
-        f"✅ Universal Search v1.4\n"
+        f"✅ Universal Search v1.6\n"
         f"Indexed: {total} messages\n"
         f"Live: {live} | Historical: {historical}\n"
         f"FTS5 ranking: {'enabled' if store.fts_enabled else 'fallback LIKE mode'}\n"
         f"Saved watches: {watches}\n"
-        f"Structured marketplace listings: {market_totals['total'] or 0}"
+        f"Structured marketplace listings: {market_totals['total'] or 0}\n"
+        f"Match Engine v2 commands: {'enabled' if is_admin(update) else 'admin-only'}"
     )
 
 
@@ -822,17 +830,19 @@ def main():
     app.add_handler(CommandHandler("searchhelp", search_help_cmd))
     app.add_handler(CommandHandler("health", health))
     app.add_handler(CommandHandler("backfillstatus", backfill_status_cmd))
+    register_match_commands_v2(app, DB, is_admin)
     app.add_handler(CallbackQueryHandler(search_page_callback, pattern=r"^us:"))
     app.add_handler(CallbackQueryHandler(market_page_callback, pattern=r"^mk:"))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, index_message))
     if not admin_id():
         print(f"[CLAIM CODE] Send /claim {claim_code()} to this bot from your Telegram account.")
-    print("[READY] VM Universal Search v1.4")
+    print("[READY] VM Universal Search v1.6")
     publisher.started(
         indexed_messages=store.count(),
         fts_enabled=store.fts_enabled,
         passive_alerts=True,
         marketplace_intelligence=True,
+        demand_match_engine_v2=True,
     )
     try:
         app.run_polling(allowed_updates=Update.ALL_TYPES)
