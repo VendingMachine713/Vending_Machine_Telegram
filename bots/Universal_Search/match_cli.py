@@ -2,7 +2,7 @@ import argparse
 import json
 from pathlib import Path
 
-from match_engine import MatchEngine
+from match_runtime import HardenedMatchEngine
 from match_ui import money, reason_summary
 
 BASE = Path(__file__).resolve().parent
@@ -26,7 +26,13 @@ def parse_args(argv=None):
     detail = sub.add_parser("show", help="Show one match.")
     detail.add_argument("id", type=int)
 
-    stats = sub.add_parser("stats", help="Show match engine statistics.")
+    sub.add_parser("stats", help="Show match engine statistics and alert queue state.")
+    sub.add_parser("queue", help="Show durable passive-alert queue counts.")
+    sub.add_parser("cleanup", help="Cancel stale alerts and prune retained queue history.")
+
+    retry = sub.add_parser("retry-failed", help="Requeue failed alerts whose match is still active/new.")
+    retry.add_argument("--user-id", type=int, default=0)
+    retry.add_argument("--limit", type=int, default=50)
 
     notify = sub.add_parser("notifications", help="Read or change passive match-alert state.")
     notify.add_argument("state", choices=("status", "on", "off"), default="status", nargs="?")
@@ -51,9 +57,17 @@ def print_match(row):
         print("  WHY   : " + "; ".join(reasons))
 
 
+def print_queue(engine):
+    counts = engine.queue_status()
+    if not counts:
+        print("Alert queue is empty.")
+        return
+    print(" ".join(f"{key}={counts[key]}" for key in sorted(counts)))
+
+
 def main(argv=None):
     args = parse_args(argv)
-    engine = MatchEngine(DB)
+    engine = HardenedMatchEngine(DB)
 
     if args.command == "refresh":
         print(json.dumps(engine.refresh_all(min_score=args.min_score), indent=2))
@@ -94,8 +108,26 @@ def main(argv=None):
             f"baseline_completed_utc={engine.get_state('baseline_completed_utc', '-')}; "
             f"notifications={'on' if engine.notifications_enabled() else 'off'}"
         )
+        print_queue(engine)
         for row in feedback:
             print(f"feedback {row['verdict']}: {row['count']}")
+        return
+
+    if args.command == "queue":
+        print_queue(engine)
+        return
+
+    if args.command == "cleanup":
+        cancelled = engine.cancel_stale_alerts()
+        pruned = engine.cleanup_alert_history()
+        print(f"[OK] cancelled_stale={cancelled} pruned_history={pruned}")
+        print_queue(engine)
+        return
+
+    if args.command == "retry-failed":
+        count = engine.retry_failed_alerts(args.user_id or None, limit=args.limit)
+        print(f"[OK] requeued_failed_alerts={count}")
+        print_queue(engine)
         return
 
     if args.command == "notifications":
@@ -110,6 +142,7 @@ def main(argv=None):
         if not engine.record_feedback(args.id, args.user_id, args.verdict, args.note):
             raise SystemExit("Match not found.")
         print(f"[OK] Match #{args.id} feedback={args.verdict}")
+        print_queue(engine)
 
 
 if __name__ == "__main__":
