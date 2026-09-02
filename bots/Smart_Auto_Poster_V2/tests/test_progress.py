@@ -1,4 +1,4 @@
-# CI retrigger: Phase 1 progress validation
+# CI retrigger: Phase 1 progress validation after enterprise Actions review
 import asyncio
 import io
 import sys
