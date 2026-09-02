@@ -61,12 +61,20 @@ def main():
                 elif response!='Access denied.' and cmd=='poster_progress_off':
                     progress_watch.pop(chat,None); progress_last.pop(chat,None)
             for chat,message_id in list(progress_watch.items()):
-                text=poster_progress_text()
-                if text!=progress_last.get(chat):
-                    edit_message(cfg['token'],chat,message_id,text)
-                    progress_last[chat]=text
-                if '\nRun: COMPLETE' in text:
+                try:
+                    text=poster_progress_text()
+                    if text!=progress_last.get(chat):
+                        edit_message(cfg['token'],chat,message_id,text)
+                        progress_last[chat]=text
+                    if '\nRun: COMPLETE' in text:
+                        progress_watch.pop(chat,None); progress_last.pop(chat,None)
+                except Exception as exc:
+                    # A deleted/expired progress message must never destabilise the
+                    # Admin Command Centre. Drop only that watch; the operator can
+                    # start a fresh one with /poster_progress.
                     progress_watch.pop(chat,None); progress_last.pop(chat,None)
+                    publisher.incident('poster_progress_watch_error','Smart Auto Poster live progress refresh stopped for one chat',severity='WARNING',error_type=type(exc).__name__)
+                    print('[WARN] poster progress watch stopped',chat,type(exc).__name__,exc)
             backoff=2
         except KeyboardInterrupt:
             publisher.stopped('keyboard_interrupt')
