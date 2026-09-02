@@ -123,33 +123,47 @@ def enforce_queue_limits(db: Database, *, add_count: int, campaign_id: str, grou
 
 
 def manage_job(db: Database, job_id: int, action: str, *, actor: str = "local", minutes: int | None = None) -> dict:
+    """Safely mutate a queue job without racing an in-flight Telegram send.
+
+    `sending` is owned exclusively by the worker and cannot be cancelled, deferred,
+    retried or manually marked sent. `uncertain` is deliberately fail-closed: it may
+    be resolved as sent, but it cannot be cancelled/deferred or pushed back into retry
+    until the reconciliation layer can prove that resending is safe.
+    """
     action = action.lower()
     now = utcnow()
     with db.connect() as con:
         row = con.execute("SELECT * FROM queue WHERE id=?", (job_id,)).fetchone()
         if not row:
             raise RuntimeError(f"Unknown queue job: {job_id}")
+        status = row["status"]
+        if status == "sending":
+            raise RuntimeError("Job is currently sending and cannot be mutated; wait for confirmation or recovery")
         if action == "cancel":
-            if row["status"] == "sent":
+            if status == "sent":
                 raise RuntimeError("Cannot cancel a sent job")
-            con.execute("UPDATE queue SET status='cancelled',resolved_at=?,updated_at=? WHERE id=?", (now, now, job_id))
+            if status == "uncertain":
+                raise RuntimeError("Cannot cancel an uncertain job; reconcile delivery first")
+            con.execute("UPDATE queue SET status='cancelled',resolved_at=?,updated_at=? WHERE id=? AND status=?", (now, now, job_id, status))
         elif action == "retry":
-            if row["status"] not in {"failed", "uncertain", "cancelled", "quarantined", "deferred"}:
-                raise RuntimeError(f"Job status {row['status']} is not eligible for retry")
-            con.execute("UPDATE queue SET status='retry',due_at=?,last_error='manual retry requested',error_kind=NULL,resolved_at=NULL,updated_at=? WHERE id=?",
-                        (now, now, job_id))
+            if status == "uncertain":
+                raise RuntimeError("Cannot retry an uncertain job without delivery reconciliation")
+            if status not in {"failed", "cancelled", "quarantined", "deferred"}:
+                raise RuntimeError(f"Job status {status} is not eligible for retry")
+            con.execute("UPDATE queue SET status='retry',due_at=?,last_error='manual retry requested',error_kind=NULL,resolved_at=NULL,updated_at=? WHERE id=? AND status=?",
+                        (now, now, job_id, status))
         elif action == "defer":
-            if row["status"] == "sent":
-                raise RuntimeError("Cannot defer a sent job")
+            if status in {"sent", "uncertain"}:
+                raise RuntimeError(f"Cannot defer a {status} job")
             if not minutes or minutes < 1:
                 raise ValueError("defer minutes must be >=1")
             due = (datetime.now(timezone.utc) + timedelta(minutes=minutes)).isoformat(timespec="seconds")
-            con.execute("UPDATE queue SET status='deferred',due_at=?,last_error='manually deferred',error_kind='manual_defer',updated_at=? WHERE id=?",
-                        (due, now, job_id))
+            con.execute("UPDATE queue SET status='deferred',due_at=?,last_error='manually deferred',error_kind='manual_defer',updated_at=? WHERE id=? AND status=?",
+                        (due, now, job_id, status))
         elif action == "mark-sent":
-            if row["status"] not in {"uncertain", "failed"}:
+            if status not in {"uncertain", "failed"}:
                 raise RuntimeError("mark-sent is only for uncertain/failed jobs")
-            con.execute("UPDATE queue SET status='sent',last_error='manually resolved as sent',resolved_at=?,updated_at=? WHERE id=?", (now, now, job_id))
+            con.execute("UPDATE queue SET status='sent',last_error='manually resolved as sent',resolved_at=?,updated_at=? WHERE id=? AND status=?", (now, now, job_id, status))
         else:
             raise ValueError("Unknown job action")
     audit(db, actor, f"job_{action}", "queue_job", str(job_id), previous_status=row["status"], minutes=minutes)
@@ -187,8 +201,6 @@ def bulk_destination_action(db: Database, *, tag: str, enable: bool | None = Non
             if never_auto_post is not None:
                 sets.append("never_auto_post=?"); vals.append(int(never_auto_post))
                 if never_auto_post:
-                    # Hard exclusions fail closed immediately; clearing the flag later
-                    # does not silently re-enable the destination.
                     sets.append("enabled=0")
             if sets:
                 sets.append("updated_at=?"); vals.append(utcnow()); vals.append(gid)
@@ -275,7 +287,6 @@ def remove_campaign_gap(db: Database, campaign_id: str, related_campaign_id: str
         if both:
             con.execute("DELETE FROM campaign_relations WHERE campaign_id=? AND related_campaign_id=? AND relation_type='min_gap'", (related_campaign_id, campaign_id))
     audit(db, actor, "campaign_gap_remove", "campaign", campaign_id, related=related_campaign_id, both=both)
-
 
 
 def expire_ineligible_jobs(db: Database, *, now: str | None = None) -> int:
