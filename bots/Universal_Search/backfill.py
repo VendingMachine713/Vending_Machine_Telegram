@@ -139,8 +139,11 @@ async def backfill_chat(
                 text, bool(message.media),
                 source="backfill",
             )
-            if market.ingest(chat_id, message.id, sender_id, date_utc, text):
+            market_row = market.ingest(chat_id, message.id, sender_id, date_utc, text)
+            if market_row:
                 marketplace_this_run += 1
+            else:
+                market.remove_for_message(chat_id, message.id)
             total_this_run += 1
             scanned_since_checkpoint += 1
             oldest_seen = message.id if oldest_seen is None else min(oldest_seen, message.id)
