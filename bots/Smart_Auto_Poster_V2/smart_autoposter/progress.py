@@ -257,7 +257,11 @@ def progress_text(db: Database, *, campaign_id: str | None = None, bar_width: in
 
 
 class TerminalProgressReporter:
-    """Low-noise terminal reporter for the same progress state used by Telegram admin."""
+    """Low-noise terminal reporter for the same progress state used by Telegram admin.
+
+    Progress is observability, not delivery control. Persistence or display failures
+    therefore fail open and must never prevent a Telegram post from being attempted.
+    """
 
     _OVERALL_STAGES = {"claimed", "sent", "failed", "uncertain", "quarantined", "cancelled", "expired"}
 
@@ -269,24 +273,45 @@ class TerminalProgressReporter:
         self._last_bucket: int | None = None
         self._last_stage: str | None = None
 
-    def _print_overall(self, job: dict) -> None:
-        summary = run_progress(self.db, run_key=job.get("run_key"), campaign_id=job.get("campaign_id"))
-        if not summary:
-            return
-        problems = summary.failed + summary.uncertain
-        line = (
-            f"[RUN] {render_bar(summary.posted_percent)} | "
-            f"posted {summary.sent}/{summary.total} | left {summary.remaining} | problems {problems}"
+    @staticmethod
+    def _fallback_progress(job: dict, stage: str, percent: float | int, error: str | None = None) -> GroupProgress:
+        return GroupProgress.build(
+            job_id=int(job["id"]),
+            campaign_id=str(job["campaign_id"]),
+            group_id=int(job["group_id"]),
+            group_name=str(job.get("group_name") or job["group_id"]),
+            stage=stage,
+            percent=percent,
+            error=error,
         )
-        print(line, file=self.stream, flush=True)
+
+    def _print_overall(self, job: dict) -> None:
+        try:
+            summary = run_progress(self.db, run_key=job.get("run_key"), campaign_id=job.get("campaign_id"))
+            if not summary:
+                return
+            problems = summary.failed + summary.uncertain
+            line = (
+                f"[RUN] {render_bar(summary.posted_percent)} | "
+                f"posted {summary.sent}/{summary.total} | left {summary.remaining} | problems {problems}"
+            )
+            print(line, file=self.stream, flush=True)
+        except Exception:
+            return
 
     def update(self, job: dict, stage: str, percent: float | int, *, error: str | None = None) -> GroupProgress:
-        progress = set_group_progress(self.db, job, stage, percent, error=error)
+        try:
+            progress = set_group_progress(self.db, job, stage, percent, error=error)
+        except Exception:
+            progress = self._fallback_progress(job, stage, percent, error)
         bucket = int(progress.percent // self.min_percent_step)
         changed = progress.job_id != self._last_job_id or stage != self._last_stage or bucket != self._last_bucket
         if changed:
-            line = f"[POST] {progress.group_name} | {render_bar(progress.percent)} | {plain_status(stage, error=error)}"
-            print(line, file=self.stream, flush=True)
+            try:
+                line = f"[POST] {progress.group_name} | {render_bar(progress.percent)} | {plain_status(stage, error=error)}"
+                print(line, file=self.stream, flush=True)
+            except Exception:
+                pass
             if stage in self._OVERALL_STAGES:
                 self._print_overall(job)
             self._last_job_id = progress.job_id
@@ -299,12 +324,15 @@ class TerminalProgressReporter:
 
         def _progress(current: float, total: float) -> None:
             nonlocal last_bucket
-            total_value = float(total or 0)
-            percent = (float(current) / total_value * 100.0) if total_value > 0 else 0.0
-            percent = clamp_percent(percent)
-            bucket = int(percent // self.min_percent_step)
-            if last_bucket is None or bucket != last_bucket or percent >= 100:
-                last_bucket = bucket
-                self.update(job, stage, percent)
+            try:
+                total_value = float(total or 0)
+                percent = (float(current) / total_value * 100.0) if total_value > 0 else 0.0
+                percent = clamp_percent(percent)
+                bucket = int(percent // self.min_percent_step)
+                if last_bucket is None or bucket != last_bucket or percent >= 100:
+                    last_bucket = bucket
+                    self.update(job, stage, percent)
+            except Exception:
+                return
 
         return _progress
