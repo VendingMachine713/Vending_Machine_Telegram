@@ -41,6 +41,14 @@ class SecurityIdentityTests(unittest.TestCase):
                 self.assertFalse(owner_authorized(111, root))
                 self.assertTrue(owner_authorized(333, root))
 
+    def test_invalid_nonempty_environment_identity_fails_closed(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            write_central_owner_ids([111], root)
+            with patch.dict(os.environ, {"VM_OWNER_USER_IDS": "invalid,-1,0"}, clear=True):
+                self.assertEqual(central_owner_ids(root), ())
+                self.assertFalse(owner_authorized(111, root))
+
 
 class GroupSafePreflightTests(unittest.TestCase):
     def _write(self, root: Path, relative: str, text: str):
