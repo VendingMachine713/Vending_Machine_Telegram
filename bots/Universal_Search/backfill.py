@@ -6,6 +6,7 @@ from pathlib import Path
 
 from core import Store
 from envutil import load_env
+from marketplace import MarketplaceStore
 
 BASE = Path(__file__).resolve().parent
 DB = BASE / "data" / "universal_search.db"
@@ -83,7 +84,16 @@ def status_text(store: Store) -> str:
     return "\n".join(lines)
 
 
-async def backfill_chat(client, store: Store, entity, *, limit: int, days: int | None, batch_size: int):
+async def backfill_chat(
+    client,
+    store: Store,
+    market: MarketplaceStore,
+    entity,
+    *,
+    limit: int,
+    days: int | None,
+    batch_size: int,
+):
     from telethon import utils
 
     chat_id = utils.get_peer_id(entity)
@@ -96,6 +106,7 @@ async def backfill_chat(client, store: Store, entity, *, limit: int, days: int |
     store.record_backfill_progress(chat_id, title, username, status="running")
     scanned_since_checkpoint = 0
     total_this_run = 0
+    marketplace_this_run = 0
     oldest_seen = max_id or None
 
     try:
@@ -105,7 +116,7 @@ async def backfill_chat(client, store: Store, entity, *, limit: int, days: int |
                     chat_id, title, username, status="complete",
                     oldest_message_id=oldest_seen, scanned_delta=scanned_since_checkpoint,
                 )
-                return total_this_run
+                return total_this_run, marketplace_this_run
 
             sender = getattr(message, "sender", None)
             if sender is None and getattr(message, "sender_id", None):
@@ -114,18 +125,22 @@ async def backfill_chat(client, store: Store, entity, *, limit: int, days: int |
                 except Exception:
                     sender = None
             sender_id, sender_username, display_name = sender_fields(sender)
+            sender_id = sender_id or getattr(message, "sender_id", None)
             date_utc = (
                 message.date.astimezone(timezone.utc).isoformat()
                 if message.date else datetime.now(timezone.utc).isoformat()
             )
+            text = message.message or ""
             store.upsert(
                 chat_id, title, username,
-                sender_id or getattr(message, "sender_id", None),
+                sender_id,
                 sender_username, display_name,
                 message.id, date_utc,
-                message.message or "", bool(message.media),
+                text, bool(message.media),
                 source="backfill",
             )
+            if market.ingest(chat_id, message.id, sender_id, date_utc, text):
+                marketplace_this_run += 1
             total_this_run += 1
             scanned_since_checkpoint += 1
             oldest_seen = message.id if oldest_seen is None else min(oldest_seen, message.id)
@@ -141,7 +156,7 @@ async def backfill_chat(client, store: Store, entity, *, limit: int, days: int |
             chat_id, title, username, status="complete",
             oldest_message_id=oldest_seen, scanned_delta=scanned_since_checkpoint,
         )
-        return total_this_run
+        return total_this_run, marketplace_this_run
     except Exception as exc:
         store.record_backfill_progress(
             chat_id, title, username, status="error",
@@ -153,6 +168,7 @@ async def backfill_chat(client, store: Store, entity, *, limit: int, days: int |
 
 async def run(args):
     store = Store(DB)
+    market = MarketplaceStore(DB)
     if args.status:
         print(status_text(store))
         return
@@ -180,10 +196,14 @@ async def run(args):
         except ValueError:
             target = args.chat
         entity = await client.get_entity(target)
-        count = await backfill_chat(
-            client, store, entity, limit=args.limit, days=args.days, batch_size=args.batch_size
+        count, marketplace_count = await backfill_chat(
+            client, store, market, entity,
+            limit=args.limit, days=args.days, batch_size=args.batch_size,
         )
-        print(f"[OK] Indexed {count} historical messages from {args.chat}.")
+        print(
+            f"[OK] Indexed {count} historical messages from {args.chat}; "
+            f"structured marketplace candidates={marketplace_count}."
+        )
         await client.disconnect()
         return
 
@@ -191,11 +211,14 @@ async def run(args):
         if not (dialog.is_group or dialog.is_channel):
             continue
         try:
-            count = await backfill_chat(
-                client, store, dialog.entity,
+            count, marketplace_count = await backfill_chat(
+                client, store, market, dialog.entity,
                 limit=args.limit, days=args.days, batch_size=args.batch_size,
             )
-            print(f"[OK] {dialog.id} {dialog.name}: {count} historical messages")
+            print(
+                f"[OK] {dialog.id} {dialog.name}: {count} historical messages; "
+                f"marketplace={marketplace_count}"
+            )
         except Exception as exc:
             print(f"[WARN] {dialog.id} {dialog.name}: {type(exc).__name__}: {exc}")
 
