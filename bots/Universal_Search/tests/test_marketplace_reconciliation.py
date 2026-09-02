@@ -76,14 +76,24 @@ class MarketplaceReconciliationTests(unittest.TestCase):
 
     def test_full_price_edit_with_available_updates_price_and_history(self):
         with tempfile.TemporaryDirectory() as d:
-            _, market = self.make_stores(d)
+            core, market = self.make_stores(d)
+            original = "For sale iPhone 15 Pro $900 available"
+            edited = "For sale iPhone 15 Pro $850 available"
+            core.upsert(
+                -1001, "Group", None, 10, "seller", "Seller", 1,
+                "2026-09-02T00:00:00+00:00", original, False,
+            )
             first = reconcile_marketplace_message(
                 market,
                 -1001,
                 1,
                 10,
                 "2026-09-02T00:00:00+00:00",
-                "For sale iPhone 15 Pro $900 available",
+                original,
+            )
+            core.upsert(
+                -1001, "Group", None, 10, "seller", "Seller", 1,
+                "2026-09-02T01:00:00+00:00", edited, False,
             )
             second = reconcile_marketplace_message(
                 market,
@@ -91,7 +101,7 @@ class MarketplaceReconciliationTests(unittest.TestCase):
                 1,
                 10,
                 "2026-09-02T01:00:00+00:00",
-                "For sale iPhone 15 Pro $850 available",
+                edited,
             )
             self.assertEqual(second["price_cents"], 85000)
             self.assertEqual(second["logical_listing_id"], first["logical_listing_id"])
