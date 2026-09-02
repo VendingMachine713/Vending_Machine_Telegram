@@ -6,6 +6,7 @@ import os
 import sqlite3
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -62,10 +63,22 @@ class DaemonLease:
         self.owner = f"{os.getpid()}-{uuid.uuid4().hex}"
         self.acquired = False
 
+    @contextmanager
     def conn(self):
+        """Yield a lease connection and always close the OS handle.
+
+        sqlite3.Connection's own context manager commits/rolls back but does not
+        close the connection. That is easy to miss on POSIX because an open file
+        can still be unlinked, while Windows correctly exposes it as a locked DB.
+        Lease connections use autocommit/explicit transactions, so this wrapper
+        owns handle lifetime only.
+        """
         c = sqlite3.connect(self.db_path, timeout=10, isolation_level=None)
         c.row_factory = sqlite3.Row
-        return c
+        try:
+            yield c
+        finally:
+            c.close()
 
     def acquire(self):
         now = utc_now_dt()
