@@ -104,7 +104,6 @@ class Worker:
             if preferred in {"primary", "secondary"}:
                 candidates.append(preferred)
             elif preferred == "both":
-                # V3.0 safe load balancing: among dual-access accounts, prefer higher health then the least recently used.
                 def balance_key(key):
                     r = rows.get(key, {})
                     health = int(r.get("health_score") or 0)
@@ -160,12 +159,7 @@ class Worker:
 
     @staticmethod
     def retry_delay_seconds(attempts: int, kind: str | None = None) -> int:
-        """Return bounded exponential retry delay for transient failures.
-
-        `attempts` is the number of failed attempts including the failure currently
-        being handled. Telegram-provided flood/slow-mode retry times still take
-        precedence; this fallback is for failures without an authoritative retry_at.
-        """
+        """Return bounded exponential retry delay for transient failures."""
         attempt = max(1, int(attempts))
         base = {
             "worker_busy": 5,
@@ -180,6 +174,43 @@ class Worker:
             con.execute("UPDATE queue SET status='deferred',account_key=COALESCE(?,account_key),due_at=?,error_kind='deferred',last_error=?,updated_at=? WHERE id=?",
                         (account, due_at, reason[:1000], utcnow(), job["id"]))
         self.db.event("INFO", "job_deferred", reason[:800], account_key=account, group_id=job["group_id"], campaign_id=job["campaign_id"])
+
+    def mark_post_send_uncertain(self, job, account: str, message_ids, exc: Exception):
+        """Suppress automatic retry when Telegram succeeded but local persistence did not.
+
+        Once pool.send() has returned message IDs, Telegram has acknowledged the send.
+        A subsequent database/account/history write failure must therefore fail closed:
+        record UNCERTAIN when possible and never route the job through retry logic.
+        If this best-effort update also fails, the row remains `sending` and startup
+        recovery will convert it to UNCERTAIN after restart.
+        """
+        now = utcnow()
+        detail = f"post-send persistence failed; Telegram acknowledged delivery: {exc}"
+        try:
+            with self.db.connect() as con:
+                con.execute('''UPDATE queue SET status='uncertain',account_key=?,attempts=attempts+1,
+                               telegram_message_ids=?,error_kind='post_send_persistence',last_error=?,
+                               resolved_at=NULL,updated_at=? WHERE id=? AND status='sending' ''',
+                            (account, json.dumps(message_ids), detail[:1000], now, job["id"]))
+        except Exception:
+            pass
+        try:
+            self.db.event("WARNING", "uncertain_send", detail[:800], account_key=account,
+                          group_id=job["group_id"], campaign_id=job["campaign_id"],
+                          details=json.dumps({"job_id": job["id"], "telegram_message_ids": message_ids}))
+        except Exception:
+            pass
+        if self.notifier is not None:
+            try:
+                self.notifier.emit(
+                    "IMPORTANT",
+                    "Telegram send needs reconciliation",
+                    f"{job['group_name']} was acknowledged by Telegram but local confirmation failed. Automatic retry is suppressed.",
+                    dedupe_key=f"uncertain:{job['id']}",
+                    dedupe_window_seconds=86400,
+                )
+            except Exception:
+                pass
 
     async def run_once(self, auth):
         if self.safety is not None and self.safety.status().paused:
@@ -211,12 +242,20 @@ class Worker:
         try:
             media = json.loads(job["media_json"] or "[]")
             ids = await self.pool.send(account, job["group_id"], job["caption"], media, job["mode"], job["topic_id"])
+        except Exception as exc:
+            kind, retry_at, permanent = classify_exception(exc)
+            self.finish_error(job, f"{kind}: {exc}", permanent=permanent, retry_at=retry_at, account=account, kind=kind)
+            return True
+
+        try:
             now = utcnow()
             interval = max(int(job.get("min_interval_seconds") or 0), int(job.get("campaign_interval") or 0))
             next_eligible = (datetime.now(timezone.utc) + timedelta(seconds=interval)).isoformat(timespec="seconds") if interval > 0 else None
             with self.db.connect() as con:
-                con.execute("UPDATE queue SET status='sent',account_key=?,attempts=attempts+1,telegram_message_ids=?,error_kind=NULL,last_error=NULL,resolved_at=?,updated_at=? WHERE id=?",
-                            (account, json.dumps(ids), now, now, job["id"]))
+                changed = con.execute("UPDATE queue SET status='sent',account_key=?,attempts=attempts+1,telegram_message_ids=?,error_kind=NULL,last_error=NULL,resolved_at=?,updated_at=? WHERE id=? AND status='sending'",
+                                      (account, json.dumps(ids), now, now, job["id"]))
+                if changed.rowcount != 1:
+                    raise RuntimeError("queue row was no longer in sending state after Telegram acknowledged delivery")
                 con.execute("UPDATE destinations SET last_post_at=?,next_eligible_at=?,consecutive_failures=0,quarantine_until=NULL,updated_at=? WHERE group_id=?",
                             (now, next_eligible, now, job["group_id"]))
                 con.execute("UPDATE accounts SET cooldown_until=NULL,consecutive_failures=0,last_error=NULL,last_success_at=?,last_heartbeat_at=?,health_score=MIN(100,health_score+2),updated_at=? WHERE account_key=?",
@@ -224,8 +263,7 @@ class Worker:
             record_content_sent(self.db, job["campaign_id"], job["group_id"], job["content_id"], now)
             self.db.event("INFO", "send_success", f"Sent {job['campaign_id']} / {job['content_id']} to {job['group_name']}", account_key=account, group_id=job["group_id"], campaign_id=job["campaign_id"])
         except Exception as exc:
-            kind, retry_at, permanent = classify_exception(exc)
-            self.finish_error(job, f"{kind}: {exc}", permanent=permanent, retry_at=retry_at, account=account, kind=kind)
+            self.mark_post_send_uncertain(job, account, ids, exc)
         return True
 
     def finish_error(self, job, error, permanent=False, retry_at=None, account=None, kind: str | None = None):
@@ -240,7 +278,6 @@ class Worker:
                 due = retry_at or (datetime.now(timezone.utc) + timedelta(seconds=self.retry_delay_seconds(attempts, kind))).isoformat(timespec="seconds")
             con.execute("UPDATE queue SET status=?,account_key=?,attempts=?,due_at=?,error_kind=?,last_error=?,resolved_at=?,updated_at=? WHERE id=?",
                         (status, account, attempts, due, kind, error[:1000], now if status in {'failed','quarantined','cancelled','expired'} else None, now, job["id"]))
-            # Slow mode is a destination timing rule, not a broken destination.
             if kind == "slow_mode" and retry_at:
                 con.execute("UPDATE destinations SET next_eligible_at=?,updated_at=? WHERE group_id=?", (retry_at, now, job["group_id"]))
             penalize_destination = kind not in {"network", "worker_busy", "flood_wait", "slow_mode", "no_authorized_account", "account_disabled", "account_cooldown", "account_cooldown_or_pacing"}
