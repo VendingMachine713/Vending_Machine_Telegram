@@ -48,6 +48,13 @@ class Worker:
                             (key, session_names.get(key, key), 1, int(bool(state.get("authorized"))), state.get("identity"), state.get("user_id"), now, now))
 
     def claim(self):
+        """Atomically claim the next eligible queue item.
+
+        Fresh pending work is deliberately preferred over retry/deferred work, and
+        destinations with a clean recent history are preferred over repeatedly failing
+        destinations. This keeps one problematic group from holding up the healthy
+        path while preserving campaign priority and due-time ordering.
+        """
         now = utcnow()
         with self.db.connect() as con:
             con.execute("BEGIN IMMEDIATE")
@@ -67,7 +74,12 @@ class Worker:
                                  AND d.enabled=1 AND d.needs_review=0
                                  AND (d.quarantine_until IS NULL OR d.quarantine_until<=?)
                                  AND (d.next_eligible_at IS NULL OR d.next_eligible_at<=?)
-                                 ORDER BY c.priority DESC, q.due_at ASC, q.id ASC LIMIT 1''', (now, now, now, now, now)).fetchone()
+                                 ORDER BY c.priority DESC,
+                                          CASE q.status WHEN 'pending' THEN 0 WHEN 'retry' THEN 1 ELSE 2 END ASC,
+                                          d.consecutive_failures ASC,
+                                          q.due_at ASC,
+                                          q.id ASC
+                                 LIMIT 1''', (now, now, now, now, now)).fetchone()
             if not row:
                 return None
             changed = con.execute("UPDATE queue SET status='sending',updated_at=? WHERE id=? AND status IN ('pending','retry','deferred')", (now, row["id"]))
@@ -146,6 +158,23 @@ class Worker:
             return None, None, "account_disabled"
         return None, None, "no_authorized_account"
 
+    @staticmethod
+    def retry_delay_seconds(attempts: int, kind: str | None = None) -> int:
+        """Return bounded exponential retry delay for transient failures.
+
+        `attempts` is the number of failed attempts including the failure currently
+        being handled. Telegram-provided flood/slow-mode retry times still take
+        precedence; this fallback is for failures without an authoritative retry_at.
+        """
+        attempt = max(1, int(attempts))
+        base = {
+            "worker_busy": 5,
+            "network": 15,
+            "flood_wait": 30,
+            "slow_mode": 30,
+        }.get(kind, 30)
+        return min(900, base * (2 ** min(attempt - 1, 5)))
+
     def defer_job(self, job, due_at: str, reason: str, account: str | None = None):
         with self.db.connect() as con:
             con.execute("UPDATE queue SET status='deferred',account_key=COALESCE(?,account_key),due_at=?,error_kind='deferred',last_error=?,updated_at=? WHERE id=?",
@@ -208,7 +237,7 @@ class Worker:
                 status, due = "failed", job["due_at"]
             else:
                 status = "retry"
-                due = retry_at or (datetime.now(timezone.utc) + timedelta(seconds=120)).isoformat(timespec="seconds")
+                due = retry_at or (datetime.now(timezone.utc) + timedelta(seconds=self.retry_delay_seconds(attempts, kind))).isoformat(timespec="seconds")
             con.execute("UPDATE queue SET status=?,account_key=?,attempts=?,due_at=?,error_kind=?,last_error=?,resolved_at=?,updated_at=? WHERE id=?",
                         (status, account, attempts, due, kind, error[:1000], now if status in {'failed','quarantined','cancelled','expired'} else None, now, job["id"]))
             # Slow mode is a destination timing rule, not a broken destination.
