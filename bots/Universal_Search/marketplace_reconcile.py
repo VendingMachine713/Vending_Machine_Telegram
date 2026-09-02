@@ -8,15 +8,13 @@ from marketplace import (
 from core import utc_now
 
 
-STRONG_RELISTING_CUES = (
+STRONG_AVAILABLE_RELISTING_CUES = (
     "for sale",
     "selling",
     "asking",
     "price",
     "ono",
     "firm",
-    "pickup",
-    "pick up",
     "delivery",
     "dm me",
     "pm me",
@@ -46,26 +44,22 @@ def _existing_for_message(store: MarketplaceStore, chat_id, message_id):
 def _is_status_only_update(text, extraction):
     """Return True only for a short lifecycle edit, not a replacement listing.
 
-    Telegram sellers often replace a full ad with just ``SOLD`` or
-    ``pending pickup``. Those edits should retain the prior structured listing.
-    A real relist/price edit must be parsed normally, even when it also contains
-    words such as ``available``.
+    SOLD/pending edits are treated as lifecycle-only when they do not introduce
+    a new price. Availability-only edits are also preserved unless they contain
+    strong relisting language. Genuine price/relisting edits are fully parsed.
     """
     value = (text or "").strip()
     words = value.split()
-    if not value or len(words) > 12:
+    if not value or len(words) > 12 or extraction.price_cents is not None:
         return False
-    lifecycle_signal = (
-        _has_any(value, SOLD_CUES)
-        or _has_any(value, PENDING_CUES)
-        or "available" in value.lower()
-        or "back available" in value.lower()
-    )
-    if not lifecycle_signal:
+
+    if _has_any(value, SOLD_CUES) or _has_any(value, PENDING_CUES):
+        return True
+
+    lowered = value.lower()
+    if "available" not in lowered and "back available" not in lowered:
         return False
-    if extraction.price_cents is not None:
-        return False
-    if _has_any(value, STRONG_RELISTING_CUES):
+    if _has_any(value, STRONG_AVAILABLE_RELISTING_CUES):
         return False
     return True
 
