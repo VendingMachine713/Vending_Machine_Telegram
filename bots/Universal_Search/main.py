@@ -28,6 +28,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from shared.vm_core.publisher import BotEventPublisher
+from shared.vm_core.security import owner_authorized, central_owner_ids
 
 publisher = BotEventPublisher("Universal_Search", ROOT)
 logger = logging.getLogger("universal_search")
@@ -61,9 +62,19 @@ def claim_code():
     return code
 
 
+def authorized_owner_ids():
+    owners = set(central_owner_ids(ROOT))
+    local = admin_id()
+    if local:
+        owners.add(local)
+    return owners
+
+
 def is_admin(update):
-    a = admin_id()
-    return bool(a and update.effective_user and update.effective_user.id == a)
+    if not update.effective_user:
+        return False
+    uid = update.effective_user.id
+    return bool((admin_id() and uid == admin_id()) or owner_authorized(uid, ROOT))
 
 
 def private_admin(update):
@@ -83,6 +94,9 @@ async def deny(update):
 async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_chat or update.effective_chat.type != "private":
         return
+    if central_owner_ids(ROOT):
+        await update.effective_message.reply_text("Central VM owner identity is configured; local claim is disabled.")
+        return
     if admin_id():
         await update.effective_message.reply_text("Admin already claimed.")
         return
@@ -92,7 +106,7 @@ async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if supplied and supplied == claim_code():
         ADMIN_FILE.write_text(str(update.effective_user.id))
         CLAIM_FILE.unlink(missing_ok=True)
-        watch_store.reconcile_owner(update.effective_user.id)
+        watch_store.reconcile_owners(authorized_owner_ids())
         await update.effective_message.reply_text("✅ Universal Search admin claimed.")
     else:
         await update.effective_message.reply_text("Invalid claim code.")
@@ -340,7 +354,7 @@ async def watch_cmd(update, context):
             await update.effective_message.reply_text("Watch limit reached (50). Delete an old watch first.")
             return
 
-    watch_store.reconcile_owner(update.effective_user.id)
+    watch_store.reconcile_owners(authorized_owner_ids())
     row = watch_store.save(update.effective_user.id, name, raw_query, chat_scope)
     await update.effective_message.reply_text(
         f"✅ Watch #{row['id']} saved: {row['name']}\n"
@@ -454,6 +468,7 @@ async def health(update, context):
         f"Live: {live} | Historical: {historical}\n"
         f"FTS5 ranking: {'enabled' if store.fts_enabled else 'fallback LIKE mode'}\n"
         f"Saved watches: {watches}\n"
+        f"Central owner configured: {'yes' if central_owner_ids(ROOT) else 'no'}\n"
         "Control scope: private owner only"
     )
 
@@ -520,17 +535,18 @@ async def index_message(update, context):
 async def alert_worker(application):
     while True:
         try:
-            owner = admin_id()
-            if not owner:
+            owners = authorized_owner_ids()
+            watch_store.reconcile_owners(owners)
+            if not owners:
                 await asyncio.sleep(10)
                 continue
-            watch_store.reconcile_owner(owner)
             alerts = watch_store.due_alerts(20)
             if not alerts:
                 await asyncio.sleep(10)
                 continue
             for alert in alerts:
-                if alert["owner_user_id"] != owner:
+                owner = int(alert["owner_user_id"])
+                if owner not in owners:
                     continue
                 title = html.escape(_short(alert["watch_name"], 60))
                 body = f"🔔 <b>Watch matched: {title}</b>\n\n{fmt_row(alert)}"
@@ -587,9 +603,7 @@ async def alert_worker(application):
 
 
 async def post_init(application):
-    owner = admin_id()
-    if owner:
-        watch_store.reconcile_owner(owner)
+    watch_store.reconcile_owners(authorized_owner_ids())
     pruned = watch_store.cleanup_alert_history()
     if pruned:
         logger.info("Pruned %s expired passive-alert delivery records", pruned)
@@ -634,14 +648,15 @@ def main():
     app.add_handler(CommandHandler("backfillstatus", backfill_status_cmd))
     app.add_handler(CallbackQueryHandler(search_page_callback, pattern=r"^us:"))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, index_message))
-    if not admin_id():
+    if not admin_id() and not central_owner_ids(ROOT):
         print(f"[CLAIM CODE] Send /claim {claim_code()} to this bot in a PRIVATE chat from your Telegram account.")
-    print("[READY] VM Universal Search v1.3 — passive indexing in groups, private-owner control only")
+    print("[READY] VM Universal Search v1.3 — passive indexing in groups, central/private-owner control only")
     publisher.started(
         indexed_messages=store.count(),
         fts_enabled=store.fts_enabled,
         passive_alerts=True,
         control_scope="private_owner_only",
+        central_owner_configured=bool(central_owner_ids(ROOT)),
     )
     try:
         app.run_polling(allowed_updates=Update.ALL_TYPES)
