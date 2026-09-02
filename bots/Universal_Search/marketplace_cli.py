@@ -3,6 +3,7 @@ from pathlib import Path
 
 from core import Store
 from marketplace import MarketplaceStore, parse_market_query
+from marketplace_reconcile import rebuild_marketplace_index
 
 BASE = Path(__file__).resolve().parent
 DB = BASE / "data" / "universal_search.db"
@@ -39,11 +40,11 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
-    Store(DB)  # ensure the core schema/migrations exist before marketplace joins are used
+    core = Store(DB)
     market = MarketplaceStore(DB)
 
     if args.command == "rebuild":
-        count = market.rebuild_from_index(args.limit)
+        count = rebuild_marketplace_index(core, market, args.limit)
         print(f"[OK] Structured marketplace listings indexed: {count}")
         return
 
