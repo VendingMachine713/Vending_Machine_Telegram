@@ -4,37 +4,120 @@ Universal Search indexes Telegram messages into a local SQLite database and prov
 
 ## Current version
 
-**v1.1.0**
+**v1.2.0**
 
-### Live search
+## Core capabilities
 
-The bot indexes messages it receives through the Telegram Bot API and supports:
+### Live indexing
 
-- `/search <words>`
-- `/crosssearch <words>` — admin only
-- `/findads <words>`
-- `/health`
-- `/backfillstatus` — admin only
+The Bot API process indexes new messages it receives into the local SQLite database.
 
 ### Historical backfill
 
-v1.1 adds a separate **read-only Telethon history worker**. It can progressively index historical messages from groups and channels accessible to the configured Telegram user account.
+A separate read-only Telethon worker can progressively index historical messages from groups and channels accessible to the configured Telegram user account.
 
 The worker:
 
 - uses its own Telegram session file;
 - does not send, edit or delete Telegram messages;
 - does not download media files;
-- stores only message text/caption and media-presence metadata;
+- stores message text/caption and media-presence metadata;
 - checkpoints progress so interrupted scans can resume;
 - uses the same Bot API-style marked chat IDs (`-100...`) as the live index;
 - upserts by `(chat_id, message_id)` so live and historical indexing do not duplicate records.
+
+### Search Engine v2
+
+v1.2 adds SQLite FTS5 search and a safe LIKE fallback when FTS5 is unavailable.
+
+Search now supports:
+
+- ranked full-text results;
+- exact phrases;
+- OR queries;
+- excluded terms;
+- sender filtering;
+- date windows;
+- media-only filtering;
+- relevance/newest/oldest sorting;
+- Previous/Next pagination;
+- persistent 24-hour pagination sessions;
+- recent search history;
+- links back to the original Telegram message when a link can be constructed.
+
+## Bot commands
+
+```text
+/search <query>
+/crosssearch <query>     admin only
+/findads <query>         admin only
+/recentsearches
+/searchhelp
+/health
+/backfillstatus          admin only
+```
+
+Cross-chat search is deliberately restricted to the claimed Universal Search admin. This prevents the bot-owned index from exposing messages from one indexed group to arbitrary users in another context.
+
+## Query examples
+
+Basic search:
+
+```text
+/search iphone 15
+```
+
+Exact phrase:
+
+```text
+/search "iphone 15 pro"
+```
+
+OR search:
+
+```text
+/search iphone OR samsung
+```
+
+Exclude a term:
+
+```text
+/search hilux -wanted
+```
+
+Sender and date filter:
+
+```text
+/search wheels --user @seller --days 30
+```
+
+Media-only results:
+
+```text
+/search exhaust --media
+```
+
+Sorting:
+
+```text
+/search iphone --sort relevant
+/search iphone --sort newest
+/search iphone --sort oldest
+```
+
+Result size and explicit page:
+
+```text
+/search iphone --limit 10 --page 2
+```
+
+The Telegram result message also provides Previous/Next buttons when additional pages are available.
 
 ## Configuration
 
 Copy `.env.example` to `.env`.
 
-Required for the bot:
+Required for the Bot API process:
 
 ```text
 BOT_TOKEN=
@@ -48,7 +131,7 @@ TELEGRAM_API_HASH=
 TELEGRAM_PHONE=
 ```
 
-Never commit `.env` or Telegram `.session` files. The project `.gitignore` already excludes them.
+Never commit `.env` or Telegram `.session` files. The project `.gitignore` excludes them.
 
 ## Install
 
@@ -98,11 +181,29 @@ Limit history to a date window:
 
 On the first Telethon login, Telegram may require an interactive login code. After the dedicated local session is authorised, later backfills reuse it.
 
-## Safety
+## Database migration behaviour
 
-Historical backfill is deliberately isolated from the Bot API polling process. A slow scan, Telegram flood-wait, or interrupted history run does not stop live `/search` operation.
+The v1.2 database upgrade is automatic when `Store` opens the existing database.
 
-The backfill worker is read-only with respect to Telegram. It only reads accessible history and writes the bot-owned local SQLite index.
+It:
+
+- preserves existing indexed messages;
+- preserves v1.1 live/backfill source metadata;
+- creates the FTS5 index when supported;
+- backfills the FTS index from existing messages once when required;
+- installs triggers so later inserts, edits and deletes stay synchronised;
+- creates search-session and search-history tables idempotently.
+
+If the local SQLite build does not provide FTS5, search remains available through the slower LIKE fallback and `/health` reports the fallback mode.
+
+## Safety and privacy
+
+- Historical backfill is isolated from Bot API polling.
+- Telegram history access is read-only.
+- Media files are not downloaded by the backfill worker.
+- Cross-chat searches require the claimed admin.
+- Pagination sessions are bound to the user who initiated the search and expire after 24 hours.
+- Bot tokens, API hashes and Telegram sessions remain local-only.
 
 ## Testing
 
@@ -110,3 +211,5 @@ The backfill worker is read-only with respect to Telegram. It only reads accessi
 py -m unittest discover -s tests -q
 py -m compileall -q .
 ```
+
+The repository GitHub Actions workflow also compiles Universal Search and runs its unit tests on Windows with Python 3.12 before merge.
