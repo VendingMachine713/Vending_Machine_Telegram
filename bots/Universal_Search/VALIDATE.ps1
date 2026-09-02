@@ -28,6 +28,16 @@ Invoke-Step "Run Universal Search tests" {
     & py -m unittest discover -s tests -p 'test_*.py' -v
 }
 
+Write-Host "> Validate BOT_MANIFEST.json"
+$manifest = Get-Content '.\BOT_MANIFEST.json' -Raw | ConvertFrom-Json
+if (-not $manifest.name -or $manifest.name -ne 'Universal_Search') {
+    throw 'BOT_MANIFEST.json has an unexpected bot name.'
+}
+if (-not $manifest.version) {
+    throw 'BOT_MANIFEST.json version is missing.'
+}
+Write-Host ("[OK] BOT_MANIFEST.json name={0} version={1}" -f $manifest.name, $manifest.version)
+
 Write-Host "> Parse PowerShell launchers"
 $PowerShellFiles = @(
     '.\START.ps1',
@@ -35,7 +45,9 @@ $PowerShellFiles = @(
     '.\MARKETPLACE.ps1',
     '.\MATCH_ENGINE.ps1',
     '.\RUN_MATCH_ENGINE.ps1',
+    '.\MATCH_ENGINE_STATUS.ps1',
     '.\INSTALL_MATCH_ENGINE_AUTOSTART.ps1',
+    '.\UNINSTALL_MATCH_ENGINE_AUTOSTART.ps1',
     '.\VALIDATE.ps1'
 )
 foreach ($file in $PowerShellFiles) {
@@ -66,9 +78,10 @@ con = sqlite3.connect(path, timeout=10)
 try:
     integrity = con.execute('PRAGMA integrity_check').fetchall()
     fk = con.execute('PRAGMA foreign_key_check').fetchall()
+    tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 finally:
     con.close()
-print({'integrity': [r[0] for r in integrity], 'foreign_key_errors': fk})
+print({'integrity': [r[0] for r in integrity], 'foreign_key_errors': fk, 'tables': len(tables)})
 if integrity != [('ok',)] or fk:
     raise SystemExit(2)
 "@
