@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "name": "Universal_Search",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "status": "existing",
   "classification": "CANONICAL",
   "entrypoint": "main.py",
@@ -10,6 +10,11 @@
     "START.ps1",
     "BACKFILL.ps1",
     "MARKETPLACE.ps1",
+    "MATCH_ENGINE.ps1",
+    "RUN_MATCH_ENGINE.ps1",
+    "MATCH_ENGINE_STATUS.ps1",
+    "INSTALL_MATCH_ENGINE_AUTOSTART.ps1",
+    "UNINSTALL_MATCH_ENGINE_AUTOSTART.ps1",
     "VALIDATE.ps1"
   ],
   "requirements": "requirements.txt",
@@ -23,7 +28,10 @@
     "tests\\test_watches.py",
     "tests\\test_marketplace.py",
     "tests\\test_marketplace_ui.py",
-    "tests\\test_marketplace_reconciliation.py"
+    "tests\\test_marketplace_reconciliation.py",
+    "tests\\test_match_engine.py",
+    "tests\\test_match_runtime.py",
+    "tests\\test_match_daemon.py"
   ],
   "vm_core": {
     "compatible": true,
@@ -63,6 +71,19 @@
     "marketplace_repost_grouping",
     "marketplace_statistics",
     "marketplace_lifecycle_reconciliation",
+    "wtb_demand_detection",
+    "demand_supply_matching",
+    "budget_aware_matching",
+    "category_and_term_scoring",
+    "self_match_prevention",
+    "match_repost_deduplication",
+    "match_feedback",
+    "passive_match_notifications",
+    "match_alert_retry_backoff",
+    "match_alert_stale_cancellation",
+    "match_daemon_singleton_lease",
+    "match_daemon_health_status",
+    "match_engine_windows_autostart",
     "local_quality_gate"
   ],
   "lifecycle": {
