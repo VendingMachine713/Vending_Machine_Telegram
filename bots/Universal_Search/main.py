@@ -66,14 +66,33 @@ def is_admin(update):
     return bool(a and update.effective_user and update.effective_user.id == a)
 
 
+def private_admin(update):
+    return bool(
+        update.effective_chat
+        and update.effective_chat.type == "private"
+        and is_admin(update)
+    )
+
+
+async def deny(update):
+    # Shared groups should not expose admin/control state to ordinary members.
+    if update.effective_chat and update.effective_chat.type == "private" and update.effective_message:
+        await update.effective_message.reply_text("Not authorised.")
+
+
 async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_chat or update.effective_chat.type != "private":
+        return
     if admin_id():
         await update.effective_message.reply_text("Admin already claimed.")
+        return
+    if not update.effective_user:
         return
     supplied = " ".join(context.args).strip().upper()
     if supplied and supplied == claim_code():
         ADMIN_FILE.write_text(str(update.effective_user.id))
         CLAIM_FILE.unlink(missing_ok=True)
+        watch_store.reconcile_owner(update.effective_user.id)
         await update.effective_message.reply_text("✅ Universal Search admin claimed.")
     else:
         await update.effective_message.reply_text("Invalid claim code.")
@@ -216,9 +235,8 @@ async def _send_search_page(
 
 
 async def search_cmd(update, context, cross=False, force_ads=False):
-    if cross and not is_admin(update):
-        await update.effective_message.reply_text("Admin only for cross-chat search.")
-        return
+    if not private_admin(update):
+        return await deny(update)
     raw = " ".join(context.args).strip()
     chat_scope = None if cross else update.effective_chat.id
     await _send_search_page(
@@ -244,6 +262,10 @@ async def cmd_ads(update, context):
 
 async def search_page_callback(update, context):
     query = update.callback_query
+    if not private_admin(update):
+        if query:
+            await query.answer("Not authorised.", show_alert=True)
+        return
     match = re.fullmatch(r"us:([A-Za-z0-9_-]+):(\d+)", query.data or "")
     if not match:
         await query.answer("Invalid search session.", show_alert=True)
@@ -256,15 +278,11 @@ async def search_page_callback(update, context):
     if not update.effective_user or update.effective_user.id != session["user_id"]:
         await query.answer("This search belongs to another user.", show_alert=True)
         return
-    cross = bool(session["cross_chat"])
-    if cross and not is_admin(update):
-        await query.answer("Admin access is required.", show_alert=True)
-        return
     await _send_search_page(
         update,
         raw=session["raw_query"],
         chat_scope=session["chat_scope"],
-        cross=cross,
+        cross=bool(session["cross_chat"]),
         force_ads=bool(session["force_ads"]),
         session_token=token,
         page_override=int(page_text),
@@ -273,8 +291,8 @@ async def search_page_callback(update, context):
 
 
 async def recent_searches_cmd(update, context):
-    if not update.effective_user:
-        return
+    if not private_admin(update):
+        return await deny(update)
     rows = store.recent_searches(update.effective_user.id, 10)
     if not rows:
         await update.effective_message.reply_text("No recent searches yet.")
@@ -292,13 +310,8 @@ def _watch_query_valid(raw_query):
 
 
 async def watch_cmd(update, context):
-    if not update.effective_user or not update.effective_chat:
-        return
-    if not is_admin(update):
-        await update.effective_message.reply_text(
-            "Saved watches are admin-only in v1.3. Local user subscriptions will be added only with membership-safe delivery checks."
-        )
-        return
+    if not private_admin(update):
+        return await deny(update)
     raw = " ".join(context.args).strip()
     global_requested = bool(re.search(r"(?:^|\s)--global(?:\s|$)", raw, flags=re.I))
     raw = re.sub(r"(?:^|\s)--global(?:\s|$)", " ", raw, flags=re.I).strip()
@@ -315,10 +328,11 @@ async def watch_cmd(update, context):
         await update.effective_message.reply_text("The watch needs a searchable term or supported filter.")
         return
 
-    if global_requested or update.effective_chat.type == "private":
+    # Private-owner control means watches are global across the indexed corpus.
+    # --global remains accepted for backwards compatibility/documentation clarity.
+    chat_scope = None
+    if global_requested:
         chat_scope = None
-    else:
-        chat_scope = update.effective_chat.id
 
     if watch_store.count_for_owner(update.effective_user.id) >= 50:
         existing = {row["name"] for row in watch_store.list_for_owner(update.effective_user.id)}
@@ -326,19 +340,19 @@ async def watch_cmd(update, context):
             await update.effective_message.reply_text("Watch limit reached (50). Delete an old watch first.")
             return
 
+    watch_store.reconcile_owner(update.effective_user.id)
     row = watch_store.save(update.effective_user.id, name, raw_query, chat_scope)
-    scope = "all indexed chats" if row["chat_scope"] is None else f"chat {row['chat_scope']}"
     await update.effective_message.reply_text(
         f"✅ Watch #{row['id']} saved: {row['name']}\n"
-        f"Scope: {scope}\n"
+        "Scope: all indexed chats\n"
         f"Query: {row['raw_query']}\n\n"
         "Matching new messages will be delivered as private bot alerts."
     )
 
 
 async def watches_cmd(update, context):
-    if not update.effective_user:
-        return
+    if not private_admin(update):
+        return await deny(update)
     rows = watch_store.list_for_owner(update.effective_user.id)
     if not rows:
         await update.effective_message.reply_text("No saved watches. Use /watch name :: query")
@@ -355,7 +369,9 @@ async def watches_cmd(update, context):
 
 
 async def _watch_state_cmd(update, context, enabled):
-    if not update.effective_user or not context.args or not context.args[0].isdigit():
+    if not private_admin(update):
+        return await deny(update)
+    if not context.args or not context.args[0].isdigit():
         await update.effective_message.reply_text(
             "Provide the watch ID, e.g. /pausewatch 3" if not enabled else "Provide the watch ID, e.g. /resumewatch 3"
         )
@@ -379,7 +395,9 @@ async def resume_watch_cmd(update, context):
 
 
 async def delete_watch_cmd(update, context):
-    if not update.effective_user or not context.args or not context.args[0].isdigit():
+    if not private_admin(update):
+        return await deny(update)
+    if not context.args or not context.args[0].isdigit():
         await update.effective_message.reply_text("Provide the watch ID, e.g. /deletewatch 3")
         return
     watch_id = int(context.args[0])
@@ -390,53 +408,59 @@ async def delete_watch_cmd(update, context):
 
 
 async def alert_status_cmd(update, context):
-    if not update.effective_user:
-        return
+    if not private_admin(update):
+        return await deny(update)
     rows = watch_store.queue_status_for_owner(update.effective_user.id)
     counts = {row["status"]: row["count"] for row in rows}
     await update.effective_message.reply_text(
         "Alert queue:\n"
         f"pending={counts.get('pending', 0)} | retry={counts.get('retry', 0)} | "
-        f"sent={counts.get('sent', 0)} | failed={counts.get('failed', 0)}"
+        f"sent={counts.get('sent', 0)} | failed={counts.get('failed', 0)} | "
+        f"cancelled={counts.get('cancelled', 0)}"
     )
 
 
 async def search_help_cmd(update, context):
+    if not private_admin(update):
+        return await deny(update)
     await update.effective_message.reply_text(
-        "Universal Search v1.3 guide:\n\n"
+        "Universal Search v1.3 private-owner guide:\n\n"
         "/search iphone 15\n"
         "/search \"iphone 15 pro\"\n"
         "/search iphone OR samsung\n"
         "/search hilux -wanted\n"
         "/search wheels --user @seller --days 30\n"
         "/search exhaust --media --sort newest\n"
-        "/crosssearch query   (admin)\n"
-        "/findads query       (admin)\n\n"
-        "Passive alerts (admin):\n"
+        "/crosssearch query\n"
+        "/findads query\n\n"
+        "Passive alerts:\n"
         "/watch name :: query\n"
-        "/watch name :: query --global\n"
-        "/watches\n/pausewatch ID\n/resumewatch ID\n/deletewatch ID\n/alertstatus"
+        "/watches\n/pausewatch ID\n/resumewatch ID\n/deletewatch ID\n/alertstatus\n\n"
+        "All control/search/watch commands work only in your private chat with this bot. "
+        "Group messages are indexed passively."
     )
 
 
 async def health(update, context):
+    if not private_admin(update):
+        return await deny(update)
     total = store.count()
     live = store.count("live")
     historical = store.count("backfill")
-    watches = watch_store.count_for_owner(update.effective_user.id) if update.effective_user else 0
+    watches = watch_store.count_for_owner(update.effective_user.id)
     await update.effective_message.reply_text(
         f"✅ Universal Search v1.3\n"
         f"Indexed: {total} messages\n"
         f"Live: {live} | Historical: {historical}\n"
         f"FTS5 ranking: {'enabled' if store.fts_enabled else 'fallback LIKE mode'}\n"
-        f"Your saved watches: {watches}"
+        f"Saved watches: {watches}\n"
+        "Control scope: private owner only"
     )
 
 
 async def backfill_status_cmd(update, context):
-    if not is_admin(update):
-        await update.effective_message.reply_text("Admin only.")
-        return
+    if not private_admin(update):
+        return await deny(update)
     rows = store.backfill_status()
     if not rows:
         await update.effective_message.reply_text(
@@ -496,16 +520,23 @@ async def index_message(update, context):
 async def alert_worker(application):
     while True:
         try:
+            owner = admin_id()
+            if not owner:
+                await asyncio.sleep(10)
+                continue
+            watch_store.reconcile_owner(owner)
             alerts = watch_store.due_alerts(20)
             if not alerts:
                 await asyncio.sleep(10)
                 continue
             for alert in alerts:
+                if alert["owner_user_id"] != owner:
+                    continue
                 title = html.escape(_short(alert["watch_name"], 60))
                 body = f"🔔 <b>Watch matched: {title}</b>\n\n{fmt_row(alert)}"
                 try:
                     await application.bot.send_message(
-                        chat_id=alert["owner_user_id"],
+                        chat_id=owner,
                         text=body,
                         parse_mode="HTML",
                     )
@@ -533,7 +564,7 @@ async def alert_worker(application):
                     publisher.signal(
                         "saved_search_alert_sent",
                         subject_type="user",
-                        subject_id=alert["owner_user_id"],
+                        subject_id=owner,
                         score=50,
                         confidence=1.0,
                         rationale="Passive Universal Search watch delivered",
@@ -556,6 +587,9 @@ async def alert_worker(application):
 
 
 async def post_init(application):
+    owner = admin_id()
+    if owner:
+        watch_store.reconcile_owner(owner)
     pruned = watch_store.cleanup_alert_history()
     if pruned:
         logger.info("Pruned %s expired passive-alert delivery records", pruned)
@@ -601,12 +635,13 @@ def main():
     app.add_handler(CallbackQueryHandler(search_page_callback, pattern=r"^us:"))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, index_message))
     if not admin_id():
-        print(f"[CLAIM CODE] Send /claim {claim_code()} to this bot from your Telegram account.")
-    print("[READY] VM Universal Search v1.3")
+        print(f"[CLAIM CODE] Send /claim {claim_code()} to this bot in a PRIVATE chat from your Telegram account.")
+    print("[READY] VM Universal Search v1.3 — passive indexing in groups, private-owner control only")
     publisher.started(
         indexed_messages=store.count(),
         fts_enabled=store.fts_enabled,
         passive_alerts=True,
+        control_scope="private_owner_only",
     )
     try:
         app.run_polling(allowed_updates=Update.ALL_TYPES)
