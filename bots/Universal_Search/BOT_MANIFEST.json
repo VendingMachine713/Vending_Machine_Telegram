@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "name": "Universal_Search",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "status": "existing",
   "classification": "CANONICAL",
   "entrypoint": "main.py",
@@ -31,7 +31,10 @@
     "tests\\test_marketplace_reconciliation.py",
     "tests\\test_match_engine.py",
     "tests\\test_match_runtime.py",
-    "tests\\test_match_daemon.py"
+    "tests\\test_match_daemon.py",
+    "tests\\test_match_engine_v2.py",
+    "tests\\test_match_engine_v2_backfill.py",
+    "tests\\test_match_engine_v2_candidate_window.py"
   ],
   "vm_core": {
     "compatible": true,
@@ -84,6 +87,16 @@
     "match_daemon_singleton_lease",
     "match_daemon_health_status",
     "match_engine_windows_autostart",
+    "event_driven_two_way_matching",
+    "sql_candidate_prefiltering",
+    "candidate_window_safe_revalidation",
+    "wtb_expiry_state",
+    "wtb_expiry_reminders",
+    "historical_wtb_reminder_baseline",
+    "demand_intelligence_stats",
+    "advisory_match_threshold_calibration",
+    "admin_match_commands",
+    "hourly_full_match_reconciliation",
     "local_quality_gate"
   ],
   "lifecycle": {
