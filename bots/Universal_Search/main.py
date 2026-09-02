@@ -61,9 +61,27 @@ def is_admin(update):
     return bool(a and update.effective_user and update.effective_user.id == a)
 
 
+def private_admin(update):
+    return bool(
+        update.effective_chat
+        and update.effective_chat.type == "private"
+        and is_admin(update)
+    )
+
+
+async def deny(update):
+    # Shared groups should not expose admin/control state to ordinary members.
+    if update.effective_chat and update.effective_chat.type == "private" and update.effective_message:
+        await update.effective_message.reply_text("Not authorised.")
+
+
 async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_chat or update.effective_chat.type != "private":
+        return
     if admin_id():
         await update.effective_message.reply_text("Admin already claimed.")
+        return
+    if not update.effective_user:
         return
     supplied = " ".join(context.args).strip().upper()
     if supplied and supplied == claim_code():
@@ -116,7 +134,6 @@ def render_page(rows, page):
     text = heading + ("\n\n" + "\n\n".join(blocks) if blocks else "")
     if len(text) <= 3900:
         return text
-    # Defensive fallback: preserve valid HTML rather than slicing through tags/entities.
     kept = []
     for block in blocks:
         candidate = heading + "\n\n" + "\n\n".join(kept + [block])
@@ -155,7 +172,6 @@ async def _send_search_page(
     if force_ads:
         effective_raw = (effective_raw + " --ads --available").strip()
     q = parse_query(effective_raw)
-    # Telegram result pages are intentionally bounded even if a larger --limit is supplied.
     q.limit = min(q.limit, 10)
     if page_override is not None:
         q.page = max(1, int(page_override))
@@ -199,23 +215,14 @@ async def _send_search_page(
     keyboard = search_keyboard(session_token, q.page, has_more)
     if update.callback_query:
         await update.callback_query.answer()
-        await update.callback_query.edit_message_text(
-            text,
-            parse_mode="HTML",
-            reply_markup=keyboard,
-        )
+        await update.callback_query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
     else:
-        await update.effective_message.reply_text(
-            text,
-            parse_mode="HTML",
-            reply_markup=keyboard,
-        )
+        await update.effective_message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
 
 
 async def search_cmd(update, context, cross=False, force_ads=False):
-    if cross and not is_admin(update):
-        await update.effective_message.reply_text("Admin only for cross-chat search.")
-        return
+    if not private_admin(update):
+        return await deny(update)
     raw = " ".join(context.args).strip()
     chat_scope = None if cross else update.effective_chat.id
     await _send_search_page(
@@ -241,6 +248,10 @@ async def cmd_ads(update, context):
 
 async def search_page_callback(update, context):
     query = update.callback_query
+    if not private_admin(update):
+        if query:
+            await query.answer("Not authorised.", show_alert=True)
+        return
     match = re.fullmatch(r"us:([A-Za-z0-9_-]+):(\d+)", query.data or "")
     if not match:
         await query.answer("Invalid search session.", show_alert=True)
@@ -253,15 +264,11 @@ async def search_page_callback(update, context):
     if not update.effective_user or update.effective_user.id != session["user_id"]:
         await query.answer("This search belongs to another user.", show_alert=True)
         return
-    cross = bool(session["cross_chat"])
-    if cross and not is_admin(update):
-        await query.answer("Admin access is required.", show_alert=True)
-        return
     await _send_search_page(
         update,
         raw=session["raw_query"],
         chat_scope=session["chat_scope"],
-        cross=cross,
+        cross=bool(session["cross_chat"]),
         force_ads=bool(session["force_ads"]),
         session_token=token,
         page_override=int(page_text),
@@ -270,8 +277,8 @@ async def search_page_callback(update, context):
 
 
 async def recent_searches_cmd(update, context):
-    if not update.effective_user:
-        return
+    if not private_admin(update):
+        return await deny(update)
     rows = store.recent_searches(update.effective_user.id, 10)
     if not rows:
         await update.effective_message.reply_text("No recent searches yet.")
@@ -284,26 +291,30 @@ async def recent_searches_cmd(update, context):
 
 
 async def search_help_cmd(update, context):
+    if not private_admin(update):
+        return await deny(update)
     await update.effective_message.reply_text(
-        "Universal Search v1.2 query guide:\n\n"
+        "Universal Search v1.3 private-owner query guide:\n\n"
         "/search iphone 15\n"
         "/search \"iphone 15 pro\"\n"
         "/search iphone OR samsung\n"
         "/search hilux -wanted\n"
         "/search wheels --user @seller --days 30\n"
         "/search exhaust --media --sort newest\n"
-        "/crosssearch query   (admin)\n"
-        "/findads query       (admin)\n\n"
-        "Sort: relevant, newest, oldest. Results support Previous/Next pagination."
+        "/crosssearch query\n"
+        "/findads query\n\n"
+        "Control/search commands work only in your private chat with this bot."
     )
 
 
 async def health(update, context):
+    if not private_admin(update):
+        return await deny(update)
     total = store.count()
     live = store.count("live")
     historical = store.count("backfill")
     await update.effective_message.reply_text(
-        f"✅ Universal Search v1.2\n"
+        f"✅ Universal Search v1.3\n"
         f"Indexed: {total} messages\n"
         f"Live: {live} | Historical: {historical}\n"
         f"FTS5 ranking: {'enabled' if store.fts_enabled else 'fallback LIKE mode'}"
@@ -311,9 +322,8 @@ async def health(update, context):
 
 
 async def backfill_status_cmd(update, context):
-    if not is_admin(update):
-        await update.effective_message.reply_text("Admin only.")
-        return
+    if not private_admin(update):
+        return await deny(update)
     rows = store.backfill_status()
     if not rows:
         await update.effective_message.reply_text(
@@ -374,9 +384,9 @@ def main():
     app.add_handler(CallbackQueryHandler(search_page_callback, pattern=r"^us:"))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, index_message))
     if not admin_id():
-        print(f"[CLAIM CODE] Send /claim {claim_code()} to this bot from your Telegram account.")
-    print("[READY] VM Universal Search v1.2")
-    publisher.started(indexed_messages=store.count(), fts_enabled=store.fts_enabled)
+        print(f"[CLAIM CODE] Send /claim {claim_code()} to this bot in a PRIVATE chat from your Telegram account.")
+    print("[READY] VM Universal Search v1.3 — passive indexing in groups, private-owner control only")
+    publisher.started(indexed_messages=store.count(), fts_enabled=store.fts_enabled, control_scope="private_owner_only")
     try:
         app.run_polling(allowed_updates=Update.ALL_TYPES)
     except BaseException as exc:
