@@ -4,6 +4,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
@@ -139,6 +140,17 @@ class ProgressTests(unittest.TestCase):
         self.assertEqual(len(lines), 2)
         self.assertIn("1%", lines[0])
         self.assertIn("5%", lines[1])
+
+    def test_progress_persistence_failure_is_fail_open(self):
+        stream = io.StringIO()
+        reporter = TerminalProgressReporter(self.db, stream=stream, min_percent_step=1)
+        job = self._job()
+        with patch("smart_autoposter.progress.set_group_progress", side_effect=RuntimeError("telemetry unavailable")):
+            result = reporter.update(job, "uploading", 36)
+            reporter.callback(job)(50, 100)
+        self.assertEqual(result.percent, 36.0)
+        self.assertIn("36%", stream.getvalue())
+        self.assertIn("50%", stream.getvalue())
 
     def test_worker_records_real_transfer_then_completed_delivery(self):
         pool = FakePool()
