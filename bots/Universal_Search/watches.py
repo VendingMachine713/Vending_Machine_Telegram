@@ -274,33 +274,65 @@ class WatchStore:
                 (owner_user_id,),
             ).fetchall()
 
-    def reconcile_owner(self, owner_user_id):
-        """Fail closed when the claimed admin changes.
+    @staticmethod
+    def _normalized_owner_ids(owner_user_ids):
+        result = set()
+        for value in owner_user_ids or ():
+            try:
+                uid = int(value)
+            except (TypeError, ValueError):
+                continue
+            if uid > 0:
+                result.add(uid)
+        return tuple(sorted(result))
 
-        Watches belonging to a previous owner are disabled and any undelivered
-        alerts for that owner are cancelled before the delivery worker reads
-        the queue. Historical sent/failed records remain for diagnostics.
+    def reconcile_owners(self, owner_user_ids):
+        """Fail closed when the authorized owner set changes.
+
+        All watches/undelivered alerts belonging to currently authorized numeric
+        owners remain active. Superseded owners are disabled/cancelled before
+        the delivery worker reads the queue. An empty owner set disables all
+        active watches and cancels all pending/retry deliveries.
         """
-        if not owner_user_id:
-            return {"disabled_watches": 0, "cancelled_alerts": 0}
+        owners = self._normalized_owner_ids(owner_user_ids)
         now = utc_now()
         with self.conn() as c:
-            disabled = c.execute(
-                """UPDATE saved_searches
-                   SET enabled=0,last_error='owner superseded',updated_utc=?
-                   WHERE owner_user_id<>? AND enabled=1""",
-                (now, int(owner_user_id)),
-            ).rowcount
-            cancelled = c.execute(
-                """UPDATE alert_queue
-                   SET status='cancelled',last_error='owner superseded'
-                   WHERE owner_user_id<>? AND status IN ('pending','retry')""",
-                (int(owner_user_id),),
-            ).rowcount
+            if owners:
+                marks = ",".join("?" for _ in owners)
+                disabled = c.execute(
+                    f"""UPDATE saved_searches
+                        SET enabled=0,last_error='owner superseded',updated_utc=?
+                        WHERE enabled=1 AND owner_user_id NOT IN ({marks})""",
+                    (now, *owners),
+                ).rowcount
+                cancelled = c.execute(
+                    f"""UPDATE alert_queue
+                        SET status='cancelled',last_error='owner superseded'
+                        WHERE status IN ('pending','retry')
+                          AND owner_user_id NOT IN ({marks})""",
+                    owners,
+                ).rowcount
+            else:
+                disabled = c.execute(
+                    """UPDATE saved_searches
+                       SET enabled=0,last_error='no authorized owner',updated_utc=?
+                       WHERE enabled=1""",
+                    (now,),
+                ).rowcount
+                cancelled = c.execute(
+                    """UPDATE alert_queue
+                       SET status='cancelled',last_error='no authorized owner'
+                       WHERE status IN ('pending','retry')"""
+                ).rowcount
         return {
             "disabled_watches": max(0, int(disabled)),
             "cancelled_alerts": max(0, int(cancelled)),
+            "authorized_owners": owners,
         }
+
+    def reconcile_owner(self, owner_user_id):
+        """Backward-compatible single-owner wrapper."""
+        return self.reconcile_owners((owner_user_id,) if owner_user_id else ())
 
     def cleanup_alert_history(self, sent_days=30, failed_days=90):
         sent_cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, int(sent_days)))).isoformat()
