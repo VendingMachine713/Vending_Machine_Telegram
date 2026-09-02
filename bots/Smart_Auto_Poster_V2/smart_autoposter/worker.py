@@ -12,12 +12,13 @@ from .delivery_ledger import (
     reconcile_open_attempts_from_queue,
     start_attempt,
 )
+from .progress import TerminalProgressReporter
 from .telegram_io import classify_exception
 from .time_rules import quiet_until
 
 
 class Worker:
-    def __init__(self, db: Database, pool, poll_seconds=5, timezone_name="Australia/Adelaide", min_send_gap_seconds=3, safety=None, notifier=None):
+    def __init__(self, db: Database, pool, poll_seconds=5, timezone_name="Australia/Adelaide", min_send_gap_seconds=3, safety=None, notifier=None, progress_reporter=None):
         self.db = db
         self.pool = pool
         self.poll_seconds = poll_seconds
@@ -25,6 +26,7 @@ class Worker:
         self.min_send_gap_seconds = max(0, int(min_send_gap_seconds))
         self.safety = safety
         self.notifier = notifier
+        self.progress = progress_reporter or TerminalProgressReporter(db)
         self.stop_requested = False
         self._startup_recovery_done = False
         self.last_recovery_summary = None
@@ -261,6 +263,7 @@ class Worker:
         with self.db.connect() as con:
             con.execute("UPDATE queue SET status='deferred',account_key=COALESCE(?,account_key),due_at=?,error_kind='deferred',last_error=?,updated_at=? WHERE id=?",
                         (account, due_at, reason[:1000], utcnow(), job["id"]))
+        self.progress.update(job, "deferred", 0, error=reason[:300])
         self.db.event("INFO", "job_deferred", reason[:800], account_key=account, group_id=job["group_id"], campaign_id=job["campaign_id"])
 
     def mark_post_send_uncertain(self, job, account: str, message_ids, exc: Exception, attempt_id: int | None = None):
@@ -275,6 +278,7 @@ class Worker:
                             (account, json.dumps(message_ids), detail[:1000], now, job["id"]))
         except Exception:
             pass
+        self.progress.update(job, "uncertain", 100, error=detail[:300])
         if attempt_id is not None:
             try:
                 finish_attempt(
@@ -325,6 +329,7 @@ class Worker:
         if not job:
             return False
 
+        self.progress.update(job, "claimed", 0)
         try:
             quiet_end = quiet_until(datetime.now(timezone.utc), job.get("quiet_start"), job.get("quiet_end"), self.timezone_name)
         except Exception as exc:
@@ -345,6 +350,7 @@ class Worker:
                     self.notifier.emit("IMPORTANT", "No Telegram account available", f"Job #{job['id']} deferred because no authorized account can reach {job['group_name']}.", dedupe_key="no_authorized_account", dedupe_window_seconds=3600)
             return True
 
+        self.progress.update(job, "preparing", 0)
         try:
             attempt = start_attempt(self.db, job["id"], account)
             attempt_id = int(attempt["id"])
@@ -355,7 +361,18 @@ class Worker:
 
         try:
             media = json.loads(job["media_json"] or "[]")
-            ids = await self.pool.send(account, job["group_id"], job["caption"], media, job["mode"], job["topic_id"])
+            stage = "sending_text" if job["mode"] == "text" else "uploading"
+            self.progress.update(job, stage, 0)
+            ids = await self.pool.send(
+                account,
+                job["group_id"],
+                job["caption"],
+                media,
+                job["mode"],
+                job["topic_id"],
+                progress_callback=self.progress.callback(job, stage),
+            )
+            self.progress.update(job, "awaiting_confirmation", 100)
         except Exception as exc:
             kind, retry_at, permanent = classify_exception(exc)
             try:
@@ -371,6 +388,7 @@ class Worker:
             self.mark_post_send_uncertain(job, account, ids, exc, attempt_id)
             return True
 
+        self.progress.update(job, "recording_delivery", 100)
         now = utcnow()
         interval = max(int(job.get("min_interval_seconds") or 0), int(job.get("campaign_interval") or 0))
         next_eligible = (datetime.now(timezone.utc) + timedelta(seconds=interval)).isoformat(timespec="seconds") if interval > 0 else None
@@ -398,6 +416,7 @@ class Worker:
         except Exception as exc:
             self._ledger_warning(job, account, f"Send confirmed but content usage bookkeeping failed: {exc}")
 
+        self.progress.update(job, "sent", 100)
         try:
             self.db.event("INFO", "send_success", f"Sent {job['campaign_id']} / {job['content_id']} to {job['group_name']}", account_key=account, group_id=job["group_id"], campaign_id=job["campaign_id"], details=json.dumps({"delivery_attempt_id": attempt_id, "telegram_message_ids": ids}))
         except Exception:
@@ -406,6 +425,7 @@ class Worker:
 
     def finish_error(self, job, error, permanent=False, retry_at=None, account=None, kind: str | None = None):
         now = utcnow()
+        final_status = "failed"
         with self.db.connect() as con:
             attempts = int(job.get("attempts", 0)) + 1
             max_attempts = int(job.get("max_attempts", 4))
@@ -427,6 +447,7 @@ class Worker:
                     con.execute("UPDATE destinations SET quarantine_until=? WHERE group_id=?", (quarantine, job["group_id"]))
                     if status == "failed":
                         con.execute("UPDATE queue SET status='quarantined',error_kind=COALESCE(error_kind,'destination_quarantined') WHERE id=?", (job["id"],))
+                        final_status = "quarantined"
                     if self.notifier is not None:
                         self.notifier.emit("WARNING", "Destination quarantined", f"{job['group_name']} was quarantined after repeated failures.", dedupe_key=f"quarantine:{job['group_id']}", dedupe_window_seconds=86400)
             if account:
@@ -434,6 +455,9 @@ class Worker:
                 con.execute('''UPDATE accounts SET consecutive_failures=consecutive_failures+1,last_error=?,last_failure_at=?,
                                cooldown_until=COALESCE(?,cooldown_until),health_score=MAX(0,health_score-?),last_heartbeat_at=?,updated_at=? WHERE account_key=?''',
                             (error[:1000], now, cooldown, 12 if kind in {'flood_wait','network'} else 6, now, now, account))
+            if final_status != "quarantined":
+                final_status = status
+        self.progress.update(job, "retrying" if final_status == "retry" else final_status, 0, error=error[:300])
         self.db.event("ERROR" if permanent else "WARNING", "send_failure", error[:800], account_key=account, group_id=job["group_id"], campaign_id=job["campaign_id"])
 
     async def run_forever(self, auth, session_names=None):
