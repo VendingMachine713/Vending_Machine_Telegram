@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -322,6 +323,25 @@ class Worker:
         except Exception:
             pass
 
+    def _send_progress_kwargs(self, job, stage: str) -> dict:
+        """Pass progress callbacks only to pool implementations that support them.
+
+        Older test doubles and compatible pool adapters pre-date the optional callback.
+        Detecting support before sending is important: retrying after a TypeError could
+        duplicate a Telegram delivery if the exception happened after network I/O.
+        """
+        try:
+            parameters = inspect.signature(self.pool.send).parameters.values()
+        except (AttributeError, TypeError, ValueError):
+            return {}
+        supports_progress = any(
+            parameter.name == "progress_callback" or parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters
+        )
+        if not supports_progress:
+            return {}
+        return {"progress_callback": self.progress.callback(job, stage)}
+
     async def run_once(self, auth):
         if self.safety is not None and self.safety.status().paused:
             return False
@@ -370,7 +390,7 @@ class Worker:
                 media,
                 job["mode"],
                 job["topic_id"],
-                progress_callback=self.progress.callback(job, stage),
+                **self._send_progress_kwargs(job, stage),
             )
             self.progress.update(job, "awaiting_confirmation", 100)
         except Exception as exc:
