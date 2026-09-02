@@ -89,15 +89,40 @@ Current rules recommend safe delivery reconciliation, relationship review and gu
 
 Run `python -m shared.vm_core.cli intelligence` to refresh and display the shared view.
 
+## Recommendation governance
+
+VM Brain now includes an explicit operator-governance layer in `shared.vm_core.governance`.
+
+Allowed state transitions are deliberately conservative:
+
+- `PROPOSED -> ACCEPTED` or `DISMISSED`
+- `BLOCKED -> DISMISSED`
+- `ACCEPTED -> COMPLETED` or `DISMISSED`
+- `DISMISSED`, `COMPLETED` and `EXPIRED` are terminal
+
+A blocked recommendation cannot be accepted. Every valid decision writes an auditable `recommendation.*` event correlated to the recommendation record. Governance transitions change VM Intelligence metadata only; they do not send Telegram messages, retry posting jobs, modify bot-owned databases or execute the recommended action.
+
+Operator tool:
+
+```powershell
+python tools/vm_brain_governance.py summary
+python tools/vm_brain_governance.py list
+python tools/vm_brain_governance.py accept "recommendation:relationship_activity:123" --actor admin
+python tools/vm_brain_governance.py complete "recommendation:relationship_activity:123" --actor admin
+python tools/vm_brain_governance.py history "recommendation:relationship_activity:123"
+```
+
+The tool is intentionally separate from Telegram action execution. `automatic_execution` remains `False` throughout this stage.
+
 ## Authority model
 
-VM Intelligence does not automatically perform consequential actions in v1.3.0.
+VM Intelligence does not automatically perform consequential actions in v1.4.0.
 
 The intended progression is:
 
-`Observe -> Correlate -> Recommend -> Governed Action -> Verify`
+`Observe -> Correlate -> Recommend -> Govern -> Governed Action -> Verify -> Learn`
 
-Future automatic actions must declare their evidence requirements, allowed authority, rollback behaviour and fail-closed conditions.
+Future automatic actions must declare their evidence requirements, allowed authority, rollback behaviour and fail-closed conditions. No recommendation status change is itself permission to perform an external action.
 
 ## Admin surface
 
