@@ -310,7 +310,7 @@ class Store:
             sql += " AND m.is_available=1"
         if q.media:
             sql += " AND m.has_media=1"
-        if include_text_fallback and q.has_text_query:
+        if include_text_fallback:
             positive_clauses: list[str] = []
             for term in q.terms:
                 positive_clauses.append("lower(m.text) LIKE ?")
