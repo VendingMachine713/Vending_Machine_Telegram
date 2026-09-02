@@ -1,15 +1,20 @@
 param(
-    [ValidateSet('Bootstrap','Refresh','List','Show','Stats','Queue','Cleanup','RetryFailed','Notifications','Feedback')]
+    [ValidateSet('Bootstrap','BootstrapV2','Refresh','ProcessEvents','List','Show','Stats','DemandStats','Calibration','ExpiryRefresh','EventBacklog','Queue','Cleanup','RetryFailed','Notifications','Feedback')]
     [string]$Mode = 'Stats',
     [double]$MinScore = 45,
+    [double]$AlertScore = 65,
     [int]$Limit = 20,
+    [int]$CandidateLimit = 500,
+    [int]$TtlDays = 30,
+    [int]$ReminderLeadDays = 7,
     [int]$Id = 0,
     [long]$UserId = 0,
     [ValidateSet('status','on','off')]
     [string]$State = 'status',
     [ValidateSet('relevant','not_relevant','accepted','ignore')]
     [string]$Verdict = 'relevant',
-    [string]$Note = ''
+    [string]$Note = '',
+    [switch]$Json
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,8 +28,14 @@ switch ($Mode) {
     'Bootstrap' {
         & py .\match_cli.py bootstrap --min-score $MinScore
     }
+    'BootstrapV2' {
+        & py .\match_cli_v2.py bootstrap --min-score $MinScore --ttl-days $TtlDays --reminder-lead-days $ReminderLeadDays
+    }
     'Refresh' {
         & py .\match_cli.py refresh --min-score $MinScore
+    }
+    'ProcessEvents' {
+        & py .\match_cli_v2.py events --min-score $MinScore --limit $Limit --candidate-limit $CandidateLimit
     }
     'List' {
         & py .\match_cli.py list --min-score $MinScore --limit $Limit
@@ -35,6 +46,20 @@ switch ($Mode) {
     }
     'Stats' {
         & py .\match_cli.py stats
+    }
+    'DemandStats' {
+        $args = @('.\match_cli_v2.py', 'demand-stats', '--alert-score', [string]$AlertScore)
+        if ($Json) { $args += '--json' }
+        & py @args
+    }
+    'Calibration' {
+        & py .\match_cli_v2.py calibration --alert-score $AlertScore --min-samples $Limit
+    }
+    'ExpiryRefresh' {
+        & py .\match_cli_v2.py expiry-refresh --ttl-days $TtlDays --reminder-lead-days $ReminderLeadDays
+    }
+    'EventBacklog' {
+        & py .\match_cli_v2.py event-backlog
     }
     'Queue' {
         & py .\match_cli.py queue
