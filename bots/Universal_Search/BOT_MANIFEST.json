@@ -1,19 +1,23 @@
 {
   "schema_version": 3,
   "name": "Universal_Search",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "status": "existing",
   "classification": "CANONICAL",
   "entrypoint": "main.py",
   "entrypoint_confidence": "high",
   "launchers": [
-    "START.ps1"
+    "START.ps1",
+    "BACKFILL.ps1"
   ],
   "requirements": "requirements.txt",
   "pyproject": null,
-  "databases": [],
+  "databases": [
+    "data\\universal_search.db"
+  ],
   "tests": [
-    "tests\\test_core.py"
+    "tests\\test_core.py",
+    "tests\\test_backfill.py"
   ],
   "vm_core": {
     "compatible": true,
@@ -23,7 +27,11 @@
     "env": [
       "BOT_TOKEN"
     ],
-    "optional_env": []
+    "optional_env": [
+      "TELEGRAM_API_ID",
+      "TELEGRAM_API_HASH",
+      "TELEGRAM_PHONE"
+    ]
   },
   "lifecycle": {
     "managed_by_vm": true,
