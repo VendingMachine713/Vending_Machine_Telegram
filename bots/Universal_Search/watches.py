@@ -84,7 +84,7 @@ def message_matches(raw_query, row) -> bool:
     for term in q.exclude_terms:
         if term.lower() in text:
             return False
-    return bool(positives or q.ads or q.media or q.user)
+    return bool(positives or q.ads or q.available or q.media or q.user)
 
 
 class WatchStore:
