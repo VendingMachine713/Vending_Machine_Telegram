@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "name": "Universal_Search",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "status": "existing",
   "classification": "CANONICAL",
   "entrypoint": "main.py",
@@ -33,6 +33,18 @@
       "TELEGRAM_PHONE"
     ]
   },
+  "capabilities": [
+    "live_index",
+    "historical_backfill",
+    "fts5_ranked_search",
+    "exact_phrase_search",
+    "boolean_or_search",
+    "exclude_terms",
+    "search_filters",
+    "result_pagination",
+    "original_message_links",
+    "recent_search_history"
+  ],
   "lifecycle": {
     "managed_by_vm": true,
     "auto_start": false,
