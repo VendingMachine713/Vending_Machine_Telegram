@@ -294,6 +294,11 @@ def _watch_query_valid(raw_query):
 async def watch_cmd(update, context):
     if not update.effective_user or not update.effective_chat:
         return
+    if not is_admin(update):
+        await update.effective_message.reply_text(
+            "Saved watches are admin-only in v1.3. Local user subscriptions will be added only with membership-safe delivery checks."
+        )
+        return
     raw = " ".join(context.args).strip()
     global_requested = bool(re.search(r"(?:^|\s)--global(?:\s|$)", raw, flags=re.I))
     raw = re.sub(r"(?:^|\s)--global(?:\s|$)", " ", raw, flags=re.I).strip()
@@ -310,17 +315,7 @@ async def watch_cmd(update, context):
         await update.effective_message.reply_text("The watch needs a searchable term or supported filter.")
         return
 
-    if global_requested:
-        if not is_admin(update):
-            await update.effective_message.reply_text("Only the claimed admin can create global watches.")
-            return
-        chat_scope = None
-    elif update.effective_chat.type == "private":
-        if not is_admin(update):
-            await update.effective_message.reply_text(
-                "Create this watch from the target group, or ask the admin to create a global watch."
-            )
-            return
+    if global_requested or update.effective_chat.type == "private":
         chat_scope = None
     else:
         chat_scope = update.effective_chat.id
@@ -337,8 +332,7 @@ async def watch_cmd(update, context):
         f"✅ Watch #{row['id']} saved: {row['name']}\n"
         f"Scope: {scope}\n"
         f"Query: {row['raw_query']}\n\n"
-        "Matching new messages will be delivered here as private bot alerts. "
-        "Make sure you have started a private chat with this bot."
+        "Matching new messages will be delivered as private bot alerts."
     )
 
 
@@ -418,9 +412,9 @@ async def search_help_cmd(update, context):
         "/search exhaust --media --sort newest\n"
         "/crosssearch query   (admin)\n"
         "/findads query       (admin)\n\n"
-        "Passive alerts:\n"
+        "Passive alerts (admin):\n"
         "/watch name :: query\n"
-        "/watch name :: query --global   (admin)\n"
+        "/watch name :: query --global\n"
         "/watches\n/pausewatch ID\n/resumewatch ID\n/deletewatch ID\n/alertstatus"
     )
 
@@ -562,6 +556,9 @@ async def alert_worker(application):
 
 
 async def post_init(application):
+    pruned = watch_store.cleanup_alert_history()
+    if pruned:
+        logger.info("Pruned %s expired passive-alert delivery records", pruned)
     application.bot_data["alert_worker_task"] = asyncio.create_task(
         alert_worker(application), name="universal-search-alert-worker"
     )
