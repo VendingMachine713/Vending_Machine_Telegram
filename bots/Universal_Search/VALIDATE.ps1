@@ -33,6 +33,9 @@ $PowerShellFiles = @(
     '.\START.ps1',
     '.\BACKFILL.ps1',
     '.\MARKETPLACE.ps1',
+    '.\MATCH_ENGINE.ps1',
+    '.\RUN_MATCH_ENGINE.ps1',
+    '.\INSTALL_MATCH_ENGINE_AUTOSTART.ps1',
     '.\VALIDATE.ps1'
 )
 foreach ($file in $PowerShellFiles) {
