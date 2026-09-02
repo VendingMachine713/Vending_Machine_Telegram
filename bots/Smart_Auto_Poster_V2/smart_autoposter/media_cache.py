@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import json
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 
 def fingerprint(paths: Iterable[str]) -> str:
@@ -44,7 +44,7 @@ class MediaCache:
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp.replace(self.path)
 
-    async def get(self, media: list[str]):
+    async def get(self, media: list[str], progress_callback: Callable[[float, float], None] | None = None):
         if not self.staging_chat_id or not media:
             return None
         fp = fingerprint(media)
@@ -64,7 +64,11 @@ class MediaCache:
                         refs = [m.media for m in msgs]
                         self._memory[fp] = refs
                         return refs
-            messages = await self.client.send_file(self.staging_chat_id, media)
+            messages = await self.client.send_file(
+                self.staging_chat_id,
+                media,
+                progress_callback=progress_callback,
+            )
             if not isinstance(messages, list): messages = [messages]
             refs = [m.media for m in messages]
             state["items"][fp] = {
