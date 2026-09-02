@@ -4,18 +4,23 @@ Universal Search indexes Telegram messages into a local SQLite database and prov
 
 ## Current version
 
-**v1.5.0**
+**v1.6.0 — Match Engine v2 checkpoint**
 
 ## Architecture
 
-Universal Search deliberately keeps proven capabilities separated:
+Universal Search keeps proven capabilities separated so search, indexing, backfill, matching, and notifications can recover independently:
 
-- `main.py` — Bot API live indexing, search, marketplace commands, and saved-search alert delivery;
+- `main.py` — Bot API live indexing, search, marketplace commands, saved-search alerts, and admin Match Engine v2 commands;
 - `backfill.py` — read-only Telethon historical indexing;
 - `marketplace.py` — conservative structured listing extraction and search;
-- `match_engine.py` — demand/supply scoring and durable match state;
-- `match_runtime.py` — alert lifecycle hardening and recovery;
-- `match_daemon.py` — outbound-only passive WTB match worker.
+- `match_engine.py` — v1.5 pair scoring, durable match state, feedback, and alert queue;
+- `match_runtime.py` — v1.5 alert lifecycle hardening and recovery;
+- `match_engine_v2.py` — durable marketplace-change events, incremental two-way reconciliation, WTB lifecycle state, demand analytics, and calibration;
+- `match_engine_v2_runtime.py` — canonical v2 runtime hardening for budget filters, historical no-flood handling, candidate-window safety, and portable SQLite cleanup;
+- `match_daemon_v2.py` — outbound-only event-driven passive worker;
+- `match_commands_v2.py` — admin-only Telegram match/demand command registration;
+- `match_cli_v2.py` — local v2 diagnostics and maintenance;
+- `migrations/0007_match_feedback.py` — idempotent v2 event/reminder migration.
 
 The match daemon does **not** call Telegram `getUpdates`, so it does not compete with the main bot polling process.
 
@@ -37,7 +42,9 @@ It:
 - checkpoints progress for resume;
 - upserts by `(chat_id, message_id)`;
 - enriches the structured marketplace index;
-- never generates passive old-message alerts.
+- never generates saved-search alerts for old messages.
+
+When v1.6 has already established its WTB reminder baseline, a later-imported historical WTB whose original message timestamp predates that baseline is also treated as historical for expiry reminders. It remains searchable and matchable, but an overdue historical reminder is not suddenly queued.
 
 ## Passive saved-search alerts
 
@@ -67,11 +74,11 @@ Lifecycle reconciliation preserves the original structured listing when sellers 
 
 Structured search supports type/category/status/seller/min/max filters plus relevance/newest/oldest/price sorting. Marketplace pagination is user-bound for 24 hours. Current-chat scope is the default; global scope is admin-only.
 
-## v1.5 Demand / WTB Match Engine
+## Demand / WTB Match Engine
 
-v1.5 turns structured wanted posts into demand records and available sale/trade/service listings into supply.
+Wanted posts become demand. Active sale/trade/service listings become supply.
 
-The match scorer combines:
+The shared scorer combines:
 
 - concrete category compatibility;
 - product-term overlap;
@@ -91,32 +98,80 @@ Hard safety rules reject:
 
 Reposts collapse to logical listings so the same seller reposting the same item does not generate duplicate opportunities.
 
-### No-alert historical baseline
+### v1.6 event-driven matching
 
-On first start, existing matches are classified as `baseline`. They are searchable and inspectable but are not automatically queued as new private alerts.
+The v2 migration installs durable SQLite change events for marketplace listing insert/update/delete activity.
 
-Only genuinely new qualifying pairs after the baseline become `new` and alertable. This prevents installing v1.5 on an established database from flooding the admin with historical matches.
+The passive worker consumes those events in both directions:
+
+- new/changed supply is compared with likely active WTB demand;
+- new/changed WTB demand is compared with likely active supply;
+- changed/inactive logical listings revalidate their existing matches;
+- the v1.5 full matcher remains a periodic reconciliation/backstop.
+
+The default passive cadence is:
+
+- marketplace-event consumption: every **15 seconds**;
+- WTB expiry-state reconciliation: every **10 minutes**;
+- full demand/supply reconciliation: every **60 minutes**.
+
+These intervals are configurable through `RUN_MATCH_ENGINE.ps1`.
+
+### SQL candidate pre-filtering
+
+Before semantic scoring, v2 uses SQL to reject obvious candidate mismatches such as incompatible concrete categories, the same seller, and explicit WTB budgets that cannot afford a priced supply listing.
+
+Candidate limits bound discovery cost only. Existing unresolved matches are directly revalidated before inactivation, so an older valid match cannot disappear merely because it fell outside a bounded newest-first candidate window.
 
 ### Match lifecycle
 
 Match states include `baseline`, `new`, `notified`, `accepted`, `dismissed`, and `inactive`.
 
-The durable match-alert queue uses pending/retry/sent/failed/cancelled states. Pending or retrying alerts are automatically cancelled when the underlying match becomes inactive, accepted, or dismissed.
+The durable match-alert queue uses pending/retry/sent/failed/cancelled states. Pending or retrying alerts are automatically cancelled when the underlying match becomes inactive, accepted, dismissed, or belongs to a superseded admin.
 
 Terminal delivery failures can be requeued only while the underlying match is still active and `new`.
 
-### Passive daemon
+### WTB expiry reminders
 
-`match_daemon.py` is an outbound-only sidecar. It:
+v1.6 maintains an independent WTB expiry/reminder lifecycle with durable scheduling and delivery state.
 
-- refreshes demand/supply matches on a bounded interval;
-- maintains a SQLite singleton lease so duplicate daemons cannot run concurrently;
-- queues only new high-score matches;
-- sends private alerts only to the claimed Universal Search admin;
-- retries failures with bounded exponential backoff;
-- cancels stale alerts;
-- prunes retained queue history;
-- writes `state/match_engine_status.json` for passive health inspection.
+Defaults:
+
+- WTB lifecycle window: **30 days**;
+- reminder lead: **7 days** before expiry;
+- delivery retry: bounded exponential backoff;
+- old historical WTBs present at baseline: no reminder flood;
+- old WTBs imported after the v2 baseline: also no reminder flood;
+- stale/superseded-admin reminder deliveries: cancelled before send.
+
+The reminder system does not alter reputation or moderation state.
+
+### Relevance feedback and threshold calibration
+
+The admin can explicitly label matches as good/relevant, bad/not relevant, accepted, or ignored.
+
+v2 aggregates those labels into a conservative threshold recommendation. Calibration is intentionally advisory:
+
+- it requires a minimum evidence sample;
+- it moves at most one small threshold step at a time;
+- it reports precision at the current threshold;
+- it **never changes the production alert threshold automatically**.
+
+This keeps learning observable and reversible.
+
+### Demand intelligence
+
+`/demandstats` and the v2 CLI expose:
+
+- active WTB count;
+- matched versus unmatched WTB demand;
+- average stated budget where available;
+- top demand categories;
+- WTBs approaching expiry;
+- overdue reminder state;
+- event backlog;
+- reminder queue state;
+- feedback/calibration status.
 
 ## Bot commands
 
@@ -131,6 +186,12 @@ Terminal delivery failures can be requeued only while the underlying match is st
 /pricehistory <id>
 /marketstats [--global]
 
+/matches [min_score] [limit]                         admin only
+/match <id>                                          admin only
+/matchfeedback <id> good|bad|accepted|ignore [note] admin only
+/demandstats                                         admin only
+/matchalerts                                         admin only
+
 /watch name :: query              admin only
 /watch name :: query --global     admin only
 /watches
@@ -144,7 +205,7 @@ Terminal delivery failures can be requeued only while the underlying match is st
 /backfillstatus          admin only
 ```
 
-The v1.5 match engine currently uses its dedicated PowerShell/Python operator surface while the main bot polling path remains isolated and stable.
+Match commands run inside the existing main Bot API polling process. The passive sidecar remains outbound-only.
 
 ## Search examples
 
@@ -173,14 +234,26 @@ The v1.5 match engine currently uses its dedicated PowerShell/Python operator su
 
 ## Match Engine operations
 
-Initial no-alert baseline / refresh:
+Existing v1.5 full baseline/reconciliation controls remain available:
 
 ```powershell
 .\MATCH_ENGINE.ps1 -Mode Bootstrap
 .\MATCH_ENGINE.ps1 -Mode Refresh
 ```
 
-Inspect matches:
+v1.6 controls:
+
+```powershell
+.\MATCH_ENGINE.ps1 -Mode BootstrapV2
+.\MATCH_ENGINE.ps1 -Mode ProcessEvents -Limit 250 -CandidateLimit 500
+.\MATCH_ENGINE.ps1 -Mode EventBacklog
+.\MATCH_ENGINE.ps1 -Mode ExpiryRefresh
+.\MATCH_ENGINE.ps1 -Mode DemandStats
+.\MATCH_ENGINE.ps1 -Mode DemandStats -Json
+.\MATCH_ENGINE.ps1 -Mode Calibration -AlertScore 65 -Limit 20
+```
+
+Inspect matches and queues:
 
 ```powershell
 .\MATCH_ENGINE.ps1 -Mode List -MinScore 65 -Limit 20
@@ -219,6 +292,17 @@ Foreground/manual run:
 .\RUN_MATCH_ENGINE.ps1
 ```
 
+Optional tuning:
+
+```powershell
+.\RUN_MATCH_ENGINE.ps1 `
+  -IntervalSeconds 15 `
+  -EventLimit 250 `
+  -CandidateLimit 500 `
+  -FullRefreshMinutes 60 `
+  -ExpiryRefreshMinutes 10
+```
+
 Install or refresh current-user Windows auto-start:
 
 ```powershell
@@ -232,7 +316,9 @@ Inspect passive health:
 .\MATCH_ENGINE_STATUS.ps1 -Json
 ```
 
-Remove auto-start while preserving the database, match history, feedback, and configuration:
+The status surface shows task/daemon state, engine mode, event backlog, demand coverage, match queue, WTB reminder queue, and advisory calibration when available.
+
+Remove auto-start while preserving the database, match history, feedback, reminder state, and configuration:
 
 ```powershell
 .\UNINSTALL_MATCH_ENGINE_AUTOSTART.ps1 -StopRunning
@@ -296,21 +382,36 @@ Marketplace rebuild is idempotent by `(chat_id, message_id)` and enriches alread
 
 ## Database migration behaviour
 
-Database upgrades are automatic and idempotent when the relevant stores open the existing database. Existing raw messages, saved watches, marketplace listings, price history, match state, feedback, and queue state are preserved.
+Database upgrades are additive and idempotent when the relevant stores/engine open the existing database.
+
+v1.6 preserves existing:
+
+- raw indexed messages;
+- chats and sender history;
+- saved watches and alert history;
+- marketplace listings and price history;
+- v1.5 match state and feedback;
+- match alert delivery state.
+
+It adds durable marketplace change events, WTB expiry/reminder state, WTB reminder delivery state, and v2 runtime state. The migration does not delete or rewrite existing marketplace/search records.
 
 ## Safety and privacy
 
 - Historical Telegram access is read-only.
-- Backfill never creates historical passive alerts.
+- Backfill never creates historical saved-search alerts.
 - Cross-chat raw search and global marketplace access require the claimed admin.
 - Search and marketplace pagination sessions are user-bound.
 - Saved watches remain admin-only.
-- Match alerts are private and admin-only.
+- Match commands and match/demand statistics are admin-only.
+- Match and WTB reminder alerts are private and admin-only.
 - The match daemon is outbound-only and does not poll Telegram updates.
-- Existing historical matches are baselined rather than alerted.
+- Existing historical matches are baselined rather than mass-alerted at initial match-engine bootstrap.
+- Historical WTB expiry reminders are baselined even when old posts are imported after the v2 baseline.
 - Self-matches and explicit over-budget matches are rejected.
-- Stale match alerts are cancelled before delivery.
+- Bounded candidate discovery cannot by itself inactivate an existing valid match.
+- Stale and wrong-admin alerts are cancelled before delivery.
 - Delivery failures back off instead of busy-looping Telegram.
+- Threshold calibration is advisory only.
 - Bot tokens, API hashes, and Telegram sessions remain local-only.
 
 ## Testing
@@ -328,4 +429,14 @@ py -m unittest discover -s tests -p "test_*.py" -v
 py -m compileall -q .
 ```
 
-`VALIDATE.ps1` also parses all supported PowerShell launchers, validates the manifest, and performs a read-only SQLite integrity check when the local database exists. It does not start Telegram polling or send Telegram messages.
+`VALIDATE.ps1`:
+
+- compiles the bot;
+- runs all `test_*.py` tests;
+- verifies the v1.6 manifest/capabilities and required files;
+- creates a temporary SQLite database to verify v2 tables/triggers and integrity;
+- parses all supported PowerShell launchers;
+- performs a read-only SQLite integrity/foreign-key check when the local production database exists;
+- never starts Telegram polling and never sends Telegram messages.
+
+GitHub-hosted CI is still subject to repository/account runner allocation. A workflow failure where the job receives no runner and executes zero steps is infrastructure failure, not a passing or failing application test result.
