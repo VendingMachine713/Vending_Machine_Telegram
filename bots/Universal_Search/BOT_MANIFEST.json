@@ -21,7 +21,8 @@
     "tests\\test_backfill.py",
     "tests\\test_watches.py",
     "tests\\test_marketplace.py",
-    "tests\\test_marketplace_ui.py"
+    "tests\\test_marketplace_ui.py",
+    "tests\\test_marketplace_reconciliation.py"
   ],
   "vm_core": {
     "compatible": true,
@@ -59,7 +60,8 @@
     "marketplace_price_history",
     "marketplace_lifecycle_status",
     "marketplace_repost_grouping",
-    "marketplace_statistics"
+    "marketplace_statistics",
+    "marketplace_lifecycle_reconciliation"
   ],
   "lifecycle": {
     "managed_by_vm": true,
