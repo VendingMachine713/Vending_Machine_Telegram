@@ -1,8 +1,13 @@
 import asyncio
 import io
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[3]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from shared.vm_core.progress import render_bar, transfer_percent
 from smart_autoposter.core import create_campaign, create_content, enqueue_campaign
