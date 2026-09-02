@@ -78,6 +78,22 @@ class MatchRuntimeTests(unittest.TestCase):
                 )
             self.assertEqual(engine.retry_failed_alerts(999), 0)
 
+    def test_admin_change_cancels_old_owner_pending_alert(self):
+        with tempfile.TemporaryDirectory() as d:
+            core, market, engine = self.make_stores(d)
+            _, _ = self.seed_new_alert(core, market, engine)
+            self.assertEqual(engine.queue_status().get("pending"), 1)
+            self.assertEqual(engine.cancel_wrong_owner_alerts(12345), 1)
+            self.assertEqual(engine.queue_status().get("cancelled"), 1)
+            self.assertEqual(engine.due_alerts(), [])
+
+    def test_current_admin_queue_is_not_cancelled(self):
+        with tempfile.TemporaryDirectory() as d:
+            core, market, engine = self.make_stores(d)
+            _, _ = self.seed_new_alert(core, market, engine)
+            self.assertEqual(engine.cancel_wrong_owner_alerts(999), 0)
+            self.assertEqual(engine.queue_status().get("pending"), 1)
+
     def test_queue_status_reports_all_states(self):
         with tempfile.TemporaryDirectory() as d:
             core, market, engine = self.make_stores(d)
