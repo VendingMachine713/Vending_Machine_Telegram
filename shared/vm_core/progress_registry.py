@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 from .autoposter_progress import smart_auto_poster_progress
 from .guard_progress import vm_guard_progress
+from .search_progress import universal_search_progress
 from .paths import project_root
 from .progress import format_progress
 
@@ -13,6 +14,7 @@ ProgressProvider = Callable[[Path | None], dict[str, Any]]
 _PROVIDERS: dict[str, ProgressProvider] = {
     "autoposter": smart_auto_poster_progress,
     "guard": vm_guard_progress,
+    "search": universal_search_progress,
 }
 
 
