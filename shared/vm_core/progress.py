@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 
 @dataclass(slots=True)
@@ -62,6 +62,7 @@ def progress_snapshot(
     services: Iterable[dict[str, Any]] = (),
     events: Iterable[ProgressEvent | dict[str, Any]] = (),
     recovery_messages: Iterable[str] = (),
+    metrics: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     service_rows: list[dict[str, Any]] = []
     for service in services:
@@ -88,6 +89,7 @@ def progress_snapshot(
         "group": group.to_dict() if group else None,
         "task": task.to_dict() if task else None,
         "services": service_rows,
+        "metrics": dict(metrics or {}),
         "events": event_rows,
         "recovery_messages": list(recovery_messages),
     }
@@ -105,6 +107,13 @@ def format_progress(snapshot: dict[str, Any]) -> str:
         )
         if row.get("detail"):
             lines.append(f"{'':14} {row['detail']}")
+
+    metrics = snapshot.get("metrics") or {}
+    if metrics:
+        lines.extend(["-" * 78, "METRICS"])
+        for name, value in metrics.items():
+            label = str(name).replace("_", " ").upper()
+            lines.append(f"{label:<24} {value}")
 
     services = snapshot.get("services") or []
     if services:
