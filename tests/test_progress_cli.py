@@ -8,9 +8,13 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 from shared.vm_core.progress_cli import main
+from shared.vm_core.progress_registry import platform_progress_summary, provider_names
 
 
 class ProgressCliTests(unittest.TestCase):
+    def test_registry_exposes_autoposter_provider(self):
+        self.assertIn("autoposter", provider_names())
+
     def test_text_mode_is_safe_when_autoposter_database_is_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -23,6 +27,16 @@ class ProgressCliTests(unittest.TestCase):
             self.assertIn("Queue unavailable", text)
             self.assertIn("RECOVERY / NEXT ACTION", text)
 
+    def test_default_all_mode_renders_platform_header_and_registered_surface(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = io.StringIO()
+            with redirect_stdout(output):
+                rc = main(["--root", tmp])
+            self.assertEqual(rc, 0)
+            text = output.getvalue()
+            self.assertIn("UNIVERSAL PROGRESS ENGINE", text)
+            self.assertIn("SMART AUTO POSTER", text)
+
     def test_json_mode_emits_structured_progress_contract(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -34,6 +48,18 @@ class ProgressCliTests(unittest.TestCase):
             self.assertEqual(payload["headline"], "SMART AUTO POSTER")
             self.assertIn("overall", payload)
             self.assertIn("recovery_messages", payload)
+
+    def test_all_json_mode_emits_summary_and_surfaces(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = io.StringIO()
+            with redirect_stdout(output):
+                rc = main(["all", "--json", "--root", tmp])
+            self.assertEqual(rc, 0)
+            payload = json.loads(output.getvalue())
+            self.assertEqual(payload["surface_count"], 1)
+            self.assertIn("autoposter", payload["surfaces"])
+            direct = platform_progress_summary(Path(tmp))
+            self.assertEqual(payload["attention_count"], direct["attention_count"])
 
 
 if __name__ == "__main__":
