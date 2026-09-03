@@ -16,6 +16,7 @@ from .manifests import discover_bots
 from .db import PlatformDB
 from .runtime_requirements import runtime_configuration_status
 from .foundation import foundation_report
+from .platform_registry import service_registry
 
 @dataclass
 class Check:
@@ -51,6 +52,14 @@ def run_doctor(root: Path | None = None) -> dict[str, Any]:
         "foundation_contract",
         foundation_status,
         f"contract v{foundation['contract_version']} | errors={foundation['summary']['ERROR']} warnings={foundation['summary']['WARN']}",
+    ))
+
+    registry = service_registry(root)
+    checks.append(Check(
+        "platform",
+        "service_registry",
+        "PASS" if registry["service_count"] == len(discover_bots(root)) else "FAIL",
+        f"{registry['service_count']} service descriptor(s) | managed={registry['managed_count']}",
     ))
 
     for pkg in ("telethon","telegram","dotenv","tzdata"):
