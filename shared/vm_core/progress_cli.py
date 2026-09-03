@@ -4,9 +4,8 @@ import argparse
 import json
 from pathlib import Path
 
-from .autoposter_progress import smart_auto_poster_progress
 from .progress import format_progress
-from .progress_registry import format_all_progress, platform_progress_summary, provider_names
+from .progress_registry import format_all_progress, platform_progress_summary, progress_surface, provider_names
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -35,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
             print(format_all_progress(args.root))
         return 0
 
-    snapshot = smart_auto_poster_progress(args.root)
+    snapshot = progress_surface(args.surface, args.root)
     if args.as_json:
         print(json.dumps(snapshot, indent=2, ensure_ascii=False, default=str))
     else:
