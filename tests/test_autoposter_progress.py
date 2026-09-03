@@ -25,15 +25,24 @@ class AutoPosterProgressTests(unittest.TestCase):
                 campaign_id INTEGER,
                 group_id INTEGER,
                 account_key TEXT,
+                due_at TEXT,
                 status TEXT,
                 error_kind TEXT,
                 last_error TEXT,
                 updated_at TEXT
             );
+            CREATE TABLE events(
+                id INTEGER PRIMARY KEY,
+                created_at TEXT,
+                severity TEXT,
+                event_type TEXT,
+                message TEXT
+            );
             INSERT INTO destinations VALUES(1001, 'Test Group A');
             INSERT INTO destinations VALUES(1002, 'Test Group B');
-            INSERT INTO queue VALUES(1, 7, 1001, 'primary', 'sent', NULL, NULL, '2026-09-03T00:00:00Z');
-            INSERT INTO queue VALUES(2, 7, 1002, 'secondary', 'pending', NULL, NULL, '2026-09-03T00:01:00Z');
+            INSERT INTO queue VALUES(1, 7, 1001, 'primary', '2026-09-03T00:00:00Z', 'sent', NULL, NULL, '2026-09-03T00:00:00Z');
+            INSERT INTO queue VALUES(2, 7, 1002, 'secondary', '2026-09-03T00:10:00Z', 'pending', NULL, NULL, '2026-09-03T00:01:00Z');
+            INSERT INTO events VALUES(1, '2026-09-03T00:01:00Z', 'INFO', 'queue_created', 'Queue job created');
             """
         )
         con.commit()
@@ -50,6 +59,22 @@ class AutoPosterProgressTests(unittest.TestCase):
         self.assertEqual(snapshot["overall"]["percent"], 50)
         self.assertEqual(snapshot["group"]["label"], "Test Group B")
         self.assertEqual(snapshot["task"]["label"], "Queue job #2")
+        self.assertEqual(snapshot["metrics"]["next_due"], "2026-09-03T00:10:00Z")
+        self.assertTrue(any(event["source"].startswith("Smart_Auto_Poster_V2/") for event in snapshot["events"]))
+
+    def test_estimates_eta_only_when_recent_send_intervals_exist(self):
+        tmp, root, db = self._root_with_db()
+        self.addCleanup(tmp.cleanup)
+        con = sqlite3.connect(db)
+        con.execute(
+            "INSERT INTO queue VALUES(3,7,1001,'primary','2026-09-03T00:05:00Z','sent',NULL,NULL,'2026-09-03T00:05:00Z')"
+        )
+        con.commit()
+        con.close()
+        snapshot = smart_auto_poster_progress(root)
+        self.assertEqual(snapshot["metrics"]["typical_send_interval"], "5m")
+        self.assertEqual(snapshot["metrics"]["estimated_queue_eta"], "5m")
+        self.assertIn("median", snapshot["metrics"]["eta_basis"])
 
     def test_uncertain_never_claims_completion_and_emits_recovery(self):
         tmp, root, db = self._root_with_db()
@@ -62,7 +87,8 @@ class AutoPosterProgressTests(unittest.TestCase):
         self.assertEqual(snapshot["overall"]["status"], "ATTENTION")
         self.assertEqual(snapshot["overall"]["percent"], 50)
         self.assertTrue(any("auto-retry blocked" in item for item in snapshot["recovery_messages"]))
-        self.assertEqual(snapshot["events"][0]["level"], "WARN")
+        self.assertEqual(snapshot["events"][-1]["level"], "WARN")
+        self.assertNotIn("estimated_queue_eta", snapshot["metrics"])
 
     def test_missing_database_is_safe_and_explicit(self):
         with tempfile.TemporaryDirectory() as tmp:
