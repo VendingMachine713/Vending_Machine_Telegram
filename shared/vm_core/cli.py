@@ -26,6 +26,7 @@ from .duplicates import write_duplicate_report
 from .validation import run_full_validation
 from .devtools import install as install_devtools, git_status
 from .intelligence import intelligence_summary, format_intelligence_summary
+from .foundation import foundation_report, format_foundation_report
 
 def _json(obj): print(json.dumps(obj,indent=2,ensure_ascii=False,default=str))
 
@@ -73,6 +74,7 @@ def build_parser():
         ("dev-tools","Preview/install Ruff and uv developer tools."),
         ("git-status","Show safe local Git repository status."),
         ("intelligence","Refresh and show shared cross-bot intelligence."),
+        ("foundation","Validate the VM Core foundation contract."),
         ("init","Initialise platform folders/database."),
     ]: s.add_parser(name,help=help_text)
     m=s.add_parser("manifests",help="Preview/create/refresh bot manifests."); m.add_argument("--write",action="store_true"); m.add_argument("--refresh",action="store_true")
@@ -101,6 +103,8 @@ def main(argv=None):
     c=args.command
     if c=="status": return cmd_status(root)
     if c=="dashboard": return cmd_dashboard(root)
+    if c=="foundation":
+        report=foundation_report(root); print(format_foundation_report(report)); return 2 if report["summary"]["ERROR"] else 0
     if c=="intelligence":
         print(format_intelligence_summary(intelligence_summary(root, refresh=True))); return 0
     if c=="init":
