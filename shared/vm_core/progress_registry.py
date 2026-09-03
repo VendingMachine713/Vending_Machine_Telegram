@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from .admin_progress import admin_command_centre_progress
 from .autoposter_progress import smart_auto_poster_progress
 from .guard_progress import vm_guard_progress
 from .relationship_progress import relationship_manager_progress
@@ -13,6 +14,7 @@ from .progress import format_progress
 ProgressProvider = Callable[[Path | None], dict[str, Any]]
 
 _PROVIDERS: dict[str, ProgressProvider] = {
+    "admin": admin_command_centre_progress,
     "autoposter": smart_auto_poster_progress,
     "guard": vm_guard_progress,
     "relationships": relationship_manager_progress,
