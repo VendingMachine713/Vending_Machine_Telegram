@@ -6,7 +6,7 @@ from typing import Any
 
 from .manifests import discover_bots
 from .paths import project_root
-from .services import service_status
+from .services import restart_service, service_status, start_service
 
 
 ATTENTION_STATES = {"FAILED", "STOPPED", "DOWN", "ERROR", "STALE", "DEGRADED"}
@@ -105,12 +105,7 @@ def classify_service(row: dict[str, Any], policy: dict[str, bool]) -> RecoveryDe
 
 
 def recovery_plan(root: Path | None = None) -> dict[str, Any]:
-    """Build a read-only, policy-gated recovery plan.
-
-    This function never starts, stops, restarts, retries or mutates a bot. It only
-    classifies evidence and proposes actions. Consequential operations remain in
-    the existing service/supervisor layer and require their normal mutation gate.
-    """
+    """Build a read-only, policy-gated recovery plan."""
     root = root or project_root()
     states = {str(row.get("name")): row for row in service_status(root)}
     decisions: list[RecoveryDecision] = []
@@ -140,6 +135,53 @@ def recovery_plan(root: Path | None = None) -> dict[str, Any]:
             "mutations_performed": False,
             "uncertain_delivery_auto_retry": False,
             "credential_or_auth_recovery": False,
+        },
+    }
+
+
+def execute_recovery_plan(
+    plan: dict[str, Any],
+    root: Path | None = None,
+    *,
+    apply: bool = False,
+    max_actions: int = 1,
+) -> dict[str, Any]:
+    """Execute only explicitly classified SAFE_RECOVERY actions.
+
+    Dry-run is the default. Even in apply mode this function never touches queue
+    rows, campaigns, schedules, credentials, Telegram delivery state, or decisions
+    marked BLOCKED/REVIEW. The per-pass cap prevents a broad restart cascade.
+    """
+    root = root or project_root()
+    limit = max(0, int(max_actions))
+    results: list[dict[str, Any]] = []
+    candidates = [
+        row for row in (plan.get("decisions") or [])
+        if row.get("classification") == "SAFE_RECOVERY"
+        and bool(row.get("automatic"))
+        and row.get("action") in SAFE_ACTIONS
+    ][:limit]
+
+    for row in candidates:
+        service = str(row.get("service") or "")
+        action = str(row.get("action") or "")
+        if action == "START_SERVICE":
+            result = start_service(service, root, dry_run=not apply)
+        elif action == "RESTART_SERVICE":
+            result = restart_service(service, root, dry_run=not apply)
+        else:
+            continue
+        results.append({"service": service, "action": action, "applied": bool(apply), "result": result})
+
+    return {
+        "mode": "APPLY_SAFE_RECOVERY" if apply else "DRY_RUN",
+        "max_actions": limit,
+        "candidate_count": len(candidates),
+        "actions": results,
+        "safety": {
+            "blocked_or_review_actions_executed": False,
+            "queue_or_delivery_retry_performed": False,
+            "credential_or_auth_recovery_performed": False,
         },
     }
 
