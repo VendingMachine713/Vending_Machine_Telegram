@@ -18,9 +18,19 @@ class AdminCoreTests(unittest.TestCase):
         text=handle_command(123,'/poster',ADMIN)
         self.assertIn('SMART AUTO POSTER CONTROL',text)
         self.assertIn('/poster_status',text)
+        self.assertIn('/poster_progress',text)
         self.assertIn('/poster_restart',text)
     def test_poster_mutations_are_guarded(self):
         self.assertIn('disabled',handle_command(123,'/poster_restart',ADMIN).lower())
+    @patch('admin_core.format_progress')
+    @patch('admin_core.smart_auto_poster_progress')
+    def test_poster_progress_uses_universal_progress_engine(self,progress,formatter):
+        progress.return_value={'headline':'SMART AUTO POSTER - UNIVERSAL PROGRESS'}
+        formatter.return_value='SMART AUTO POSTER - UNIVERSAL PROGRESS\nOVERALL 50%'
+        text=handle_command(123,'/poster_progress',ADMIN)
+        self.assertIn('UNIVERSAL PROGRESS',text)
+        progress.assert_called_once_with(ROOT)
+        formatter.assert_called_once_with(progress.return_value)
     @patch('admin_core.run_service_cli')
     def test_poster_health_uses_vm_core_cli_bridge(self,run_cli):
         run_cli.return_value={'ok':True,'stdout':'HEALTH OK','stderr':''}
