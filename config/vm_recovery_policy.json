@@ -1,0 +1,28 @@
+{
+  "enabled": false,
+  "apply_safe": false,
+  "interval_seconds": 60,
+  "max_actions_per_pass": 1,
+  "services": {
+    "Admin_Command_Centre": {
+      "auto_start": true,
+      "auto_restart": true
+    },
+    "VM_Guard": {
+      "auto_start": true,
+      "auto_restart": true
+    },
+    "Universal_Search": {
+      "auto_start": true,
+      "auto_restart": true
+    },
+    "VM_Relationship_Manager": {
+      "auto_start": true,
+      "auto_restart": true
+    },
+    "Smart_Auto_Poster_V2": {
+      "auto_start": false,
+      "auto_restart": false
+    }
+  }
+}
