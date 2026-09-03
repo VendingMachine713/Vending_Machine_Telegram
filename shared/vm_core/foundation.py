@@ -157,9 +157,18 @@ def foundation_report(root: Path | None = None) -> dict[str, Any]:
     for bot in bots:
         findings.extend(validate_bot_contract(Path(bot.path)))
 
-    config = load_config(root)
-    for issue in validate_config(config):
-        findings.append(ContractFinding(issue["severity"], "config", issue["code"], issue["detail"]))
+    try:
+        config = load_config(root)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        findings.append(ContractFinding(
+            "ERROR",
+            "config",
+            "CONFIG_UNREADABLE",
+            f"{type(exc).__name__}: {exc}",
+        ))
+    else:
+        for issue in validate_config(config):
+            findings.append(ContractFinding(issue["severity"], "config", issue["code"], issue["detail"]))
 
     counts = {
         severity: sum(1 for f in findings if f.severity == severity)
