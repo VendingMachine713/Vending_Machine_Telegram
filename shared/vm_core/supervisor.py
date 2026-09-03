@@ -1,49 +1,73 @@
 from __future__ import annotations
 from pathlib import Path
-import json
 import time
 from typing import Any
 from .paths import project_root
-from .manifests import discover_bots
-from .services import service_status, start_service
+from .recovery import execute_recovery_plan, recovery_plan
 from .events import emit
 from .logging_setup import log_event
 
 
-def _policy(bot_dir: Path) -> dict[str, Any]:
-    path = bot_dir / "BOT_MANIFEST.json"
-    if not path.is_file():
-        return {"auto_start": False, "auto_restart": False}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        life = data.get("lifecycle") or {}
-        return {
-            "auto_start": bool(life.get("auto_start", False)),
-            "auto_restart": bool(life.get("auto_restart", False)),
-        }
-    except Exception:
-        return {"auto_start": False, "auto_restart": False}
-
-
 def supervise_once(root: Path | None = None, apply: bool = False) -> list[dict[str, Any]]:
+    """Run one policy-gated supervisor pass.
+
+    Recovery decisions are delegated to Recovery Intelligence so the supervisor
+    cannot bypass BLOCKED/REVIEW classifications. Only SAFE_RECOVERY decisions
+    can reach service start/restart functions, and the executor applies at most
+    one action per pass by default with cooldown/attempt-limit protection.
+    """
     root = root or project_root()
-    states = {r["name"]: r for r in service_status(root)}
-    actions = []
-    for bot in discover_bots(root):
-        if bot.classification == "PLACEHOLDER":
-            actions.append({"service": bot.folder, "action": "none", "reason": "PLANNED placeholder; no runnable service installed."})
-            continue
-        policy = _policy(Path(bot.path))
-        state = states.get(bot.folder, {})
-        alive = bool(state.get("process_alive"))
-        desired = policy["auto_start"] or policy["auto_restart"]
-        if desired and not alive:
-            result = start_service(bot.folder, root, dry_run=not apply)
-            actions.append({"service": bot.folder, "action": "restart" if policy["auto_restart"] else "start", "result": result})
-            emit("supervisor.recovery_requested", "supervisor", {"service": bot.folder, "applied": apply}, root)
-            log_event("supervisor_recovery", level="WARN", data={"service": bot.folder, "applied": apply}, root=root)
+    plan = recovery_plan(root)
+    execution = execute_recovery_plan(plan, root, apply=apply, max_actions=1)
+    executed = {row.get("service"): row for row in execution.get("actions") or []}
+    skipped = {row.get("service"): row for row in execution.get("skipped") or []}
+
+    actions: list[dict[str, Any]] = []
+    for decision in plan.get("decisions") or []:
+        service = str(decision.get("service") or "unknown")
+        classification = str(decision.get("classification") or "UNKNOWN")
+        proposed = str(decision.get("action") or "NONE")
+
+        if service in executed:
+            result = executed[service]
+            action = "restart" if proposed == "RESTART_SERVICE" else "start"
+            actions.append({
+                "service": service,
+                "action": action,
+                "classification": classification,
+                "applied": bool(apply),
+                "result": result.get("result"),
+                "verified": result.get("verified"),
+                "escalation": result.get("escalation"),
+            })
+            emit(
+                "supervisor.recovery_requested",
+                "supervisor",
+                {"service": service, "classification": classification, "applied": apply},
+                root,
+            )
+            log_event(
+                "supervisor_recovery",
+                level="WARN",
+                data={"service": service, "classification": classification, "applied": apply},
+                root=root,
+            )
+        elif service in skipped:
+            actions.append({
+                "service": service,
+                "action": "none",
+                "classification": classification,
+                "reason": skipped[service].get("reason"),
+                "recovery_gate": skipped[service].get("history"),
+            })
         else:
-            actions.append({"service": bot.folder, "action": "none", "alive": alive, "policy": policy})
+            actions.append({
+                "service": service,
+                "action": "none",
+                "classification": classification,
+                "reason": decision.get("reason"),
+                "proposed_action": proposed,
+            })
 
     # Intelligence refresh is deliberately isolated from recovery control. A
     # collector/read-model problem must never prevent normal supervisor actions.
