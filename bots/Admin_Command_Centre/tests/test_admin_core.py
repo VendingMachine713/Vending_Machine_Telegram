@@ -34,6 +34,7 @@ class AdminCoreTests(unittest.TestCase):
         self.assertIn('SMART AUTO POSTER CONTROL',text)
         self.assertIn('/poster_status',text)
         self.assertIn('/poster_progress',text)
+        self.assertIn('/poster_recovery_preview',text)
         self.assertIn('/poster_restart',text)
     def test_poster_mutations_are_guarded(self):
         self.assertIn('disabled',handle_command(123,'/poster_restart',ADMIN).lower())
@@ -46,6 +47,15 @@ class AdminCoreTests(unittest.TestCase):
         self.assertIn('UNIVERSAL PROGRESS',text)
         progress.assert_called_once_with(ROOT)
         formatter.assert_called_once_with(progress.return_value)
+    @patch('admin_core.format_smart_auto_poster_reconciliation_preview')
+    @patch('admin_core.smart_auto_poster_reconciliation_preview')
+    def test_poster_recovery_preview_is_read_only_evidence_surface(self,preview,formatter):
+        preview.return_value={'available':True,'summary':{'total':1},'items':[],'mutations_performed':False}
+        formatter.return_value='SMART AUTO POSTER - RECOVERY PREVIEW\nMode: READ ONLY / NO RESEND'
+        text=handle_command(123,'/poster_recovery_preview',ADMIN)
+        self.assertIn('NO RESEND',text)
+        preview.assert_called_once_with(ROOT)
+        formatter.assert_called_once_with(preview.return_value)
     @patch('admin_core.run_service_cli')
     def test_poster_health_uses_vm_core_cli_bridge(self,run_cli):
         run_cli.return_value={'ok':True,'stdout':'HEALTH OK','stderr':''}
