@@ -1,5 +1,8 @@
 param(
-    [switch]$Json
+    [switch]$Json,
+    [switch]$ApplySafe,
+    [ValidateRange(0, 10)]
+    [int]$MaxActions = 1
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,9 +23,19 @@ if (-not $Python) {
 
 $argsList = @('-m', 'shared.vm_core.recovery_cli')
 if ($Json) { $argsList += '--json' }
+if ($ApplySafe) {
+    $argsList += '--apply-safe'
+    $argsList += '--max-actions'
+    $argsList += [string]$MaxActions
+}
 
 Write-Host '============================================================'
-Write-Host ' VM RECOVERY INTELLIGENCE - READ ONLY'
+if ($ApplySafe) {
+    Write-Host ' VM RECOVERY INTELLIGENCE - GUARDED SAFE RECOVERY'
+    Write-Host " Max actions this pass: $MaxActions"
+} else {
+    Write-Host ' VM RECOVERY INTELLIGENCE - READ ONLY'
+}
 Write-Host '============================================================'
 & $Python @argsList
 exit $LASTEXITCODE
