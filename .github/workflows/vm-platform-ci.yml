@@ -73,6 +73,7 @@ jobs:
             universal_search=true
             vm_guard=true
             admin_command_centre=true
+            smart_auto_poster=true
           fi
 
           {
