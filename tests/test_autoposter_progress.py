@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import sqlite3
 import tempfile
 import unittest
@@ -38,12 +39,23 @@ class AutoPosterProgressTests(unittest.TestCase):
                 event_type TEXT,
                 message TEXT
             );
+            CREATE TABLE heartbeats(
+                component TEXT PRIMARY KEY,
+                last_seen_at TEXT,
+                status TEXT,
+                details TEXT
+            );
             INSERT INTO destinations VALUES(1001, 'Test Group A');
             INSERT INTO destinations VALUES(1002, 'Test Group B');
             INSERT INTO queue VALUES(1, 7, 1001, 'primary', '2026-09-03T00:00:00Z', 'sent', NULL, NULL, '2026-09-03T00:00:00Z');
             INSERT INTO queue VALUES(2, 7, 1002, 'secondary', '2026-09-03T00:10:00Z', 'pending', NULL, NULL, '2026-09-03T00:01:00Z');
             INSERT INTO events VALUES(1, '2026-09-03T00:01:00Z', 'INFO', 'queue_created', 'Queue job created');
             """
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        con.executemany(
+            "INSERT INTO heartbeats(component,last_seen_at,status,details) VALUES(?,?,?,?)",
+            [("service", now, "ok", None), ("scheduler", now, "idle", None), ("worker", now, "ok", None)],
         )
         con.commit()
         con.close()
@@ -61,6 +73,21 @@ class AutoPosterProgressTests(unittest.TestCase):
         self.assertEqual(snapshot["task"]["label"], "Queue job #2")
         self.assertEqual(snapshot["metrics"]["next_due"], "2026-09-03T00:10:00Z")
         self.assertTrue(any(event["source"].startswith("Smart_Auto_Poster_V2/") for event in snapshot["events"]))
+        self.assertEqual([row["status"] for row in snapshot["services"]], ["HEALTHY", "HEALTHY", "HEALTHY"])
+
+    def test_stale_runtime_heartbeat_sets_attention_and_recovery(self):
+        tmp, root, db = self._root_with_db()
+        self.addCleanup(tmp.cleanup)
+        stale = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        con = sqlite3.connect(db)
+        con.execute("UPDATE heartbeats SET last_seen_at=? WHERE component='worker'", (stale,))
+        con.commit()
+        con.close()
+        snapshot = smart_auto_poster_progress(root)
+        worker = next(row for row in snapshot["services"] if row["name"] == "poster/worker")
+        self.assertEqual(worker["status"], "DEGRADED")
+        self.assertEqual(snapshot["overall"]["status"], "ATTENTION")
+        self.assertTrue(any("stale heartbeat" in item for item in snapshot["recovery_messages"]))
 
     def test_estimates_eta_only_when_recent_send_intervals_exist(self):
         tmp, root, db = self._root_with_db()

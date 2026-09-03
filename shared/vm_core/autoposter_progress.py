@@ -12,6 +12,8 @@ from .progress import ProgressEvent, ProgressLine, progress_snapshot
 _TERMINAL = {"sent", "failed", "cancelled", "quarantined"}
 _ACTIVE = {"pending", "retry", "processing", "sending", "uncertain"}
 _WORKING = {"pending", "retry", "processing", "sending"}
+_REQUIRED_HEARTBEATS = ("service", "scheduler", "worker")
+_HEARTBEAT_STALE_SECONDS = 180
 
 
 def _count_statuses(con) -> dict[str, int]:
@@ -126,12 +128,50 @@ def _recent_events(con, tables: set[str]) -> list[dict[str, Any]]:
     return result
 
 
+def _heartbeat_services(con, tables: set[str]) -> tuple[list[dict[str, Any]], list[str]]:
+    if "heartbeats" not in tables:
+        return [], ["Smart Auto Poster heartbeat table is unavailable; component health cannot be verified."]
+    rows = con.execute("SELECT component,last_seen_at,status,details FROM heartbeats ORDER BY component").fetchall()
+    by_component = {str(row["component"]): row for row in rows}
+    now = datetime.now(timezone.utc)
+    services: list[dict[str, Any]] = []
+    problems: list[str] = []
+
+    ordered = list(_REQUIRED_HEARTBEATS) + sorted(name for name in by_component if name not in _REQUIRED_HEARTBEATS)
+    for component in ordered:
+        row = by_component.get(component)
+        if row is None:
+            services.append({"name": f"poster/{component}", "status": "FAILED", "detail": "no heartbeat"})
+            problems.append(f"{component}: no heartbeat")
+            continue
+        last_seen = _parse_time(row["last_seen_at"])
+        age = (now - last_seen).total_seconds() if last_seen else None
+        raw = str(row["status"] or "unknown").lower()
+        stale = age is not None and age > _HEARTBEAT_STALE_SECONDS
+        if stale:
+            status = "STALE"
+            problems.append(f"{component}: stale heartbeat ({int(age)}s)")
+        elif raw in {"ok", "idle", "paused"}:
+            status = "RUNNING"
+        else:
+            status = raw.upper()
+            if raw not in {"ok", "idle", "paused"}:
+                problems.append(f"{component}: status={raw}")
+        detail_parts = [f"last_seen={row['last_seen_at']}"]
+        if age is not None:
+            detail_parts.append(f"age={_format_duration(age)}")
+        if row["details"]:
+            detail_parts.append(str(row["details"]))
+        services.append({"name": f"poster/{component}", "status": status, "detail": " | ".join(detail_parts)})
+    return services, problems
+
+
 def smart_auto_poster_progress(root: Path | None = None) -> dict[str, Any]:
     """Return a read-only Smart Auto Poster snapshot for the Universal Progress Engine.
 
     The adapter never mutates the bot database. It derives progress only from
-    explicit queue/campaign/destination state so operator visibility cannot
-    change delivery behaviour.
+    explicit queue/campaign/destination/heartbeat state so operator visibility
+    cannot change delivery behaviour.
     """
     root = root or project_root()
     bot_dir = root / "bots" / "Smart_Auto_Poster_V2"
@@ -160,9 +200,10 @@ def smart_auto_poster_progress(root: Path | None = None) -> dict[str, Any]:
         unresolved = counts.get("uncertain", 0)
         failed = counts.get("failed", 0) + counts.get("quarantined", 0)
         active = _latest_active(con, columns)
+        services, heartbeat_problems = _heartbeat_services(con, tables)
 
         overall_status = "RUNNING" if any(counts.get(s, 0) for s in _ACTIVE) else "COMPLETE"
-        if unresolved:
+        if unresolved or heartbeat_problems:
             overall_status = "ATTENTION"
 
         overall = ProgressLine(
@@ -206,6 +247,8 @@ def smart_auto_poster_progress(root: Path | None = None) -> dict[str, Any]:
             )
         if failed:
             recovery.append(f"{failed} failed/quarantined queue item(s) need review; healthy destinations can continue independently.")
+        if heartbeat_problems:
+            recovery.append("Runtime health needs attention: " + "; ".join(heartbeat_problems))
         if total == 0:
             recovery.append("Queue is empty; no posting progress is currently active.")
 
@@ -214,6 +257,7 @@ def smart_auto_poster_progress(root: Path | None = None) -> dict[str, Any]:
             overall=overall,
             group=group,
             task=task,
+            services=services,
             events=events,
             metrics=_throughput_metrics(con, counts, columns),
             recovery_messages=recovery,
