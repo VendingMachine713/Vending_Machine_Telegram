@@ -27,12 +27,14 @@ def test_snapshot_normalises_health_and_keeps_three_tiers():
         ],
         events=[ProgressEvent("worker started", source="worker")],
         recovery_messages=["Restart scheduler after diagnostics pass."],
+        metrics={"estimated_queue_eta": "12m", "queue_active": 4},
     )
     assert snapshot["overall"]["percent"] == 50
     assert snapshot["group"]["percent"] == 50
     assert snapshot["task"]["percent"] == 100
     assert [row["status"] for row in snapshot["services"]] == ["HEALTHY", "DEGRADED", "FAILED"]
     assert snapshot["events"][0]["message"] == "worker started"
+    assert snapshot["metrics"]["estimated_queue_eta"] == "12m"
 
 
 def test_text_formatter_exposes_operator_sections():
@@ -42,6 +44,7 @@ def test_text_formatter_exposes_operator_sections():
         group=ProgressLine("Current group", 1, 2, "RUNNING"),
         task=ProgressLine("Current task", 1, 1, "DONE"),
         services=[{"name": "worker", "runtime_status": "ALIVE"}],
+        metrics={"estimated_queue_eta": "12m", "queue_active": 4},
         events=[{"message": "post delivered", "level": "INFO", "source": "worker"}],
         recovery_messages=["No recovery required."],
     )
@@ -49,6 +52,8 @@ def test_text_formatter_exposes_operator_sections():
     assert "OVERALL" in text
     assert "CURRENT GROUP" in text
     assert "CURRENT TASK" in text
+    assert "METRICS" in text
+    assert "ESTIMATED QUEUE ETA" in text
     assert "HEALTH" in text
     assert "LIVE EVENT FEED" in text
     assert "RECOVERY / NEXT ACTION" in text
