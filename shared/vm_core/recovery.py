@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from .autoposter_recovery import smart_auto_poster_recovery_gate
 from .manifests import discover_bots
 from .paths import project_root
 from .recovery_state import RecoveryHistory
@@ -116,8 +117,9 @@ def recovery_plan(root: Path | None = None) -> dict[str, Any]:
             continue
         bot_dir = Path(bot.path)
         row = states.get(bot.folder, {"name": bot.folder, "runtime_status": "UNKNOWN", "process_alive": False})
+        alive = bool(row.get("process_alive"))
         configured = runtime_configuration_status(bot_dir)
-        if not bool(row.get("process_alive")) and not configured.get("configured", True):
+        if not alive and not configured.get("configured", True):
             missing = ", ".join(configured.get("missing_env_names") or []) or "required runtime configuration"
             decisions.append(RecoveryDecision(
                 bot.folder,
@@ -129,6 +131,21 @@ def recovery_plan(root: Path | None = None) -> dict[str, Any]:
                 requires_operator=True,
             ))
             continue
+
+        if bot.folder == "Smart_Auto_Poster_V2" and not alive:
+            poster_gate = smart_auto_poster_recovery_gate(root)
+            if not poster_gate.get("safe"):
+                decisions.append(RecoveryDecision(
+                    bot.folder,
+                    "BLOCKED",
+                    "RECONCILE",
+                    str(poster_gate.get("reason") or "Smart Auto Poster delivery state is not safe for automatic lifecycle recovery."),
+                    1.0,
+                    automatic=False,
+                    requires_operator=True,
+                ))
+                continue
+
         decisions.append(classify_service(row, _manifest_policy(bot_dir)))
 
     automatic = [d for d in decisions if d.automatic and d.action in SAFE_ACTIONS]
@@ -151,6 +168,7 @@ def recovery_plan(root: Path | None = None) -> dict[str, Any]:
             "uncertain_delivery_auto_retry": False,
             "credential_or_auth_recovery": False,
             "missing_configuration_auto_start": False,
+            "autoposter_delivery_certainty_required": True,
         },
     }
 
