@@ -29,6 +29,8 @@ from .intelligence import intelligence_summary, format_intelligence_summary
 from .foundation import foundation_report, format_foundation_report
 from .platform_registry import service_registry, write_service_registry, format_service_registry
 from .config_registry import configuration_registry, write_configuration_registry, format_configuration_registry
+from .runtime_registry import runtime_registry, write_runtime_registry, format_runtime_registry
+from .core1_readiness import core1_readiness, format_core1_readiness
 
 def _json(obj): print(json.dumps(obj,indent=2,ensure_ascii=False,default=str))
 
@@ -77,6 +79,7 @@ def build_parser():
         ("git-status","Show safe local Git repository status."),
         ("intelligence","Refresh and show shared cross-bot intelligence."),
         ("foundation","Validate the VM Core foundation contract."),
+        ("core-readiness","Show Core 1 Foundation readiness and adoption."),
         ("init","Initialise platform folders/database."),
     ]: s.add_parser(name,help=help_text)
     m=s.add_parser("manifests",help="Preview/create/refresh bot manifests."); m.add_argument("--write",action="store_true"); m.add_argument("--refresh",action="store_true")
@@ -87,7 +90,7 @@ def build_parser():
     for action in ("start","stop","restart"):
         q=s.add_parser(action,help=f"{action.title()} a VM service."); q.add_argument("service"); q.add_argument("--apply",action="store_true"); q.add_argument("--force",action="store_true")
     s.choices["logs"].add_argument("service",nargs="?",default="platform"); s.choices["logs"].add_argument("--lines",type=int,default=50); s.choices["logs"].add_argument("--errors",action="store_true")
-    s.choices["registry"].add_argument("action",choices=["summary","sync","services","config"],nargs="?",default="summary"); s.choices["registry"].add_argument("--write",action="store_true")
+    s.choices["registry"].add_argument("action",choices=["summary","sync","services","config","runtime"],nargs="?",default="summary"); s.choices["registry"].add_argument("--write",action="store_true")
     s.choices["jobs"].add_argument("action",choices=["list","enqueue","run-one"],nargs="?",default="list"); s.choices["jobs"].add_argument("job_type",nargs="?")
     s.choices["events"].add_argument("action",choices=["list","emit"],nargs="?",default="list"); s.choices["events"].add_argument("event_type",nargs="?")
     s.choices["simulate"].add_argument("scenario",choices=sorted(SCENARIOS))
@@ -107,6 +110,8 @@ def main(argv=None):
     if c=="dashboard": return cmd_dashboard(root)
     if c=="foundation":
         report=foundation_report(root); print(format_foundation_report(report)); return 2 if report["summary"]["ERROR"] else 0
+    if c=="core-readiness":
+        report=core1_readiness(root); print(format_core1_readiness(report)); return 0 if report["status"]=="PASS" else 2
     if c=="intelligence":
         print(format_intelligence_summary(intelligence_summary(root, refresh=True))); return 0
     if c=="init":
@@ -168,6 +173,12 @@ def main(argv=None):
                 print(write_configuration_registry(root))
             else:
                 print(format_configuration_registry(report))
+        elif args.action=="runtime":
+            report=runtime_registry(root)
+            if args.write:
+                print(write_runtime_registry(root))
+            else:
+                print(format_runtime_registry(report))
         else:
             _json(registry_summary(root))
         return 0
