@@ -6,6 +6,7 @@ from typing import Any
 
 from .manifests import discover_bots
 from .paths import project_root
+from .recovery_state import RecoveryHistory
 from .services import restart_service, service_status, start_service
 
 
@@ -145,24 +146,42 @@ def execute_recovery_plan(
     *,
     apply: bool = False,
     max_actions: int = 1,
+    history: RecoveryHistory | None = None,
 ) -> dict[str, Any]:
     """Execute only explicitly classified SAFE_RECOVERY actions.
 
     Dry-run is the default. Even in apply mode this function never touches queue
     rows, campaigns, schedules, credentials, Telegram delivery state, or decisions
-    marked BLOCKED/REVIEW. The per-pass cap prevents a broad restart cascade.
+    marked BLOCKED/REVIEW. RecoveryHistory enforces cooldown/backoff and a bounded
+    attempts-per-window limit to prevent unattended restart loops.
     """
     root = root or project_root()
+    history = history or RecoveryHistory(root)
     limit = max(0, int(max_actions))
     results: list[dict[str, Any]] = []
-    candidates = [
+    skipped: list[dict[str, Any]] = []
+    raw_candidates = [
         row for row in (plan.get("decisions") or [])
         if row.get("classification") == "SAFE_RECOVERY"
         and bool(row.get("automatic"))
         and row.get("action") in SAFE_ACTIONS
-    ][:limit]
+    ]
 
-    for row in candidates:
+    eligible: list[dict[str, Any]] = []
+    for row in raw_candidates:
+        service = str(row.get("service") or "")
+        gate = history.status(service)
+        if gate.get("limited"):
+            skipped.append({"service": service, "reason": "attempt_limit", "history": gate})
+            continue
+        if gate.get("cooling_down"):
+            skipped.append({"service": service, "reason": "cooldown", "history": gate})
+            continue
+        eligible.append(row)
+        if len(eligible) >= limit:
+            break
+
+    for row in eligible:
         service = str(row.get("service") or "")
         action = str(row.get("action") or "")
         if action == "START_SERVICE":
@@ -171,17 +190,22 @@ def execute_recovery_plan(
             result = restart_service(service, root, dry_run=not apply)
         else:
             continue
+        if apply:
+            history.record_attempt(service, action=action, success=bool(result.get("ok")))
         results.append({"service": service, "action": action, "applied": bool(apply), "result": result})
 
     return {
         "mode": "APPLY_SAFE_RECOVERY" if apply else "DRY_RUN",
         "max_actions": limit,
-        "candidate_count": len(candidates),
+        "candidate_count": len(eligible),
+        "raw_candidate_count": len(raw_candidates),
         "actions": results,
+        "skipped": skipped,
         "safety": {
             "blocked_or_review_actions_executed": False,
             "queue_or_delivery_retry_performed": False,
             "credential_or_auth_recovery_performed": False,
+            "restart_loop_guard_enabled": True,
         },
     }
 
