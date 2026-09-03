@@ -6,6 +6,15 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from shared.vm_core.source_of_truth import (
+    bot_version_evidence,
+    duplicate_bot_folders,
+    tracked_policy_violations,
+)
+
 PROJECT_FILE = ROOT / "VM_PROJECT.json"
 
 
@@ -65,6 +74,36 @@ def _validate_admin_separation(errors: list[str]) -> None:
                 )
 
 
+def _validate_source_of_truth(canonical: list[str], errors: list[str], warnings: list[str]) -> None:
+    """Apply repository-safe source-of-truth checks without forcing legacy cleanup early."""
+    policy = tracked_policy_violations(ROOT)
+    if policy.get("error"):
+        errors.extend(f"source policy audit failed: {msg}" for msg in policy["error"])
+    for path in policy.get("critical", []):
+        errors.append(f"tracked sensitive/runtime credential path: {path}")
+
+    # Generated tracked files are technical debt, not an immediate release blocker while
+    # Phase 0 reconciliation is underway. Surface them loudly so cleanup cannot be forgotten.
+    for path in policy.get("generated", []):
+        if not path.endswith("/.gitkeep") and path not in {"state/.gitkeep"}:
+            warnings.append(f"generated/runtime path is tracked and should be reconciled: {path}")
+
+    for name in canonical:
+        evidence = bot_version_evidence(ROOT, name)
+        if evidence.get("exists") and not evidence.get("consistent"):
+            errors.append(
+                f"{name}: VERSION.txt and BOT_MANIFEST.json version metadata disagree: "
+                f"{evidence.get('evidence')}"
+            )
+
+    # Same-name nested bot folders are known Phase 0 reconciliation debt. Warn now;
+    # convert this to a hard failure after the explicit archive/delete gate is completed.
+    for item in duplicate_bot_folders(ROOT):
+        warnings.append(
+            f"nested bot copy requires reconciliation: {item['nested']}"
+        )
+
+
 def main() -> int:
     project = json.loads(PROJECT_FILE.read_text(encoding="utf-8"))
     canonical = project.get("canonical_bot_folders", [])
@@ -72,6 +111,7 @@ def main() -> int:
         fail("VM_PROJECT.json has no canonical_bot_folders")
 
     errors: list[str] = []
+    warnings: list[str] = []
     for name in canonical:
         bot = ROOT / "bots" / name
         manifest_path = bot / "BOT_MANIFEST.json"
@@ -111,13 +151,20 @@ def main() -> int:
                 errors.append(f"{name}: missing declared test {test}")
 
     _validate_admin_separation(errors)
+    _validate_source_of_truth(canonical, errors, warnings)
+
+    for warning in warnings:
+        print(f"WARNING: {warning}")
 
     if errors:
         for error in errors:
             print(f"ERROR: {error}")
         return 1
 
-    print(f"Repository health OK: validated {len(canonical)} canonical bots and admin ownership boundary.")
+    print(
+        f"Repository health OK: validated {len(canonical)} canonical bots, "
+        "admin ownership boundary, version consistency and source policy."
+    )
     return 0
 
 
