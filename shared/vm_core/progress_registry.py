@@ -20,32 +20,40 @@ def provider_names() -> tuple[str, ...]:
     return tuple(sorted(_PROVIDERS))
 
 
+def _failed_snapshot(name: str, exc: Exception) -> dict[str, Any]:
+    return {
+        "headline": name.upper(),
+        "overall": {
+            "label": "Progress provider unavailable",
+            "current": 0,
+            "total": 0,
+            "status": "FAILED",
+            "detail": f"{type(exc).__name__}: {exc}",
+            "percent": 0,
+        },
+        "group": None,
+        "task": None,
+        "services": [],
+        "metrics": {},
+        "events": [],
+        "recovery_messages": ["Progress provider failed safely; no bot state was changed."],
+    }
+
+
+def progress_surface(name: str, root: Path | None = None) -> dict[str, Any]:
+    root = root or project_root()
+    provider = _PROVIDERS.get(str(name).lower())
+    if provider is None:
+        raise KeyError(f"Unknown progress surface: {name}")
+    try:
+        return provider(root)
+    except Exception as exc:
+        return _failed_snapshot(str(name), exc)
+
+
 def collect_progress_surfaces(root: Path | None = None) -> dict[str, dict[str, Any]]:
     root = root or project_root()
-    surfaces: dict[str, dict[str, Any]] = {}
-    for name, provider in _PROVIDERS.items():
-        try:
-            snapshot = provider(root)
-        except Exception as exc:
-            snapshot = {
-                "headline": name.upper(),
-                "overall": {
-                    "label": "Progress provider unavailable",
-                    "current": 0,
-                    "total": 0,
-                    "status": "FAILED",
-                    "detail": f"{type(exc).__name__}: {exc}",
-                    "percent": 0,
-                },
-                "group": None,
-                "task": None,
-                "services": [],
-                "metrics": {},
-                "events": [],
-                "recovery_messages": ["Progress provider failed safely; no bot state was changed."],
-            }
-        surfaces[name] = snapshot
-    return surfaces
+    return {name: progress_surface(name, root) for name in _PROVIDERS}
 
 
 def platform_progress_summary(root: Path | None = None) -> dict[str, Any]:
