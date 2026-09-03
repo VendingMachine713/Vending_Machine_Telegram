@@ -20,6 +20,15 @@ class AdminCoreTests(unittest.TestCase):
         text=handle_command(123,'/progress',ADMIN)
         self.assertIn('UNIVERSAL PROGRESS ENGINE',text)
         formatter.assert_called_once_with(ROOT)
+    @patch('admin_core.format_recovery_plan')
+    @patch('admin_core.recovery_plan')
+    def test_recovery_command_is_read_only_planning_surface(self,planner,formatter):
+        planner.return_value={'mode':'READ_ONLY_PLAN','summary':{},'decisions':[],'safety':{'mutations_performed':False}}
+        formatter.return_value='VM RECOVERY INTELLIGENCE\nMode: READ_ONLY_PLAN'
+        text=handle_command(123,'/recovery',ADMIN)
+        self.assertIn('READ_ONLY_PLAN',text)
+        planner.assert_called_once_with(ROOT)
+        formatter.assert_called_once_with(planner.return_value)
     def test_poster_help_is_owned_by_admin_command_centre(self):
         text=handle_command(123,'/poster',ADMIN)
         self.assertIn('SMART AUTO POSTER CONTROL',text)
