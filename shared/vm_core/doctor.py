@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
+from . import __version__
 import importlib.util
 import json
 import os
@@ -123,7 +124,7 @@ def run_doctor(root: Path | None = None) -> dict[str, Any]:
     counts = {s: sum(1 for c in checks if c.status==s) for s in ("PASS","INFO","WARN","FAIL")}
     return {
         "schema_version":3,
-        "vm_core_version":"1.2.0",
+        "vm_core_version":__version__,
         "generated_at_utc":datetime.now(timezone.utc).isoformat(),
         "project_root":str(root),
         "bot_count":len(bots),
