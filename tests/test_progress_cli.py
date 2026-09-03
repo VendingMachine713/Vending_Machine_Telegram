@@ -15,6 +15,7 @@ class ProgressCliTests(unittest.TestCase):
     def test_registry_exposes_initial_cross_bot_providers(self):
         self.assertIn("autoposter", provider_names())
         self.assertIn("guard", provider_names())
+        self.assertIn("relationships", provider_names())
         self.assertIn("search", provider_names())
 
     def test_text_mode_is_safe_when_autoposter_database_is_missing(self):
@@ -49,6 +50,16 @@ class ProgressCliTests(unittest.TestCase):
             self.assertIn("UNIVERSAL SEARCH", text)
             self.assertIn("Search database unavailable", text)
 
+    def test_relationship_surface_dispatches_through_registry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = io.StringIO()
+            with redirect_stdout(output):
+                rc = main(["relationships", "--root", tmp])
+            self.assertEqual(rc, 0)
+            text = output.getvalue()
+            self.assertIn("VM RELATIONSHIP MANAGER", text)
+            self.assertIn("Relationship database unavailable", text)
+
     def test_default_all_mode_renders_platform_header_and_registered_surfaces(self):
         with tempfile.TemporaryDirectory() as tmp:
             output = io.StringIO()
@@ -60,6 +71,7 @@ class ProgressCliTests(unittest.TestCase):
             self.assertIn("SMART AUTO POSTER", text)
             self.assertIn("VM GUARD", text)
             self.assertIn("UNIVERSAL SEARCH", text)
+            self.assertIn("VM RELATIONSHIP MANAGER", text)
 
     def test_json_mode_emits_structured_progress_contract(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -80,9 +92,10 @@ class ProgressCliTests(unittest.TestCase):
                 rc = main(["all", "--json", "--root", tmp])
             self.assertEqual(rc, 0)
             payload = json.loads(output.getvalue())
-            self.assertEqual(payload["surface_count"], 3)
+            self.assertEqual(payload["surface_count"], 4)
             self.assertIn("autoposter", payload["surfaces"])
             self.assertIn("guard", payload["surfaces"])
+            self.assertIn("relationships", payload["surfaces"])
             self.assertIn("search", payload["surfaces"])
             direct = platform_progress_summary(Path(tmp))
             self.assertEqual(payload["attention_count"], direct["attention_count"])
