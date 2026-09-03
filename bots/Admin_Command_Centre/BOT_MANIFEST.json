@@ -36,7 +36,7 @@
   ],
   "lifecycle": {
     "managed_by_vm": true,
-    "auto_start": false,
-    "auto_restart": false
+    "auto_start": true,
+    "auto_restart": true
   }
 }
