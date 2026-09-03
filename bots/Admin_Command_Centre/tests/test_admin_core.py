@@ -14,6 +14,12 @@ class AdminCoreTests(unittest.TestCase):
     def test_allowlist(self): self.assertTrue(is_admin(123,{'admin_ids':{123}}))
     def test_access_denied(self): self.assertEqual(handle_command(456,'/status',ADMIN),'Access denied.')
     def test_mutations_disabled(self): self.assertIn('disabled',handle_command(123,'/backup',ADMIN).lower())
+    @patch('admin_core.format_all_progress')
+    def test_platform_progress_uses_registered_surfaces(self,formatter):
+        formatter.return_value='UNIVERSAL PROGRESS ENGINE\nSurfaces: 1'
+        text=handle_command(123,'/progress',ADMIN)
+        self.assertIn('UNIVERSAL PROGRESS ENGINE',text)
+        formatter.assert_called_once_with(ROOT)
     def test_poster_help_is_owned_by_admin_command_centre(self):
         text=handle_command(123,'/poster',ADMIN)
         self.assertIn('SMART AUTO POSTER CONTROL',text)
