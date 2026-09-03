@@ -16,9 +16,11 @@ Read-only platform command:
 
 - `/progress` - render every registered Universal Progress Engine surface in one operator view.
 
-Registered surfaces now include Smart Auto Poster and VM Guard. The provider registry is intentionally extensible, so additional bots can be added without changing the progress rendering contract used by terminal and Telegram admin surfaces.
+Registered surfaces now include Smart Auto Poster, VM Guard and Universal Search. The provider registry is intentionally extensible, so additional bots can be added without changing the progress rendering contract used by terminal and Telegram admin surfaces.
 
-VM Guard is a continuous service rather than a finite campaign. Its progress bar therefore represents operational readiness, while metrics expose monitor-only versus active-moderation mode, risk threshold and recent Guard events.
+VM Guard is a continuous service rather than a finite campaign. Its progress bar represents operational readiness, while metrics expose monitor-only versus active-moderation mode, risk threshold and recent Guard events.
+
+Universal Search exposes index size, saved-watch state and passive alert-delivery progress. Pending/retry alerts remain active work; terminal failures switch the surface to ATTENTION with recovery guidance.
 
 ## Smart Auto Poster controls
 
@@ -51,10 +53,11 @@ Render one provider only:
 ```powershell
 python -m shared.vm_core.progress_cli autoposter
 python -m shared.vm_core.progress_cli guard
-python -m shared.vm_core.progress_cli guard --json
+python -m shared.vm_core.progress_cli search
+python -m shared.vm_core.progress_cli search --json
 ```
 
-The progress surfaces never send posts, change queue rows, retry uncertain deliveries, change Guard moderation mode, or modify campaign/schedule state.
+The progress surfaces never send posts, change queue rows, trigger alert retries, change Guard moderation mode, or modify campaign/schedule state.
 
 ## Architecture boundary
 
