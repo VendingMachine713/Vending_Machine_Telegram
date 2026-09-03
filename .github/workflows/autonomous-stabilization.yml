@@ -26,10 +26,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip'
-          cache-dependency-path: |
-            **/requirements*.txt
-            pyproject.toml
 
       - name: Upgrade pip
         shell: pwsh
@@ -47,13 +43,7 @@ jobs:
 
       - name: Compile Python source
         shell: pwsh
-        run: |
-          python - <<'PY'
-          import compileall
-          import sys
-          ok = compileall.compile_dir('.', quiet=1, rx=r'(^|[\\/])(\.git|\.venv|venv|backups|runtime|state)([\\/]|$)')
-          sys.exit(0 if ok else 1)
-          PY
+        run: python -c "import compileall,sys; sys.exit(0 if compileall.compile_dir('.',quiet=1) else 1)"
 
       - name: Run unittest discovery
         shell: pwsh
