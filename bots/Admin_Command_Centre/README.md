@@ -16,12 +16,15 @@ Read-only platform command:
 
 - `/progress` - render every registered Universal Progress Engine surface in one operator view.
 
-Registered surfaces now include Smart Auto Poster, VM Guard, Universal Search and VM Relationship Manager. The provider registry is intentionally extensible, so additional services can be added without changing the progress rendering contract used by terminal and Telegram admin surfaces.
+All five primary bot folders now have a progress provider:
 
-- Smart Auto Poster exposes queue progress, current destination/task, ETA, events, runtime heartbeats and recovery guidance.
-- VM Guard exposes operational readiness, monitor-only/active mode, risk threshold, runtime freshness and recent Guard events.
-- Universal Search exposes index size, saved-watch state and passive alert-delivery progress. Terminal alert failures switch the surface to ATTENTION.
-- VM Relationship Manager exposes intelligence coverage, overdue/dormant/low-health counts and the highest-priority suggested action for manual review.
+- Admin Command Centre: operator/control-surface runtime readiness and recent admin events.
+- Smart Auto Poster: queue progress, current destination/task, ETA, events, runtime heartbeats and recovery guidance.
+- VM Guard: operational readiness, monitor-only/active mode, risk threshold, runtime freshness and recent Guard events.
+- Universal Search: index size, saved-watch state and passive alert-delivery progress. Terminal alert failures switch the surface to ATTENTION.
+- VM Relationship Manager: intelligence coverage, overdue/dormant/low-health counts and the highest-priority suggested action for manual review.
+
+The provider registry remains extensible, so future bots/services can join without changing the terminal or Telegram rendering contract.
 
 ## Smart Auto Poster controls
 
@@ -52,14 +55,15 @@ python -m shared.vm_core.progress_cli all --json
 Render one provider only:
 
 ```powershell
+python -m shared.vm_core.progress_cli admin
 python -m shared.vm_core.progress_cli autoposter
 python -m shared.vm_core.progress_cli guard
 python -m shared.vm_core.progress_cli search
 python -m shared.vm_core.progress_cli relationships
-python -m shared.vm_core.progress_cli relationships --json
+python -m shared.vm_core.progress_cli admin --json
 ```
 
-The progress surfaces are visibility-only: they never send posts/messages, mutate bot queues, trigger retries, change Guard moderation mode, contact people, or modify campaign/schedule state.
+The progress surfaces are visibility-only: they never send posts/messages, mutate bot queues, trigger retries, change Guard moderation mode, contact people, or modify campaign/schedule/service state.
 
 ## Architecture boundary
 
