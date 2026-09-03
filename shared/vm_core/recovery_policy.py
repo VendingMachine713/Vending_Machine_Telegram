@@ -41,18 +41,19 @@ def load_recovery_policy(root: Path | None = None) -> dict[str, Any]:
 
 
 def service_policy(service: str, manifest_policy: dict[str, bool], root: Path | None = None) -> dict[str, bool]:
-    """Resolve one service's recovery policy without weakening manifest safety.
+    """Resolve one service's recovery policy from one central configuration file.
 
-    Central policy can further disable recovery or opt a service in only when the
-    service manifest already declares it managed by VM and the central file
-    explicitly names the service. This keeps one configuration surface while
-    preventing accidental blanket activation.
+    A central opt-in is honored only for manifests marked managed_by_vm. This
+    avoids per-bot PowerShell configuration while retaining an explicit service
+    allowlist and safe default-off behavior.
     """
     policy = load_recovery_policy(root)
     override = (policy.get("services") or {}).get(service) or {}
     if not isinstance(override, dict):
         override = {}
+    managed = bool(manifest_policy.get("managed_by_vm", False))
     return {
-        "auto_start": bool(manifest_policy.get("auto_start", False) or override.get("auto_start", False)),
-        "auto_restart": bool(manifest_policy.get("auto_restart", False) or override.get("auto_restart", False)),
+        "managed_by_vm": managed,
+        "auto_start": bool(manifest_policy.get("auto_start", False) or (managed and override.get("auto_start", False))),
+        "auto_restart": bool(manifest_policy.get("auto_restart", False) or (managed and override.get("auto_restart", False))),
     }
