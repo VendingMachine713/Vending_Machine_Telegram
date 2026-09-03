@@ -7,6 +7,7 @@ from typing import Any
 from .manifests import discover_bots
 from .paths import project_root
 from .recovery_state import RecoveryHistory
+from .runtime_requirements import runtime_configuration_status
 from .services import restart_service, service_status, start_service
 
 
@@ -113,8 +114,22 @@ def recovery_plan(root: Path | None = None) -> dict[str, Any]:
     for bot in discover_bots(root):
         if bot.classification == "PLACEHOLDER":
             continue
+        bot_dir = Path(bot.path)
         row = states.get(bot.folder, {"name": bot.folder, "runtime_status": "UNKNOWN", "process_alive": False})
-        decisions.append(classify_service(row, _manifest_policy(Path(bot.path))))
+        configured = runtime_configuration_status(bot_dir)
+        if not bool(row.get("process_alive")) and not configured.get("configured", True):
+            missing = ", ".join(configured.get("missing_env_names") or []) or "required runtime configuration"
+            decisions.append(RecoveryDecision(
+                bot.folder,
+                "BLOCKED",
+                "CONFIGURE",
+                f"Required local configuration is missing ({missing}); automatic start/restart is blocked until configuration is present.",
+                1.0,
+                automatic=False,
+                requires_operator=True,
+            ))
+            continue
+        decisions.append(classify_service(row, _manifest_policy(bot_dir)))
 
     automatic = [d for d in decisions if d.automatic and d.action in SAFE_ACTIONS]
     operator = [d for d in decisions if d.requires_operator]
@@ -135,6 +150,7 @@ def recovery_plan(root: Path | None = None) -> dict[str, Any]:
             "mutations_performed": False,
             "uncertain_delivery_auto_retry": False,
             "credential_or_auth_recovery": False,
+            "missing_configuration_auto_start": False,
         },
     }
 
