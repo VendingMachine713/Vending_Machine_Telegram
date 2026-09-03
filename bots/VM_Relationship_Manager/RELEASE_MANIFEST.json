@@ -1,0 +1,280 @@
+{
+  "baseline": "v5.0.2 session-first authentication baseline",
+  "default_autonomy_mode": "safe",
+  "files": {
+    "APPLY_VM_RM_UPDATE.ps1": {
+      "bytes": 6006,
+      "sha256": "d6da999bd85c938e63ad5c96b102cfc93890c50f6d024f6a1f52ee8bc0e5b3e1"
+    },
+    "CHANGELOG.md": {
+      "bytes": 2784,
+      "sha256": "9629c484036564c0f350c35442af3a272049cfcaf3f292ad1512ef6fcbd8a22e"
+    },
+    "INSTALL_VM_RM_AUTOSTART.ps1": {
+      "bytes": 1686,
+      "sha256": "3141467173830d1787e006a123f986f4e4697d854d723f7bf0b3a590b0c0210b"
+    },
+    "README.md": {
+      "bytes": 2733,
+      "sha256": "3ef6fb4bebc8a036a001791d80154e80d44ae815a85711acb6812c1848e0ed28"
+    },
+    "RECOVER_VM_RM_ENV_DEEP_R2.bat": {
+      "bytes": 310,
+      "sha256": "fe65ac59153b37d9b22d059c9bf147483c9dee696d004a4f70b2ddf6afa76524"
+    },
+    "RECOVER_VM_RM_ENV_DEEP_R2.py": {
+      "bytes": 16611,
+      "sha256": "10881b7966fa4e142e3488aefe14a99858f2fbfd4d8950f8c8419b626404e645"
+    },
+    "REMOVE_VM_RM_AUTOSTART.ps1": {
+      "bytes": 299,
+      "sha256": "8a16b1d3496a436a5b1e8821133ebf1dc3d10718590e4807cd8081a09e87e291"
+    },
+    "ROLLBACK_VM_RM_CODE.ps1": {
+      "bytes": 1946,
+      "sha256": "de707e829a947fcd1dbc11d347eb98951cb9365782a8b91fe18a723e76073cba"
+    },
+    "RUN_VM_RM_WATCHDOG.ps1": {
+      "bytes": 2295,
+      "sha256": "08a3c21bfc24ace4d0661fa9ea00a41aa188a4b9bcea9dea2763915109a2f724"
+    },
+    "START_VM_RELATIONSHIPS.bat": {
+      "bytes": 273,
+      "sha256": "a8bb528710acddd12f6ed80b8e13fe96311a93f5e8f96b31baa22430966cc5be"
+    },
+    "START_VM_RELATIONSHIPS.ps1": {
+      "bytes": 5703,
+      "sha256": "c641a254b6da4d4bc3218bed6eb8274626bc7fd174da6f43c722732d3ca22bc6"
+    },
+    "START_VM_RM_BACKGROUND.ps1": {
+      "bytes": 532,
+      "sha256": "d46ea41f6c04d3b8adab3d9191ef3a58e65c20cc9b4aad11c244dd49866384aa"
+    },
+    "STOP_VM_RM_BACKGROUND.ps1": {
+      "bytes": 634,
+      "sha256": "686bf596f76ce1cc0d83d6e4d68c185a3c73b7691af952228fbefc31554e8fe6"
+    },
+    "UPDATE_VM_RM_PREFLIGHT.py": {
+      "bytes": 898,
+      "sha256": "a21bfa68b8364fdf55bbe926863391dd121f69445e7503f4a6304bb52b6df84a"
+    },
+    "UPGRADE_TO_6.0.md": {
+      "bytes": 1564,
+      "sha256": "6fb38b57e48442757c8cf3ae0af9a763e8c9599ec6d34ee7bdb58a6082fa1164"
+    },
+    "VERSION.txt": {
+      "bytes": 98,
+      "sha256": "50e5a453f410bbf4a9a9315f256d16dde779fedad75efb11fbedd728021b787e"
+    },
+    "VM_RM_BACKGROUND_STATUS.ps1": {
+      "bytes": 619,
+      "sha256": "cc77325111589ee3cbfc0e5234814f8b0dad928fb6817814218d10625761e133"
+    },
+    "VM_RM_LOCAL_DOCTOR.py": {
+      "bytes": 5171,
+      "sha256": "71d68a4355a52f71e2a020d0d5533b72d45c4c0e8d4444d211295a52798107e0"
+    },
+    "VM_RM_OPERATIONS.md": {
+      "bytes": 1585,
+      "sha256": "916033dc8862d86ebd5b0ce8a2f80b647cccb32be4547fd18359965168d6f206"
+    },
+    "action_engine.py": {
+      "bytes": 14320,
+      "sha256": "d755b915da40b7f30ab377288ca6b479cd383dfb00ed43509b2d68f034860653"
+    },
+    "admin_bot.py": {
+      "bytes": 156928,
+      "sha256": "905136be466745c7431e4cf1f533b9159730c3244c0589c9c0b9faa3865d0ad7"
+    },
+    "automation_engine.py": {
+      "bytes": 8593,
+      "sha256": "d930aa2cac1c00c036b991201c23ba0c6ca00239fe5bac8b319a82818ff30add"
+    },
+    "autonomy_engine.py": {
+      "bytes": 2466,
+      "sha256": "f014dd0f5c86891da3066872a0eb251776afd4fa30a8e43f8bb5a923a89ba579"
+    },
+    "backup_manager.py": {
+      "bytes": 4458,
+      "sha256": "975ef67bc80b9d44be3165d7ced5a67572616cc263ed2bb9efd337e4afe24191"
+    },
+    "behavior_engine.py": {
+      "bytes": 7056,
+      "sha256": "c4bffdd0ff94aa93be192123ae03004acf99bc49d917e5e6b38a59554853e279"
+    },
+    "briefing_engine.py": {
+      "bytes": 3747,
+      "sha256": "0341e5f115516084b7d363b19f05606a4ca0414a24fe69a20def418aef6e090e"
+    },
+    "calibration_engine.py": {
+      "bytes": 5730,
+      "sha256": "8ae8cf0597c9cf7e3875cd03dc1ced3230bb514a126baaaaa0f77ec5a09810a6"
+    },
+    "classification_engine.py": {
+      "bytes": 17808,
+      "sha256": "7c144b7c22ee6ce98987cf4a636fb8e3847d6dcadf8b45f9e96692e9df730ace"
+    },
+    "config.py": {
+      "bytes": 3448,
+      "sha256": "74e3ba04e019bc0ef6f77ca5290b7589ab14688de9a818bbe5f869df6d130b08"
+    },
+    "data_quality_engine.py": {
+      "bytes": 4012,
+      "sha256": "9be9bebcc418e776ef6ff48aaf4212cf21268b3a232e65d80d1356704ca931a8"
+    },
+    "database.py": {
+      "bytes": 24187,
+      "sha256": "8499774ce7121babff829f185258312269b1c68c5d6ee351bd5a2d00228f6777"
+    },
+    "exception_policy_engine.py": {
+      "bytes": 4411,
+      "sha256": "5357f921d0e3ead029b852000c157a2e8907584d72ce9f7dcfca1a0b161bf895"
+    },
+    "forecast_engine.py": {
+      "bytes": 5742,
+      "sha256": "2c7b87caffcb7ef23e40d3ce33f1a755baea06bc518560df413ae91c070d4ccf"
+    },
+    "goal_engine.py": {
+      "bytes": 5932,
+      "sha256": "c0d7ecf8fd9b220942b1b60300fdd9fb87457a716162886bc69c7bcf12cce767"
+    },
+    "group_engine.py": {
+      "bytes": 4613,
+      "sha256": "70693dd5b4074ffe225dba658de7c0603f95c6573d037ea5bc89969425b49545"
+    },
+    "instance_lock.py": {
+      "bytes": 2464,
+      "sha256": "cad2467dddab7bd02a3ce4d4f241d6a12efda5c6f1a84b7487824abe1e9795d4"
+    },
+    "integration_engine.py": {
+      "bytes": 13031,
+      "sha256": "22d52084e288940f1c3c565c50ead17da4bd7ebc6f33f1526942baa1c6b886c6"
+    },
+    "jobs.py": {
+      "bytes": 8102,
+      "sha256": "3c4b936faa3ca9a8a1493eacb4e89309275c41fe8f57a29fb3af11cb5b1eb2d5"
+    },
+    "main.py": {
+      "bytes": 9071,
+      "sha256": "ede8219646a6396c9a52d2073d9d7ef4b3b015d24c1da53b364962a94089746c"
+    },
+    "maintenance_engine.py": {
+      "bytes": 4371,
+      "sha256": "b3d1c233d431964cb5d6eb51500e77e69cf8a1ec23ab098404ad15ce777d90f7"
+    },
+    "memory_engine.py": {
+      "bytes": 1971,
+      "sha256": "5a38d2656adc7843704007252ed695efe80b3cab8593e2f0f162e9fd5d95de66"
+    },
+    "monitor.py": {
+      "bytes": 14188,
+      "sha256": "9ffc7f422c50d979d046f5e6e4ba8feb88c8f859d313575003156a7b863857f3"
+    },
+    "network_engine.py": {
+      "bytes": 4032,
+      "sha256": "428ed62fc66806f214a940962d646c35f61625b287651876e815bd10e8d08f99"
+    },
+    "operations_engine.py": {
+      "bytes": 5446,
+      "sha256": "d494fc75d3e8a3f62ced1dc428f4999e2d2da63333651949e120ee7b54feda7b"
+    },
+    "opportunity_engine.py": {
+      "bytes": 5562,
+      "sha256": "822ce4e8d8e8bd1608386fcc03ee821da454c8dc11416ff1aa2331cb411d31a8"
+    },
+    "playbook_engine.py": {
+      "bytes": 3496,
+      "sha256": "94a34fa2e02b6a8f4b55df9c6936830487f266d4b92b6e5d158568be68b6b4d4"
+    },
+    "priority_engine.py": {
+      "bytes": 8533,
+      "sha256": "b93051ff9b68e74852403f340f603eaaaad343054227918072d5be532061b4ce"
+    },
+    "privacy_engine.py": {
+      "bytes": 2699,
+      "sha256": "485b8fb98e28b380c120c0e45b8bae3b69d58464bc7339148baec3cf5e37f3cc"
+    },
+    "query_engine.py": {
+      "bytes": 10212,
+      "sha256": "95f9500eba5039b6c08be0738c5d58226faabedafbeea9e1ac871466dfe6d1db"
+    },
+    "relationship_engine.py": {
+      "bytes": 40375,
+      "sha256": "0e1d599b7c3caf1b499a924e82c3e538e19efdad59f81733376e954ae0ebc88d"
+    },
+    "release_test_v6.py": {
+      "bytes": 10895,
+      "sha256": "368b49152da304e2a15279b0dd6e3752ccb0b12df1e03839bbedb64f677d4a89"
+    },
+    "reporting_engine.py": {
+      "bytes": 6263,
+      "sha256": "c2d1209a738160a09a25a843089cb86fafe04890b604be87784bab6d8c78433d"
+    },
+    "requirements.txt": {
+      "bytes": 106,
+      "sha256": "d82fe2fb2c247d738ab8fe67f8eb735b795e82bbd69a0a01f75a4871b791f966"
+    },
+    "risk_engine.py": {
+      "bytes": 1514,
+      "sha256": "0e66903ae55ee9f72d20ee2f6bba0c78e68533e2cd013f6ac7fa8fd9cc14021d"
+    },
+    "segment_engine.py": {
+      "bytes": 6489,
+      "sha256": "48cce5208f6178bdd94aad0c1f45a9a88bb047b5e23d46a99491da04c90295f0"
+    },
+    "session_engine.py": {
+      "bytes": 4562,
+      "sha256": "6945f0e822d4fdca383a9f9fbd53d368d11b3465172ec25af571c2fd0cd65e8a"
+    },
+    "smoke_test.py": {
+      "bytes": 13522,
+      "sha256": "7b752469198969bf885f7ecc96b40a49743f16b452deefb645c81541ccf1e5ac"
+    },
+    "startup_utils.py": {
+      "bytes": 2998,
+      "sha256": "15ae021908cf264c5ebd54b905e595970dc4a30fb978655c2e9c38e167efbedf"
+    }
+  },
+  "internal_cycle": "5.1 through 5.9 consolidated into 6.0",
+  "operations": {
+    "automatic_code_rollback_on_smoke_failure": true,
+    "optional_logon_autostart": true,
+    "single_instance_lock": true,
+    "transactional_update_snapshot": true,
+    "update_blocked_while_runtime_active": true,
+    "watchdog_script": true
+  },
+  "package_type": "dependency-closed direct-drop major update",
+  "privacy_and_safety": {
+    "automatic_contact_messages": false,
+    "credentials_included": false,
+    "critical_exception_budget_bypass": true,
+    "live_database_included": false,
+    "manual_relationship_types_overwritten": false,
+    "phone_required_with_authorised_saved_session": false,
+    "telegram_sessions_included": false
+  },
+  "product": "VM Relationship Manager",
+  "release_date": "2026-09-01",
+  "release_name": "Passive Autonomy and Operations",
+  "schema_version": "6.0.0",
+  "validation": [
+    "41 Python source files compile",
+    "86 Telegram CommandHandler targets resolve",
+    "v6 smoke suite",
+    "v6 release suite",
+    "real v5.0.2 Database-created DB -> v6.0.0 migration with data preservation",
+    "verified pre-v6 backup regression",
+    "classification calibration/quarantine",
+    "exception budget + critical bypass",
+    "dismissal cooldown + action feedback",
+    "integration contract 6.0 idempotency",
+    "operations SLO healthy-state score 100/100",
+    "single-instance lock acquisition regression",
+    "source/ZIP secret and private-artifact scans",
+    "exact-package v5.0.2 overlay simulation",
+    "root-only direct-drop ZIP validation",
+    "PowerShell structural balance checks (definitive execution remains Windows-side)"
+  ],
+  "version": "6.0.0"
+}

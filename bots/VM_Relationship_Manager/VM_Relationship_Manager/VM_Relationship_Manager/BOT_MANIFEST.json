@@ -1,0 +1,26 @@
+{
+  "schema_version": 3,
+  "name": "VM_Relationship_Manager",
+  "version": "3.0.0",
+  "status": "existing",
+  "classification": "CANONICAL",
+  "entrypoint": "main.py",
+  "entrypoint_confidence": "high",
+  "launchers": [
+    "START_VM_RELATIONSHIPS.bat",
+    "START_VM_RELATIONSHIPS.ps1"
+  ],
+  "requirements": "requirements.txt",
+  "pyproject": null,
+  "databases": [],
+  "tests": [],
+  "vm_core": {
+    "compatible": true,
+    "minimum_version": "1.4.0"
+  },
+  "lifecycle": {
+    "managed_by_vm": true,
+    "auto_start": false,
+    "auto_restart": false
+  }
+}

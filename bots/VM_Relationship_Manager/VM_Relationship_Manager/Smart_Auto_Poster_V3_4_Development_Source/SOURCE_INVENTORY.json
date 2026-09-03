@@ -1,0 +1,419 @@
+﻿{
+    "collector_version":  "1.0.0",
+    "collected_at_utc":  "2026-08-31T22:31:39.0305967+00:00",
+    "source_version":  "3.3.0",
+    "source_file_count":  80,
+    "exclusions":  [
+                       "secrets",
+                       ".env",
+                       "Telegram sessions",
+                       "databases",
+                       "logs",
+                       "media",
+                       "runtime state",
+                       "backups",
+                       "virtual environments"
+                   ],
+    "files":  [
+                  {
+                      "path":  "ACTIVATE_MAIN_PRODUCTION.ps1",
+                      "bytes":  3917,
+                      "sha256":  "1d55cd52cd2497c80c314d8cf48a3d6f6d2a81544f58b75b3b98972a412eea9e"
+                  },
+                  {
+                      "path":  "app.py",
+                      "bytes":  76,
+                      "sha256":  "457adc8f70bc5692fba5630daf59d06442bdc0ae7d1b5b0f18421b61be1ba951"
+                  },
+                  {
+                      "path":  "AUTOSTART_STATUS.ps1",
+                      "bytes":  508,
+                      "sha256":  "3117ef5f23fb2c19fda6a4905a07450ef540e1dffa9e03afcae94ddcce10548a"
+                  },
+                  {
+                      "path":  "BOT_MANIFEST.json",
+                      "bytes":  1491,
+                      "sha256":  "52d43983454d95175b0879a17ffeb547fe3e1231761b0d6ab8c563ab9f1cb3ef"
+                  },
+                  {
+                      "path":  "BUILD_REPORT.txt",
+                      "bytes":  291,
+                      "sha256":  "4c9eb40578da7bd836643251123f5bc99ef3a2809db2f6a58bb3c35ee99628a0"
+                  },
+                  {
+                      "path":  "CHANGELOG.md",
+                      "bytes":  1465,
+                      "sha256":  "b2b9bec58fa02d475186d65959d2b92dc3d3af57435a909d39917cf0cc47ddeb"
+                  },
+                  {
+                      "path":  "CONFIRM_ALBUM_CANARY.ps1",
+                      "bytes":  2349,
+                      "sha256":  "460e528d94fb8d8eba6d089c41028fcf96bc9d34733176784e5e9e9055ae63ae"
+                  },
+                  {
+                      "path":  "CONTROL_PANEL.ps1",
+                      "bytes":  18427,
+                      "sha256":  "adfa61d79710b2759cd1bd4827d174989280a854b2309ce583cb99b5733cabd4"
+                  },
+                  {
+                      "path":  "docs/LIVE_TEST_CHECKLIST.md",
+                      "bytes":  778,
+                      "sha256":  "259029919e29c90fb7090c07200dd323a2b0befc2d08cb9bc6c32f3fb27e4a94"
+                  },
+                  {
+                      "path":  "docs/OPERATIONS.md",
+                      "bytes":  1020,
+                      "sha256":  "b1d3b5fbb64e0d292be435a694b6149ad7f42ce5c25d7d77b8a95817f07469fc"
+                  },
+                  {
+                      "path":  "docs/RELEASE_3_0_CHECKLIST.md",
+                      "bytes":  978,
+                      "sha256":  "031e93ee21dd2a9140ed67ddac8b7c8caf172a1d73c9d9724c0aca1054bced5d"
+                  },
+                  {
+                      "path":  "docs/TELEGRAM_ADMIN_SETUP.md",
+                      "bytes":  1301,
+                      "sha256":  "efa3c7d85808e0817971ca87937f841ea8d95ac398659d4c3e3d03d0ed7eb113"
+                  },
+                  {
+                      "path":  "docs/UPGRADE_FROM_2.2.3.md",
+                      "bytes":  1734,
+                      "sha256":  "fb2408c19cd44e91693389bc330a693a629d20f8c4008dcb54987d2a3b531399"
+                  },
+                  {
+                      "path":  "docs/V3_PLATFORM.md",
+                      "bytes":  1942,
+                      "sha256":  "9fe0fde2c2b8bee4ab74604010c73a8269c62fc0cd9b15ad7722ac4af0842244"
+                  },
+                  {
+                      "path":  "DRIFT_REPAIR_VM_1_4_1.json",
+                      "bytes":  366,
+                      "sha256":  "acb462c62917c8d5126e63dd607b3f0590825007da61c9ce2ab9be14789eebb8"
+                  },
+                  {
+                      "path":  "GO_LIVE.ps1",
+                      "bytes":  22391,
+                      "sha256":  "13ffd80abc5f2b49c5e8b67129d85bcd3ea5824ee77817f95f9a8ea843406677"
+                  },
+                  {
+                      "path":  "INSTALL_AUTOSTART.ps1",
+                      "bytes":  2348,
+                      "sha256":  "0edef9b051a7ae36b568e96c4fc2a7a262b6d28319f9b6f40972078cb8324e6c"
+                  },
+                  {
+                      "path":  "INSTALL_MASTER_UPDATER.ps1",
+                      "bytes":  853,
+                      "sha256":  "0a7d02c42146b1f7bd9f180459daefb22a2956b28cada015f3eeb90cbb7ddb30"
+                  },
+                  {
+                      "path":  "master_updater/APPLY_UPDATE.ps1",
+                      "bytes":  14105,
+                      "sha256":  "db1438e92c76d96d71ff3a0708d21932433e792d7366805d5a229238d4710bbc"
+                  },
+                  {
+                      "path":  "master_updater/ROLLBACK_LAST_UPDATE.ps1",
+                      "bytes":  4117,
+                      "sha256":  "1f42f11a75ddd11b026d751e0b95eda936ab916e4bbde448cd6138abee9eb0d9"
+                  },
+                  {
+                      "path":  "PREPARE_ALL_ALBUM_DELIVERY.ps1",
+                      "bytes":  2132,
+                      "sha256":  "a910dee06251028a53616c5a04ede3ad2114b9f450325b479c9aeb37cfb1712f"
+                  },
+                  {
+                      "path":  "README.md",
+                      "bytes":  3237,
+                      "sha256":  "89ca42c57189f4e47eee34443caaafee3590afc78bcf7469f5f8c2e9dfb09f79"
+                  },
+                  {
+                      "path":  "RECONCILE_ALBUM_CANARY_VISUAL.ps1",
+                      "bytes":  4377,
+                      "sha256":  "d1d87655b6ecb7cd65abe2a728cf2f6090e8743ed1399ec8f16ec7eb037640cb"
+                  },
+                  {
+                      "path":  "RECOVERY_DOCTOR.ps1",
+                      "bytes":  4393,
+                      "sha256":  "69fcf2e928ccf7abb00b52b74451f2121172e666e0b064b2d42ef4789a1fa214"
+                  },
+                  {
+                      "path":  "REMOVE_AUTOSTART.ps1",
+                      "bytes":  381,
+                      "sha256":  "688cb9570a1897b399aa6e0f4dc3882149ee80b5e2a8646b5c36d9079c71a697"
+                  },
+                  {
+                      "path":  "requirements.txt",
+                      "bytes":  39,
+                      "sha256":  "241fa4014fa563814a1f1d1e1b316456627606f1f8cd660a85789344b750b466"
+                  },
+                  {
+                      "path":  "RESUME_ALBUM_CANARY.ps1",
+                      "bytes":  6468,
+                      "sha256":  "a651c8310abda7d2a28d1e3e075631ebc203bf3e0155825ea15f655e7fd3391c"
+                  },
+                  {
+                      "path":  "RUN_ALBUM_CANARY.ps1",
+                      "bytes":  3413,
+                      "sha256":  "d725869342626161ef7ace8104c713638aaf5825109ed173bfeaea4ebd3119df"
+                  },
+                  {
+                      "path":  "RUN_SERVICE.ps1",
+                      "bytes":  1065,
+                      "sha256":  "ab3d221cc49017951fedc6f59f3fb570b8b5ef70e6348b409e6301e9cc2b0366"
+                  },
+                  {
+                      "path":  "run_setup.ps1",
+                      "bytes":  2912,
+                      "sha256":  "03990b9b4a25fa0ed8924f4d953064a99044b806447c53b048c90d23569cba82"
+                  },
+                  {
+                      "path":  "SELF_TEST.md",
+                      "bytes":  582,
+                      "sha256":  "7a779fbcba659feb9ef7fabba36230f2ac007ce55d882d646dcf5a9aa317eeff"
+                  },
+                  {
+                      "path":  "SETUP_MAIN_PRODUCTION.ps1",
+                      "bytes":  2844,
+                      "sha256":  "496ceda79c63f72f48e4f72ae5a5c57b2b420b6c28ef92fc5b0acf98eb1e0e21"
+                  },
+                  {
+                      "path":  "smart_autoposter/__init__.py",
+                      "bytes":  22,
+                      "sha256":  "30f49b9094bff904a42caeec32515715fe625a56dc48bd7c0e3d9988c0ad4bd7"
+                  },
+                  {
+                      "path":  "smart_autoposter/account_guard.py",
+                      "bytes":  1196,
+                      "sha256":  "12facf89bc3f09cd0c2176e8279982414d7dd50ff44531fe84745bff9096d02c"
+                  },
+                  {
+                      "path":  "smart_autoposter/admin_bot.py",
+                      "bytes":  41650,
+                      "sha256":  "689745b41666c285977968d53af3e0361a70266fcd6c35088c034b376175f20f"
+                  },
+                  {
+                      "path":  "smart_autoposter/analytics.py",
+                      "bytes":  4531,
+                      "sha256":  "726f50f8519d1c59ad304e64c0514232351196cdd0e1d75601a19c72b2af48a5"
+                  },
+                  {
+                      "path":  "smart_autoposter/cli.py",
+                      "bytes":  76530,
+                      "sha256":  "18cefd1614e334d0f07cc51bc32434a4cd709927abe75e8665c2bbdc73485300"
+                  },
+                  {
+                      "path":  "smart_autoposter/collections.py",
+                      "bytes":  5977,
+                      "sha256":  "d94138aa0bc6669c2d327bef2c66f406fd01750cbdbe3c75f4c452973b5bcbe7"
+                  },
+                  {
+                      "path":  "smart_autoposter/content_library.py",
+                      "bytes":  9542,
+                      "sha256":  "43fe38ad4d6173ef1139d33c8f734fbd27c6830e52e914c5a5ed24416027ccf5"
+                  },
+                  {
+                      "path":  "smart_autoposter/core.py",
+                      "bytes":  34436,
+                      "sha256":  "d66de5a1bf048cb1d7107d58aee5fc0b0bd34ba6ce3b258a87d1a77e2520cb22"
+                  },
+                  {
+                      "path":  "smart_autoposter/db.py",
+                      "bytes":  16238,
+                      "sha256":  "8937d020d0e96ed2311440e905b4316343722fcf5b53e3df386f0cf916fc1d8b"
+                  },
+                  {
+                      "path":  "smart_autoposter/destination_sync.py",
+                      "bytes":  4301,
+                      "sha256":  "4815eca327282f679466ad33f35555674cdf931d988ed0edc55fcf1b5081743b"
+                  },
+                  {
+                      "path":  "smart_autoposter/importer.py",
+                      "bytes":  2623,
+                      "sha256":  "db80db9e15de82021d77eaa3da4a51f6ed3e4e5e2700f0038cfd269cafa8629a"
+                  },
+                  {
+                      "path":  "smart_autoposter/maintenance.py",
+                      "bytes":  8085,
+                      "sha256":  "0ed506d8d16d3e0b765febc342776babe6ea8544339e2eb3906a86d46f353479"
+                  },
+                  {
+                      "path":  "smart_autoposter/media_cache.py",
+                      "bytes":  3144,
+                      "sha256":  "a95f4b084e6aa18e1167dc2b678586e4628cea355c0130b9159f023f2f7f0c8e"
+                  },
+                  {
+                      "path":  "smart_autoposter/notifications.py",
+                      "bytes":  5086,
+                      "sha256":  "70d6b7d8e6397e5609049d332186e744c6abbeafe73fbe5142b8f7f989cf4b6a"
+                  },
+                  {
+                      "path":  "smart_autoposter/operations.py",
+                      "bytes":  20612,
+                      "sha256":  "63fa39cc307caf66a2bc1c462f6bfbf9945bf12f43860593100f07297bebec07"
+                  },
+                  {
+                      "path":  "smart_autoposter/production.py",
+                      "bytes":  24905,
+                      "sha256":  "4bbe00ae52ddfa9a6cc4c24eae9d6686c6bd5194fc1b11bfe3656e71c629ecee"
+                  },
+                  {
+                      "path":  "smart_autoposter/recommendations.py",
+                      "bytes":  10006,
+                      "sha256":  "925d80f048defa4e0c80b403ca4f82099f00331487866f5aef165b49a41eb9b9"
+                  },
+                  {
+                      "path":  "smart_autoposter/redaction.py",
+                      "bytes":  640,
+                      "sha256":  "ddf47659685335882310fe17f733a190dbf3113bc10deaa8eeed103b53e267b4"
+                  },
+                  {
+                      "path":  "smart_autoposter/reports.py",
+                      "bytes":  1876,
+                      "sha256":  "8800c2bf0c8071b3fe3869681434b1a0d9529432394256c4cec6401e886dbdad"
+                  },
+                  {
+                      "path":  "smart_autoposter/rules.py",
+                      "bytes":  8802,
+                      "sha256":  "95c867f68b91501959818895261568685c8d7ec58aeca406d869b4fa87c150e1"
+                  },
+                  {
+                      "path":  "smart_autoposter/runtime_lock.py",
+                      "bytes":  6866,
+                      "sha256":  "62a0ef7f554b725df7641518376e5e7e79064b0b8e4b8fe3de40b0a5910dc605"
+                  },
+                  {
+                      "path":  "smart_autoposter/safety.py",
+                      "bytes":  4826,
+                      "sha256":  "a23b601de0474a0a237b6955591034772311ae36823d153b30e4370e25de5636"
+                  },
+                  {
+                      "path":  "smart_autoposter/scheduler.py",
+                      "bytes":  16657,
+                      "sha256":  "178f0c693261e651be0a41082d9690e1a81119010304c8daeb1f88bedfaad18f"
+                  },
+                  {
+                      "path":  "smart_autoposter/service.py",
+                      "bytes":  19619,
+                      "sha256":  "e1c6846ba96c142a4bb91d50236cd003729642eb5219608d216cc69b596093e6"
+                  },
+                  {
+                      "path":  "smart_autoposter/settings.py",
+                      "bytes":  9240,
+                      "sha256":  "b6f6711028a73a543791a014f3ede719c99214f93b2a3abc15dbcc4dbd8d75bc"
+                  },
+                  {
+                      "path":  "smart_autoposter/telegram_io.py",
+                      "bytes":  6949,
+                      "sha256":  "c897d21f6d44f08ee01ca31657e612cf724100d43cdec9ce385ab1f245b5b0ab"
+                  },
+                  {
+                      "path":  "smart_autoposter/templates.py",
+                      "bytes":  2081,
+                      "sha256":  "da19cf4533d3f2f5b7ae994a8b7e2d3f105831a63ada7f4c53fb3e5354afcccc"
+                  },
+                  {
+                      "path":  "smart_autoposter/time_rules.py",
+                      "bytes":  1471,
+                      "sha256":  "a2a6f6ecafcdb4047590ad7133b8815c13d7ad8bb0c55194a1d5ebd9da6cfb8f"
+                  },
+                  {
+                      "path":  "smart_autoposter/watchdog.py",
+                      "bytes":  2719,
+                      "sha256":  "c1a40a3980eef7361ff7dcbc9ad4629f4429864d715e21d894a7df965958301b"
+                  },
+                  {
+                      "path":  "smart_autoposter/wizard.py",
+                      "bytes":  10384,
+                      "sha256":  "8ecbe4b1013904ec18597fbaa8c2ce9eab750da24ddbbf3d07012c70920119db"
+                  },
+                  {
+                      "path":  "smart_autoposter/worker.py",
+                      "bytes":  17737,
+                      "sha256":  "87dbd6f904de9ed3261074ec7169988bc25431e06401577baf777f9f0b51daf5"
+                  },
+                  {
+                      "path":  "START_AUTO_POSTER.ps1",
+                      "bytes":  128,
+                      "sha256":  "01d663e580ba6c1b4a7726fe17121145698f9d000b3788ab33fad3b1aca38db8"
+                  },
+                  {
+                      "path":  "tests/test_account_guard.py",
+                      "bytes":  1280,
+                      "sha256":  "3f1474d8bc76f7979d21a99461a87fcfb1ddfa326bfc9f56ddc9dc0194ce4cfb"
+                  },
+                  {
+                      "path":  "tests/test_admin_credentials.py",
+                      "bytes":  9675,
+                      "sha256":  "9f5aa91a3891829d8da8d95d839e4478d2c459e1425935313bd8b895d7ba4a9f"
+                  },
+                  {
+                      "path":  "tests/test_core.py",
+                      "bytes":  5040,
+                      "sha256":  "71da5b212aa63c085686bdd8d413a9e975443a51ad58612846a5819e93ff3065"
+                  },
+                  {
+                      "path":  "tests/test_destination_sync.py",
+                      "bytes":  1895,
+                      "sha256":  "df3f09295da17ab676c530f007d4c92322b9b7da81439ba3d11a4fc8dc4ddbc6"
+                  },
+                  {
+                      "path":  "tests/test_login_account.py",
+                      "bytes":  2335,
+                      "sha256":  "bd881cf07a02253906e87cbecb2c3c68630fef3ac20726ff2909b9c68f1ddf45"
+                  },
+                  {
+                      "path":  "tests/test_migration.py",
+                      "bytes":  5482,
+                      "sha256":  "6c167dd5ab8b09b28166bb74ab27a99984f9407c63d1072b6bbdd8c92d62147e"
+                  },
+                  {
+                      "path":  "tests/test_safety_runtime.py",
+                      "bytes":  4022,
+                      "sha256":  "b34d4fdbc9d93c764e8f6fcef7f54119ab9d06c74d6f78efae04bbbf1a79e080"
+                  },
+                  {
+                      "path":  "tests/test_v23_production.py",
+                      "bytes":  6649,
+                      "sha256":  "8e19697b77cc56df1db9984192a291a3cb99288af4d839d535a0f7c5783652fd"
+                  },
+                  {
+                      "path":  "tests/test_v24_autonomous.py",
+                      "bytes":  17276,
+                      "sha256":  "5090772b4d022fd098ec17780b065c065e5f1142914d1165f23c86b14fa38c5b"
+                  },
+                  {
+                      "path":  "tests/test_v24_recovery.py",
+                      "bytes":  7545,
+                      "sha256":  "3a68866d8bf1e0b3b2c19f1e746360ca7891e573e58019b744867b0bc3629e25"
+                  },
+                  {
+                      "path":  "tests/test_v30_platform.py",
+                      "bytes":  28841,
+                      "sha256":  "78ab5bf56b21b89fb15747dd7706779ec46b51cbbea43ccadd32c7c1928fe8dc"
+                  },
+                  {
+                      "path":  "tests/test_v305_production.py",
+                      "bytes":  18987,
+                      "sha256":  "6f58c8d800c2709bbed85c64a359fdefb69839a2d8f4784106a0d1d7fae04a72"
+                  },
+                  {
+                      "path":  "tests/test_v320_go_live.py",
+                      "bytes":  14024,
+                      "sha256":  "df058c27972159fa27a25dba3b110b5469f2e0f8a9bf133736b6965688ce0b17"
+                  },
+                  {
+                      "path":  "tests/test_v330_fast_pass.py",
+                      "bytes":  6721,
+                      "sha256":  "6baddcf4f4012b588e51a60f8673869d51d5cf824160a846d3b2e9e15901c1df"
+                  },
+                  {
+                      "path":  "tests/test_worker_logic.py",
+                      "bytes":  14544,
+                      "sha256":  "36a7e9f9f0ef4e1bd9127ed97916ac821faa68a56ced9debe79164327e825921"
+                  },
+                  {
+                      "path":  "VERSION.txt",
+                      "bytes":  6,
+                      "sha256":  "5eee6c0c5c6901f5e523f0a434bca4106e1ff7136deb451f982b0bb1a7b13716"
+                  }
+              ]
+}

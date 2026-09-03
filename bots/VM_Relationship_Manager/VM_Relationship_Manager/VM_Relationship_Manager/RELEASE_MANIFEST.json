@@ -1,0 +1,167 @@
+{
+  "files": {
+    "CHANGELOG.md": {
+      "bytes": 4932,
+      "sha256": "6e1f79f1b47a60cf67ddcc8e260409ffb86cf41eafcd37fcf5378d92c8362539"
+    },
+    "README.md": {
+      "bytes": 4099,
+      "sha256": "32b3977d1ca535ff4b2e5b90a5b3ebcca07615c755db20f7b16a21156f5b1d9e"
+    },
+    "UPGRADE_TO_4.0.md": {
+      "bytes": 1298,
+      "sha256": "fbf56dee9c1fca3dc6b1c9f2b818bf9021d8dd33b6963050e3a9a439e6369683"
+    },
+    "VERSION.txt": {
+      "bytes": 57,
+      "sha256": "72cfbce0bfd21e66f2a00c0cfdeb414395dfe2bae84838a1f67ad4858d0e720b"
+    },
+    "VM_RM_LOCAL_DOCTOR.py": {
+      "bytes": 2726,
+      "sha256": "9edc5bcce379f8d89f37c846f3597e7395edb9d61ecc1c92c67b6b1edbf0137b"
+    },
+    "admin_bot.py": {
+      "bytes": 128722,
+      "sha256": "51e70d964a6a9578f55be4ce0f265e1a5255bde9fb53f7cf512e630b4dfdf3fe"
+    },
+    "automation_engine.py": {
+      "bytes": 8593,
+      "sha256": "d930aa2cac1c00c036b991201c23ba0c6ca00239fe5bac8b319a82818ff30add"
+    },
+    "backup_manager.py": {
+      "bytes": 2669,
+      "sha256": "da7cc1ae6d840434d1b4ca3c8a1494d96aea08c051b8a03b539954d7af5f6873"
+    },
+    "behavior_engine.py": {
+      "bytes": 7056,
+      "sha256": "c4bffdd0ff94aa93be192123ae03004acf99bc49d917e5e6b38a59554853e279"
+    },
+    "briefing_engine.py": {
+      "bytes": 2225,
+      "sha256": "878d942e223d3eb2b445adecd761f634f99d3959d647125c192dbeb18b6debd8"
+    },
+    "config.py": {
+      "bytes": 2779,
+      "sha256": "dfdb7ad718792372663f5cc51f32d3b6e73d4910764c8b63cdf7bdc0030b41ef"
+    },
+    "data_quality_engine.py": {
+      "bytes": 4012,
+      "sha256": "9be9bebcc418e776ef6ff48aaf4212cf21268b3a232e65d80d1356704ca931a8"
+    },
+    "database.py": {
+      "bytes": 19358,
+      "sha256": "fd59d007200096404ab934e20581b16296e0e8abc620f5c75c556eebce2e318b"
+    },
+    "forecast_engine.py": {
+      "bytes": 5742,
+      "sha256": "2c7b87caffcb7ef23e40d3ce33f1a755baea06bc518560df413ae91c070d4ccf"
+    },
+    "goal_engine.py": {
+      "bytes": 5932,
+      "sha256": "c0d7ecf8fd9b220942b1b60300fdd9fb87457a716162886bc69c7bcf12cce767"
+    },
+    "group_engine.py": {
+      "bytes": 4613,
+      "sha256": "70693dd5b4074ffe225dba658de7c0603f95c6573d037ea5bc89969425b49545"
+    },
+    "integration_engine.py": {
+      "bytes": 9034,
+      "sha256": "873eef4442b1a94d6ad9a74cb3e410e28b8516a3ebf56b13579534aa8e09e6f5"
+    },
+    "jobs.py": {
+      "bytes": 6290,
+      "sha256": "d4688a98e9f862d2491294bced90abe7db8556baa9b58ff8253ca433c5d75010"
+    },
+    "main.py": {
+      "bytes": 7419,
+      "sha256": "34d0e3c57a56e29286541cf2c581fe568a02a572e42cd596eac0c190eab26453"
+    },
+    "memory_engine.py": {
+      "bytes": 1971,
+      "sha256": "5a38d2656adc7843704007252ed695efe80b3cab8593e2f0f162e9fd5d95de66"
+    },
+    "monitor.py": {
+      "bytes": 13653,
+      "sha256": "e8d98122869b906520bd792ef6d583d3117e2b1d6a058ae19bb57495043a3dfe"
+    },
+    "network_engine.py": {
+      "bytes": 4032,
+      "sha256": "428ed62fc66806f214a940962d646c35f61625b287651876e815bd10e8d08f99"
+    },
+    "opportunity_engine.py": {
+      "bytes": 5562,
+      "sha256": "822ce4e8d8e8bd1608386fcc03ee821da454c8dc11416ff1aa2331cb411d31a8"
+    },
+    "playbook_engine.py": {
+      "bytes": 3496,
+      "sha256": "94a34fa2e02b6a8f4b55df9c6936830487f266d4b92b6e5d158568be68b6b4d4"
+    },
+    "priority_engine.py": {
+      "bytes": 8533,
+      "sha256": "b93051ff9b68e74852403f340f603eaaaad343054227918072d5be532061b4ce"
+    },
+    "privacy_engine.py": {
+      "bytes": 2699,
+      "sha256": "485b8fb98e28b380c120c0e45b8bae3b69d58464bc7339148baec3cf5e37f3cc"
+    },
+    "query_engine.py": {
+      "bytes": 8028,
+      "sha256": "07de637a9524c7b8a06aa8115fde4a200ad6287077b604d88e4f59a724fd21e8"
+    },
+    "relationship_engine.py": {
+      "bytes": 39372,
+      "sha256": "14692445c6016d39e6d8788356066a1c3e2f07962a0bcff8498bd341cb62e545"
+    },
+    "reporting_engine.py": {
+      "bytes": 3782,
+      "sha256": "970d949d3242b11b186fa959c539087ae6c5ff919bb13f4b29ea1f623dc29e22"
+    },
+    "risk_engine.py": {
+      "bytes": 1514,
+      "sha256": "0e66903ae55ee9f72d20ee2f6bba0c78e68533e2cd013f6ac7fa8fd9cc14021d"
+    },
+    "segment_engine.py": {
+      "bytes": 5860,
+      "sha256": "10a712968570f34e1783473ab8acf45724b6d4721206f5c418477b003412bc7b"
+    },
+    "session_engine.py": {
+      "bytes": 4562,
+      "sha256": "6945f0e822d4fdca383a9f9fbd53d368d11b3465172ec25af571c2fd0cd65e8a"
+    },
+    "smoke_test.py": {
+      "bytes": 6448,
+      "sha256": "402e15e80e05c0c93424a179d6d697eb6823b67dfba177c2a9a91ba9dc6331a9"
+    },
+    "startup_utils.py": {
+      "bytes": 2905,
+      "sha256": "30c30d2db10bd73d9178670df3e33ca8ce0a9ce920fbc4b141aa9deff1ea8a0a"
+    }
+  },
+  "package_type": "dependency-closed direct-drop major update",
+  "preserves": [
+    ".env",
+    "BotFather/API credentials",
+    "runtime/Telethon session files",
+    "shared live database/history"
+  ],
+  "product": "VM Relationship Manager",
+  "release_date": "2026-09-01",
+  "schema_version": "4.0.0",
+  "validation": [
+    "production module compile pass",
+    "75 Telegram command handler targets statically verified",
+    "v4 startup smoke test",
+    "v3 -> v4 migration",
+    "v2-era -> v4 migration",
+    "scheduler/maintenance cycle",
+    "pre-v4 SQLite safety backup + live-source hash freshness",
+    "admin rendering logic",
+    "goals/priority/attention integration",
+    "sessions/outlook/data-confidence/segments",
+    "private-chat vs group/network isolation",
+    "privacy-safe contact export",
+    "secret scan",
+    "direct-drop package smoke simulation"
+  ],
+  "version": "4.0.0"
+}

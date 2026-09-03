@@ -1,0 +1,7 @@
+Smart Auto Poster V3.3.0 Fast Pass
+- clean pending destinations first
+- zero production spread
+- 3-second default post-success pacing
+- 45-second ambiguous-send timeout -> UNCERTAIN / no blind retry
+- 4-hour production cadence retained
+- full regression suite: 170 tests passing in worktree
