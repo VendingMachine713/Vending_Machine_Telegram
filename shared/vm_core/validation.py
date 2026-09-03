@@ -1,6 +1,7 @@
 from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
+from . import __version__
 import json
 import subprocess
 import sys
@@ -76,7 +77,7 @@ def run_full_validation(root: Path | None = None, *, backup_first: bool = True) 
 
     summary = {
         "schema_version": 1,
-        "vm_core_version": "1.2.0",
+        "vm_core_version":__version__,
         "started_at_utc": started,
         "completed_at_utc": datetime.now(timezone.utc).isoformat(),
         "backup": backup_path,
