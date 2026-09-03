@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import io
 import json
-import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from shared.vm_core.recovery import classify_service, format_recovery_plan, recovery_plan
+from shared.vm_core.recovery import classify_service, execute_recovery_plan, format_recovery_plan, recovery_plan
 from shared.vm_core.recovery_cli import main as recovery_cli
 
 
@@ -69,6 +68,35 @@ class RecoveryIntelligenceTests(unittest.TestCase):
         self.assertEqual(plan["summary"]["automatic_candidates"], 1)
         self.assertFalse(plan["safety"]["mutations_performed"])
         self.assertFalse(plan["safety"]["uncertain_delivery_auto_retry"])
+
+    @patch("shared.vm_core.recovery.restart_service")
+    def test_executor_is_dry_run_by_default_and_caps_actions(self, restart):
+        restart.return_value = {"ok": True, "dry_run": True}
+        plan = {
+            "decisions": [
+                {"service": "A", "classification": "SAFE_RECOVERY", "action": "RESTART_SERVICE", "automatic": True},
+                {"service": "B", "classification": "SAFE_RECOVERY", "action": "RESTART_SERVICE", "automatic": True},
+            ]
+        }
+        result = execute_recovery_plan(plan, Path("/tmp/project"))
+        self.assertEqual(result["mode"], "DRY_RUN")
+        self.assertEqual(result["candidate_count"], 1)
+        restart.assert_called_once_with("A", Path("/tmp/project"), dry_run=True)
+        self.assertFalse(result["safety"]["queue_or_delivery_retry_performed"])
+
+    @patch("shared.vm_core.recovery.restart_service")
+    @patch("shared.vm_core.recovery.start_service")
+    def test_executor_never_runs_blocked_or_review_actions(self, start, restart):
+        plan = {
+            "decisions": [
+                {"service": "A", "classification": "BLOCKED", "action": "RESTART_SERVICE", "automatic": True},
+                {"service": "B", "classification": "REVIEW", "action": "START_SERVICE", "automatic": True},
+            ]
+        }
+        result = execute_recovery_plan(plan, Path("/tmp/project"), apply=True, max_actions=5)
+        self.assertEqual(result["candidate_count"], 0)
+        start.assert_not_called()
+        restart.assert_not_called()
 
     def test_formatter_exposes_safety_boundary(self):
         text = format_recovery_plan({
