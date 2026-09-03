@@ -6,7 +6,7 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from shared.vm_core.recovery import classify_service, execute_recovery_plan, format_recovery_plan, recovery_plan
 from shared.vm_core.recovery_cli import main as recovery_cli
@@ -83,6 +83,33 @@ class RecoveryIntelligenceTests(unittest.TestCase):
         self.assertEqual(result["candidate_count"], 1)
         restart.assert_called_once_with("A", Path("/tmp/project"), dry_run=True)
         self.assertFalse(result["safety"]["queue_or_delivery_retry_performed"])
+        self.assertEqual(result["verification_failures"], 0)
+
+    @patch("shared.vm_core.recovery.verify_service_recovered")
+    @patch("shared.vm_core.recovery.restart_service")
+    def test_apply_mode_verifies_recovery_and_records_success(self, restart, verify):
+        restart.return_value = {"ok": True}
+        verify.return_value = {"verified": True, "process_alive": True, "runtime_status": "RUNNING"}
+        history = MagicMock()
+        history.status.return_value = {"limited": False, "cooling_down": False}
+        plan = {"decisions": [{"service": "A", "classification": "SAFE_RECOVERY", "action": "RESTART_SERVICE", "automatic": True}]}
+        result = execute_recovery_plan(plan, Path("/tmp/project"), apply=True, history=history)
+        self.assertFalse(result["operator_escalation_required"])
+        self.assertTrue(result["actions"][0]["verification"]["verified"])
+        history.record_attempt.assert_called_once_with("A", action="RESTART_SERVICE", success=True)
+
+    @patch("shared.vm_core.recovery.verify_service_recovered")
+    @patch("shared.vm_core.recovery.restart_service")
+    def test_failed_verification_requires_operator_escalation(self, restart, verify):
+        restart.return_value = {"ok": True}
+        verify.return_value = {"verified": False, "process_alive": False, "runtime_status": "STOPPED"}
+        history = MagicMock()
+        history.status.return_value = {"limited": False, "cooling_down": False}
+        plan = {"decisions": [{"service": "A", "classification": "SAFE_RECOVERY", "action": "RESTART_SERVICE", "automatic": True}]}
+        result = execute_recovery_plan(plan, Path("/tmp/project"), apply=True, history=history)
+        self.assertEqual(result["verification_failures"], 1)
+        self.assertTrue(result["operator_escalation_required"])
+        history.record_attempt.assert_called_once_with("A", action="RESTART_SERVICE", success=False)
 
     @patch("shared.vm_core.recovery.restart_service")
     @patch("shared.vm_core.recovery.start_service")
