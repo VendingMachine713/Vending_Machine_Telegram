@@ -7,7 +7,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from shared.vm_core.autoposter_recovery import smart_auto_poster_recovery_gate
+from shared.vm_core.autoposter_recovery import (
+    smart_auto_poster_reconciliation_preview,
+    smart_auto_poster_recovery_gate,
+)
 from shared.vm_core.recovery import recovery_plan
 
 
@@ -21,11 +24,20 @@ class AutoPosterRecoveryGateTests(unittest.TestCase):
         con = sqlite3.connect(db)
         con.executescript(
             """
-            CREATE TABLE queue(id INTEGER PRIMARY KEY,status TEXT NOT NULL);
+            CREATE TABLE queue(
+                id INTEGER PRIMARY KEY,
+                status TEXT NOT NULL,
+                telegram_message_ids TEXT,
+                error_kind TEXT
+            );
             CREATE TABLE delivery_attempts(
                 id INTEGER PRIMARY KEY,
                 queue_job_id INTEGER NOT NULL,
-                outcome TEXT NOT NULL
+                attempt_no INTEGER NOT NULL DEFAULT 1,
+                outcome TEXT NOT NULL,
+                telegram_message_ids TEXT,
+                acknowledged_at TEXT,
+                finished_at TEXT
             );
             """
         )
@@ -62,12 +74,61 @@ class AutoPosterRecoveryGateTests(unittest.TestCase):
         try:
             con = sqlite3.connect(db)
             con.execute("INSERT INTO queue(id,status) VALUES(1,'sending')")
-            con.execute("INSERT INTO delivery_attempts(id,queue_job_id,outcome) VALUES(1,1,'acknowledged')")
+            con.execute(
+                "INSERT INTO delivery_attempts(id,queue_job_id,outcome,acknowledged_at) VALUES(1,1,'acknowledged','2026-09-03T00:00:00+00:00')"
+            )
             con.commit(); con.close()
             gate = smart_auto_poster_recovery_gate(root)
             self.assertFalse(gate["safe"])
             self.assertEqual(gate["metrics"]["acknowledged_open_attempts"], 1)
             self.assertIn("acknowledged", gate["reason"].lower())
+        finally:
+            tmp.cleanup()
+
+    def test_reconciliation_preview_identifies_confirm_sent_candidate_without_mutating(self):
+        tmp, root, db = self._root_with_db()
+        try:
+            con = sqlite3.connect(db)
+            con.execute(
+                "INSERT INTO queue(id,status,telegram_message_ids,error_kind) VALUES(1,'uncertain','[777]','post_send_persistence')"
+            )
+            con.execute(
+                """INSERT INTO delivery_attempts(
+                       id,queue_job_id,attempt_no,outcome,telegram_message_ids,acknowledged_at
+                   ) VALUES(1,1,1,'acknowledged','[777]','2026-09-03T00:00:00+00:00')"""
+            )
+            con.commit(); con.close()
+
+            preview = smart_auto_poster_reconciliation_preview(root)
+            self.assertTrue(preview["available"])
+            self.assertEqual(preview["summary"]["CONFIRM_SENT_CANDIDATE"], 1)
+            self.assertEqual(preview["items"][0]["classification"], "CONFIRM_SENT_CANDIDATE")
+            self.assertFalse(preview["mutations_performed"])
+
+            con = sqlite3.connect(db)
+            status = con.execute("SELECT status FROM queue WHERE id=1").fetchone()[0]
+            outcome = con.execute("SELECT outcome FROM delivery_attempts WHERE id=1").fetchone()[0]
+            con.close()
+            self.assertEqual(status, "uncertain")
+            self.assertEqual(outcome, "acknowledged")
+        finally:
+            tmp.cleanup()
+
+    def test_reconciliation_preview_keeps_ambiguous_interruption_manual(self):
+        tmp, root, db = self._root_with_db()
+        try:
+            con = sqlite3.connect(db)
+            con.execute(
+                "INSERT INTO queue(id,status,error_kind) VALUES(1,'uncertain','interrupted_send')"
+            )
+            con.execute(
+                "INSERT INTO delivery_attempts(id,queue_job_id,attempt_no,outcome) VALUES(1,1,1,'started')"
+            )
+            con.commit(); con.close()
+            preview = smart_auto_poster_reconciliation_preview(root)
+            self.assertEqual(preview["summary"]["MANUAL_REVIEW"], 1)
+            self.assertEqual(preview["items"][0]["classification"], "MANUAL_REVIEW")
+            self.assertFalse(preview["items"][0]["telegram_ack_evidence"])
         finally:
             tmp.cleanup()
 
