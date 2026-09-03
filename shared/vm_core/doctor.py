@@ -15,6 +15,7 @@ from .paths import project_root
 from .manifests import discover_bots
 from .db import PlatformDB
 from .runtime_requirements import runtime_configuration_status
+from .foundation import foundation_report
 
 @dataclass
 class Check:
@@ -42,6 +43,15 @@ def run_doctor(root: Path | None = None) -> dict[str, Any]:
     free = shutil.disk_usage(root).free/(1024**3)
     checks.append(Check("runtime","disk_free","PASS" if free >= 2 else "WARN",f"{free:.1f} GiB free"))
     checks.append(Check("runtime","root_write_access","PASS" if os.access(root,os.W_OK) else "WARN","writable" if os.access(root,os.W_OK) else "not writable"))
+
+    foundation = foundation_report(root)
+    foundation_status = "PASS" if foundation["status"] == "PASS" else ("WARN" if foundation["status"] == "WARN" else "FAIL")
+    checks.append(Check(
+        "platform",
+        "foundation_contract",
+        foundation_status,
+        f"contract v{foundation['contract_version']} | errors={foundation['summary']['ERROR']} warnings={foundation['summary']['WARN']}",
+    ))
 
     for pkg in ("telethon","telegram","dotenv","tzdata"):
         found = importlib.util.find_spec(pkg) is not None
