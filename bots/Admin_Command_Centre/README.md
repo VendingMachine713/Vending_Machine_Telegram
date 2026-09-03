@@ -16,7 +16,9 @@ Read-only platform command:
 
 - `/progress` - render every registered Universal Progress Engine surface in one operator view.
 
-The provider registry is intentionally extensible. Smart Auto Poster is the first provider; additional bots can be added without changing the progress rendering contract used by terminal and Telegram admin surfaces.
+Registered surfaces now include Smart Auto Poster and VM Guard. The provider registry is intentionally extensible, so additional bots can be added without changing the progress rendering contract used by terminal and Telegram admin surfaces.
+
+VM Guard is a continuous service rather than a finite campaign. Its progress bar therefore represents operational readiness, while metrics expose monitor-only versus active-moderation mode, risk threshold and recent Guard events.
 
 ## Smart Auto Poster controls
 
@@ -44,19 +46,18 @@ python -m shared.vm_core.progress_cli
 python -m shared.vm_core.progress_cli all --json
 ```
 
-Render Smart Auto Poster only:
+Render one provider only:
 
 ```powershell
 python -m shared.vm_core.progress_cli autoposter
-python -m shared.vm_core.progress_cli autoposter --json
+python -m shared.vm_core.progress_cli guard
+python -m shared.vm_core.progress_cli guard --json
 ```
 
-The progress surfaces never send posts, change queue rows, retry uncertain deliveries, or modify campaign/schedule state.
+The progress surfaces never send posts, change queue rows, retry uncertain deliveries, change Guard moderation mode, or modify campaign/schedule state.
 
 ## Architecture boundary
 
 `Admin_Command_Centre` owns Telegram administration and authentication.
 
-`Smart_Auto_Poster_V2` owns posting, scheduling, queueing, recovery, safety and its own data.
-
-Cross-bot operations use `shared/vm_core` service interfaces. Admin Command Centre does not import Smart Auto Poster internal modules. The Universal Progress Engine reads explicit bot-owned state through shared read-only providers and renders one stable contract for terminal and Telegram admin surfaces.
+Each bot continues to own its operational behaviour and bot-specific data. Cross-bot operations use `shared/vm_core` interfaces. The Universal Progress Engine reads explicit bot/platform evidence through shared read-only providers and renders one stable contract for terminal and Telegram admin surfaces.
