@@ -103,6 +103,39 @@ def smart_auto_poster_reconciliation_preview(root: Path | None = None, limit: in
         con.close()
 
 
+def format_smart_auto_poster_reconciliation_preview(preview: dict[str, Any]) -> str:
+    if not preview.get("available"):
+        return (
+            "SMART AUTO POSTER - RECOVERY PREVIEW\n"
+            "Status: UNAVAILABLE\n"
+            f"Database: {preview.get('database_path', '-')}\n"
+            f"Reason: {preview.get('error') or 'delivery evidence could not be read safely'}"
+        )
+    summary = preview.get("summary") or {}
+    lines = [
+        "SMART AUTO POSTER - RECOVERY PREVIEW",
+        "Mode: READ ONLY / NO RESEND",
+        (
+            f"Unresolved: {summary.get('total', 0)} | "
+            f"Confirm-sent candidates: {summary.get('CONFIRM_SENT_CANDIDATE', 0)} | "
+            f"Manual review: {summary.get('MANUAL_REVIEW', 0)}"
+        ),
+        "",
+    ]
+    for item in preview.get("items") or []:
+        marker = "EVIDENCE" if item.get("classification") == "CONFIRM_SENT_CANDIDATE" else "REVIEW"
+        lines.append(
+            f"#{item.get('queue_job_id')} {marker} {item.get('status','unknown').upper()} "
+            f"[{item.get('classification')}]"
+        )
+        lines.append(f"  {item.get('reason','')}")
+    lines.extend([
+        "",
+        "Safety: this view never changes queue state and never sends or retries Telegram messages.",
+    ])
+    return "\n".join(lines)
+
+
 def smart_auto_poster_recovery_gate(root: Path | None = None) -> dict[str, Any]:
     """Return read-only evidence describing whether lifecycle restart is safe.
 
