@@ -46,6 +46,23 @@ class RecoveryIntelligenceTests(unittest.TestCase):
         self.assertFalse(d.automatic)
         self.assertTrue(d.requires_operator)
 
+    @patch("shared.vm_core.recovery.runtime_configuration_status")
+    @patch("shared.vm_core.recovery._manifest_policy")
+    @patch("shared.vm_core.recovery.discover_bots")
+    @patch("shared.vm_core.recovery.service_status")
+    def test_missing_required_configuration_blocks_auto_start(self, status, discover, policy, runtime):
+        status.return_value = [{"name": "A", "process_alive": False, "runtime_status": "STOPPED"}]
+        discover.return_value = [SimpleNamespace(folder="A", classification="CANONICAL", path="/tmp/A")]
+        policy.return_value = {"auto_start": True, "auto_restart": True}
+        runtime.return_value = {"configured": False, "missing_env_names": ["BOT_TOKEN"]}
+        plan = recovery_plan(Path("/tmp/project"))
+        decision = plan["decisions"][0]
+        self.assertEqual(decision["classification"], "BLOCKED")
+        self.assertEqual(decision["action"], "CONFIGURE")
+        self.assertIn("BOT_TOKEN", decision["reason"])
+        self.assertEqual(plan["summary"]["automatic_candidates"], 0)
+        self.assertFalse(plan["safety"]["missing_configuration_auto_start"])
+
     @patch("shared.vm_core.recovery._manifest_policy")
     @patch("shared.vm_core.recovery.discover_bots")
     @patch("shared.vm_core.recovery.service_status")
