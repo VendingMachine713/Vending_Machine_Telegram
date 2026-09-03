@@ -28,6 +28,16 @@ class ProgressCliTests(unittest.TestCase):
             self.assertIn("Queue unavailable", text)
             self.assertIn("RECOVERY / NEXT ACTION", text)
 
+    def test_guard_surface_dispatches_through_registry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = io.StringIO()
+            with redirect_stdout(output):
+                rc = main(["guard", "--root", tmp])
+            self.assertEqual(rc, 0)
+            text = output.getvalue()
+            self.assertIn("VM GUARD", text)
+            self.assertIn("Protection readiness", text)
+
     def test_default_all_mode_renders_platform_header_and_registered_surfaces(self):
         with tempfile.TemporaryDirectory() as tmp:
             output = io.StringIO()
