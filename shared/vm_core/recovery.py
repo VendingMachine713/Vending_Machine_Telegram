@@ -106,7 +106,6 @@ def classify_service(row: dict[str, Any], policy: dict[str, bool]) -> RecoveryDe
 
 
 def recovery_plan(root: Path | None = None) -> dict[str, Any]:
-    """Build a read-only, policy-gated recovery plan."""
     root = root or project_root()
     states = {str(row.get("name")): row for row in service_status(root)}
     decisions: list[RecoveryDecision] = []
@@ -140,6 +139,21 @@ def recovery_plan(root: Path | None = None) -> dict[str, Any]:
     }
 
 
+def verify_service_recovered(service: str, root: Path | None = None) -> dict[str, Any]:
+    root = root or project_root()
+    row = next((r for r in service_status(root) if str(r.get("name")) == service), None)
+    if row is None:
+        return {"verified": False, "reason": "service_not_found"}
+    alive = bool(row.get("process_alive"))
+    status = str(row.get("runtime_status") or "UNKNOWN").upper()
+    return {
+        "verified": alive,
+        "process_alive": alive,
+        "runtime_status": status,
+        "pid": row.get("pid"),
+    }
+
+
 def execute_recovery_plan(
     plan: dict[str, Any],
     root: Path | None = None,
@@ -153,7 +167,9 @@ def execute_recovery_plan(
     Dry-run is the default. Even in apply mode this function never touches queue
     rows, campaigns, schedules, credentials, Telegram delivery state, or decisions
     marked BLOCKED/REVIEW. RecoveryHistory enforces cooldown/backoff and a bounded
-    attempts-per-window limit to prevent unattended restart loops.
+    attempts-per-window limit to prevent unattended restart loops. Apply-mode
+    actions are verified against fresh service evidence before being considered
+    successful.
     """
     root = root or project_root()
     history = history or RecoveryHistory(root)
@@ -190,10 +206,20 @@ def execute_recovery_plan(
             result = restart_service(service, root, dry_run=not apply)
         else:
             continue
-        if apply:
-            history.record_attempt(service, action=action, success=bool(result.get("ok")))
-        results.append({"service": service, "action": action, "applied": bool(apply), "result": result})
 
+        verification = {"verified": False, "reason": "dry_run"}
+        if apply:
+            verification = verify_service_recovered(service, root)
+            history.record_attempt(service, action=action, success=bool(result.get("ok")) and bool(verification.get("verified")))
+        results.append({
+            "service": service,
+            "action": action,
+            "applied": bool(apply),
+            "result": result,
+            "verification": verification,
+        })
+
+    failed_verification = [r for r in results if r.get("applied") and not (r.get("verification") or {}).get("verified")]
     return {
         "mode": "APPLY_SAFE_RECOVERY" if apply else "DRY_RUN",
         "max_actions": limit,
@@ -201,11 +227,14 @@ def execute_recovery_plan(
         "raw_candidate_count": len(raw_candidates),
         "actions": results,
         "skipped": skipped,
+        "verification_failures": len(failed_verification),
+        "operator_escalation_required": bool(failed_verification or any(r.get("reason") == "attempt_limit" for r in skipped)),
         "safety": {
             "blocked_or_review_actions_executed": False,
             "queue_or_delivery_retry_performed": False,
             "credential_or_auth_recovery_performed": False,
             "restart_loop_guard_enabled": True,
+            "post_action_verification_enabled": True,
         },
     }
 
