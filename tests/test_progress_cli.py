@@ -12,8 +12,9 @@ from shared.vm_core.progress_registry import platform_progress_summary, provider
 
 
 class ProgressCliTests(unittest.TestCase):
-    def test_registry_exposes_autoposter_provider(self):
+    def test_registry_exposes_initial_cross_bot_providers(self):
         self.assertIn("autoposter", provider_names())
+        self.assertIn("guard", provider_names())
 
     def test_text_mode_is_safe_when_autoposter_database_is_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -27,7 +28,7 @@ class ProgressCliTests(unittest.TestCase):
             self.assertIn("Queue unavailable", text)
             self.assertIn("RECOVERY / NEXT ACTION", text)
 
-    def test_default_all_mode_renders_platform_header_and_registered_surface(self):
+    def test_default_all_mode_renders_platform_header_and_registered_surfaces(self):
         with tempfile.TemporaryDirectory() as tmp:
             output = io.StringIO()
             with redirect_stdout(output):
@@ -36,6 +37,7 @@ class ProgressCliTests(unittest.TestCase):
             text = output.getvalue()
             self.assertIn("UNIVERSAL PROGRESS ENGINE", text)
             self.assertIn("SMART AUTO POSTER", text)
+            self.assertIn("VM GUARD", text)
 
     def test_json_mode_emits_structured_progress_contract(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -56,8 +58,9 @@ class ProgressCliTests(unittest.TestCase):
                 rc = main(["all", "--json", "--root", tmp])
             self.assertEqual(rc, 0)
             payload = json.loads(output.getvalue())
-            self.assertEqual(payload["surface_count"], 1)
+            self.assertEqual(payload["surface_count"], 2)
             self.assertIn("autoposter", payload["surfaces"])
+            self.assertIn("guard", payload["surfaces"])
             direct = platform_progress_summary(Path(tmp))
             self.assertEqual(payload["attention_count"], direct["attention_count"])
 
