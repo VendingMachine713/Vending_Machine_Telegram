@@ -28,6 +28,7 @@ from .devtools import install as install_devtools, git_status
 from .intelligence import intelligence_summary, format_intelligence_summary
 from .foundation import foundation_report, format_foundation_report
 from .platform_registry import service_registry, write_service_registry, format_service_registry
+from .config_registry import configuration_registry, write_configuration_registry, format_configuration_registry
 
 def _json(obj): print(json.dumps(obj,indent=2,ensure_ascii=False,default=str))
 
@@ -86,7 +87,7 @@ def build_parser():
     for action in ("start","stop","restart"):
         q=s.add_parser(action,help=f"{action.title()} a VM service."); q.add_argument("service"); q.add_argument("--apply",action="store_true"); q.add_argument("--force",action="store_true")
     s.choices["logs"].add_argument("service",nargs="?",default="platform"); s.choices["logs"].add_argument("--lines",type=int,default=50); s.choices["logs"].add_argument("--errors",action="store_true")
-    s.choices["registry"].add_argument("action",choices=["summary","sync","services"],nargs="?",default="summary"); s.choices["registry"].add_argument("--write",action="store_true")
+    s.choices["registry"].add_argument("action",choices=["summary","sync","services","config"],nargs="?",default="summary"); s.choices["registry"].add_argument("--write",action="store_true")
     s.choices["jobs"].add_argument("action",choices=["list","enqueue","run-one"],nargs="?",default="list"); s.choices["jobs"].add_argument("job_type",nargs="?")
     s.choices["events"].add_argument("action",choices=["list","emit"],nargs="?",default="list"); s.choices["events"].add_argument("event_type",nargs="?")
     s.choices["simulate"].add_argument("scenario",choices=sorted(SCENARIOS))
@@ -161,6 +162,12 @@ def main(argv=None):
                 print(write_service_registry(root))
             else:
                 print(format_service_registry(report))
+        elif args.action=="config":
+            report=configuration_registry(root)
+            if args.write:
+                print(write_configuration_registry(root))
+            else:
+                print(format_configuration_registry(report))
         else:
             _json(registry_summary(root))
         return 0
