@@ -61,6 +61,28 @@ class FoundationContractTests(unittest.TestCase):
             self.assertEqual(report["status"], "PASS")
             self.assertEqual(report["summary"]["ERROR"], 0)
 
+    def test_invalid_platform_config_is_reported_not_raised(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bot = root / "bots" / "Demo"
+            bot.mkdir(parents=True)
+            (bot / "main.py").write_text("print('ok')\n", encoding="utf-8")
+            (bot / "BOT_MANIFEST.json").write_text(
+                json.dumps(self._manifest("Demo")), encoding="utf-8"
+            )
+            (root / "VM_PROJECT.json").write_text(
+                json.dumps({"project": "Test", "canonical_bot_folders": ["Demo"]}),
+                encoding="utf-8",
+            )
+            (root / "config").mkdir()
+            (root / "config" / "vm_platform.json").write_text("{invalid", encoding="utf-8")
+            report = foundation_report(root)
+            self.assertEqual(report["status"], "FAIL")
+            self.assertIn(
+                "CONFIG_UNREADABLE",
+                {item["code"] for item in report["findings"]},
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
