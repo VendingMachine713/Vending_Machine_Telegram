@@ -7,6 +7,102 @@ from .adapters import _connect_readonly, _resolve_bot_path, _tables
 from .paths import project_root
 
 
+def _poster_db(root: Path) -> tuple[Path, Any]:
+    bot_dir = root / "bots" / "Smart_Auto_Poster_V2"
+    db_path = _resolve_bot_path(bot_dir, "DATABASE_PATH", bot_dir / "data" / "smart_autoposter.sqlite3")
+    return db_path, _connect_readonly(db_path)
+
+
+def smart_auto_poster_reconciliation_preview(root: Path | None = None, limit: int = 50) -> dict[str, Any]:
+    """Classify unresolved Smart Auto Poster delivery evidence without mutating it.
+
+    `CONFIRM_SENT_CANDIDATE` means durable Telegram acknowledgement/message IDs are
+    present and the row is suitable for a future, separately-tested local-state
+    reconciliation path. It does *not* mark the job sent. `MANUAL_REVIEW` remains
+    ambiguous and must never be retried automatically from this preview.
+    """
+    root = root or project_root()
+    db_path, con = _poster_db(root)
+    if con is None:
+        return {"available": False, "database_path": str(db_path), "items": [], "summary": {}}
+    try:
+        tables = _tables(con)
+        if "queue" not in tables:
+            return {"available": False, "database_path": str(db_path), "items": [], "summary": {}}
+        qcols = {str(row[1]) for row in con.execute("PRAGMA table_info(queue)").fetchall()}
+        msg_expr = "q.telegram_message_ids" if "telegram_message_ids" in qcols else "NULL"
+        err_expr = "q.error_kind" if "error_kind" in qcols else "NULL"
+        rows = con.execute(
+            f"""SELECT q.id,q.status,{msg_expr} AS telegram_message_ids,{err_expr} AS error_kind
+                FROM queue q
+                WHERE lower(q.status) IN ('uncertain','sending')
+                ORDER BY q.id ASC LIMIT ?""",
+            (max(1, min(int(limit), 500)),),
+        ).fetchall()
+
+        attempt_by_job: dict[int, list[dict[str, Any]]] = {}
+        if "delivery_attempts" in tables and rows:
+            ids = [int(row["id"]) for row in rows]
+            marks = ",".join("?" for _ in ids)
+            attempts = con.execute(
+                f"""SELECT queue_job_id,outcome,telegram_message_ids,acknowledged_at,finished_at
+                    FROM delivery_attempts WHERE queue_job_id IN ({marks})
+                    ORDER BY queue_job_id,attempt_no""",
+                ids,
+            ).fetchall()
+            for attempt in attempts:
+                attempt_by_job.setdefault(int(attempt["queue_job_id"]), []).append(dict(attempt))
+
+        items: list[dict[str, Any]] = []
+        counts = {"CONFIRM_SENT_CANDIDATE": 0, "MANUAL_REVIEW": 0}
+        for row in rows:
+            job_id = int(row["id"])
+            attempts = attempt_by_job.get(job_id, [])
+            queue_ids = bool(str(row["telegram_message_ids"] or "").strip())
+            acknowledged = any(
+                str(a.get("outcome") or "").lower() in {"acknowledged", "sent"}
+                or bool(a.get("acknowledged_at"))
+                or bool(str(a.get("telegram_message_ids") or "").strip())
+                for a in attempts
+            )
+            post_send = str(row["error_kind"] or "").lower() == "post_send_persistence"
+            if str(row["status"] or "").lower() == "uncertain" and (queue_ids or acknowledged) and (post_send or acknowledged):
+                classification = "CONFIRM_SENT_CANDIDATE"
+                reason = "Durable Telegram acknowledgement/message IDs exist; local-state reconciliation can be evaluated without resending."
+            else:
+                classification = "MANUAL_REVIEW"
+                reason = "Delivery completion is not durably proven; never auto-retry or auto-confirm from this evidence."
+            counts[classification] += 1
+            items.append({
+                "queue_job_id": job_id,
+                "status": str(row["status"] or "").lower(),
+                "classification": classification,
+                "reason": reason,
+                "queue_has_message_ids": queue_ids,
+                "delivery_attempt_count": len(attempts),
+                "telegram_ack_evidence": acknowledged,
+                "error_kind": row["error_kind"],
+            })
+        return {
+            "available": True,
+            "database_path": str(db_path),
+            "items": items,
+            "summary": {"total": len(items), **counts},
+            "mutations_performed": False,
+            "telegram_actions_performed": False,
+        }
+    except Exception as exc:
+        return {
+            "available": False,
+            "database_path": str(db_path),
+            "items": [],
+            "summary": {},
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    finally:
+        con.close()
+
+
 def smart_auto_poster_recovery_gate(root: Path | None = None) -> dict[str, Any]:
     """Return read-only evidence describing whether lifecycle restart is safe.
 
@@ -15,9 +111,7 @@ def smart_auto_poster_recovery_gate(root: Path | None = None) -> dict[str, Any]:
     is present in Smart Auto Poster's durable database.
     """
     root = root or project_root()
-    bot_dir = root / "bots" / "Smart_Auto_Poster_V2"
-    db_path = _resolve_bot_path(bot_dir, "DATABASE_PATH", bot_dir / "data" / "smart_autoposter.sqlite3")
-    con = _connect_readonly(db_path)
+    db_path, con = _poster_db(root)
     if con is None:
         return {
             "safe": False,
