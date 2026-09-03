@@ -14,6 +14,7 @@ from shared.vm_core.support import create_support_bundle
 from shared.vm_core.supervisor import supervise_once
 from shared.vm_core.intelligence import intelligence_summary,format_intelligence_summary
 from shared.vm_core.autoposter_progress import smart_auto_poster_progress
+from shared.vm_core.autoposter_recovery import smart_auto_poster_reconciliation_preview,format_smart_auto_poster_reconciliation_preview
 from shared.vm_core.progress import format_progress
 from shared.vm_core.progress_registry import format_all_progress
 from shared.vm_core.recovery import recovery_plan,format_recovery_plan
@@ -59,7 +60,7 @@ def help_text(cfg):
         '/vm\n/status\n/health\n/progress\n/recovery\n/intelligence\n/brain\n/registry\n/jobs\n/doctor\n/backup\n/support\n'
         '/start <service>\n/stop <service>\n/restart <service>\n/supervise\n\n'
         'SMART AUTO POSTER\n'
-        '/poster\n/poster_status\n/poster_progress\n/poster_health\n/poster_queue\n/poster_campaigns\n'
+        '/poster\n/poster_status\n/poster_progress\n/poster_recovery_preview\n/poster_health\n/poster_queue\n/poster_campaigns\n'
         '/poster_start\n/poster_stop\n/poster_restart\n\n'
         'Mutating commands: '+('ENABLED' if cfg['allow_mutations'] else 'DISABLED')
     )
@@ -82,6 +83,12 @@ def _poster_progress_text()->str:
         return format_progress(smart_auto_poster_progress(ROOT))[:3900]
     except Exception as exc:
         return f'SMART AUTO POSTER - UNIVERSAL PROGRESS\nProgress unavailable: {type(exc).__name__}: {exc}'[:3900]
+
+def _poster_recovery_preview_text()->str:
+    try:
+        return format_smart_auto_poster_reconciliation_preview(smart_auto_poster_reconciliation_preview(ROOT))[:3900]
+    except Exception as exc:
+        return f'SMART AUTO POSTER - RECOVERY PREVIEW\nPreview unavailable: {type(exc).__name__}: {exc}'[:3900]
 
 def _platform_progress_text()->str:
     try:
@@ -117,6 +124,7 @@ def _poster_help(cfg)->str:
         'SMART AUTO POSTER CONTROL\n\n'
         '/poster_status - VM runtime state\n'
         '/poster_progress - live universal progress view\n'
+        '/poster_recovery_preview - read-only uncertain-delivery evidence\n'
         '/poster_health - poster health command\n'
         '/poster_queue - queue capacity/status\n'
         '/poster_campaigns - campaign list\n'
@@ -136,6 +144,7 @@ def handle_command(user_id:int,text:str,cfg:dict[str,Any]|None=None)->str:
     if cmd=='poster': return _poster_help(cfg)
     if cmd=='poster_status': return _poster_status_text()
     if cmd=='poster_progress': return _poster_progress_text()
+    if cmd=='poster_recovery_preview': return _poster_recovery_preview_text()
     if cmd=='poster_health': return _poster_cli('health')
     if cmd=='poster_queue': return _poster_cli('queue')
     if cmd=='poster_campaigns': return _poster_cli('campaigns')
