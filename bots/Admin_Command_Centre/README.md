@@ -16,11 +16,12 @@ Read-only platform command:
 
 - `/progress` - render every registered Universal Progress Engine surface in one operator view.
 
-Registered surfaces now include Smart Auto Poster, VM Guard and Universal Search. The provider registry is intentionally extensible, so additional bots can be added without changing the progress rendering contract used by terminal and Telegram admin surfaces.
+Registered surfaces now include Smart Auto Poster, VM Guard, Universal Search and VM Relationship Manager. The provider registry is intentionally extensible, so additional services can be added without changing the progress rendering contract used by terminal and Telegram admin surfaces.
 
-VM Guard is a continuous service rather than a finite campaign. Its progress bar represents operational readiness, while metrics expose monitor-only versus active-moderation mode, risk threshold and recent Guard events.
-
-Universal Search exposes index size, saved-watch state and passive alert-delivery progress. Pending/retry alerts remain active work; terminal failures switch the surface to ATTENTION with recovery guidance.
+- Smart Auto Poster exposes queue progress, current destination/task, ETA, events, runtime heartbeats and recovery guidance.
+- VM Guard exposes operational readiness, monitor-only/active mode, risk threshold, runtime freshness and recent Guard events.
+- Universal Search exposes index size, saved-watch state and passive alert-delivery progress. Terminal alert failures switch the surface to ATTENTION.
+- VM Relationship Manager exposes intelligence coverage, overdue/dormant/low-health counts and the highest-priority suggested action for manual review.
 
 ## Smart Auto Poster controls
 
@@ -28,7 +29,7 @@ Read-only commands:
 
 - `/poster` - show Smart Auto Poster controls.
 - `/poster_status` - VM-managed runtime status and PID.
-- `/poster_progress` - live Universal Progress Engine view using Smart Auto Poster's read-only queue, destination, event and heartbeat evidence.
+- `/poster_progress` - focused Smart Auto Poster Universal Progress view.
 - `/poster_health` - run Smart Auto Poster's existing `health` CLI through VM Core.
 - `/poster_queue` - run Smart Auto Poster's existing `queue-capacity` CLI through VM Core.
 - `/poster_campaigns` - run Smart Auto Poster's existing `campaigns` CLI through VM Core.
@@ -54,10 +55,11 @@ Render one provider only:
 python -m shared.vm_core.progress_cli autoposter
 python -m shared.vm_core.progress_cli guard
 python -m shared.vm_core.progress_cli search
-python -m shared.vm_core.progress_cli search --json
+python -m shared.vm_core.progress_cli relationships
+python -m shared.vm_core.progress_cli relationships --json
 ```
 
-The progress surfaces never send posts, change queue rows, trigger alert retries, change Guard moderation mode, or modify campaign/schedule state.
+The progress surfaces are visibility-only: they never send posts/messages, mutate bot queues, trigger retries, change Guard moderation mode, contact people, or modify campaign/schedule state.
 
 ## Architecture boundary
 
