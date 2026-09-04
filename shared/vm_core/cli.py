@@ -12,6 +12,7 @@ from .dependencies import environment_report, requirements_inventory, pip_check,
 from .db import PlatformDB
 from .services import service_status, start_service, stop_service, restart_service
 from .health import run_health
+from .health_engine import health_snapshot, format_health_snapshot
 from .backup import create_backup, list_backups, rollback
 from .registry import sync_accounts, sync_destinations, registry_summary
 from .jobs import enqueue, run_one
@@ -64,6 +65,7 @@ def build_parser():
         ("status","Show VM service state."),("dashboard","Show platform dashboard."),
         ("doctor","Run diagnostics."),("inspect","Write safe structure report."),
         ("inventory","Refresh machine-readable inventory."),("health","Run service health checks."),
+        ("health-v2","Run universal health classification."),
         ("env","Show environment/developer tools."),("deps","Show dependency inventory."),
         ("test","Run platform self-tests."),("check","Run release pre-flight checks."),
         ("support","Create safe support bundle."),("registry","Sync/show shared registries."),
@@ -112,6 +114,8 @@ def main(argv=None):
         report=foundation_report(root); print(format_foundation_report(report)); return 2 if report["summary"]["ERROR"] else 0
     if c=="core-readiness":
         report=core1_readiness(root); print(format_core1_readiness(report)); return 0 if report["status"]=="PASS" else 2
+    if c=="health-v2":
+        report=health_snapshot(root); print(format_health_snapshot(report)); return 2 if report["status"]=="ATTENTION_REQUIRED" else 0
     if c=="intelligence":
         print(format_intelligence_summary(intelligence_summary(root, refresh=True))); return 0
     if c=="init":
