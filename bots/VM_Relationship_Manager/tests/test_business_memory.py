@@ -98,6 +98,16 @@ class BusinessMemoryTests(unittest.TestCase):
         self.assertIn("client", summary["roles"])
         self.assertIn("supplier", summary["roles"])
 
+    def test_correct_transaction_is_audited_and_uses_canonical_product(self):
+        tx_id = self.memory.record(1001, "client", "Widget", quantity=1, total="10.00", recorded_by=9)
+        corrected = self.memory.correct_transaction(tx_id, recorded_by=9, product="Widget ", quantity=2, total="12.00", note="corrected")
+        self.assertEqual(corrected["product_name"], "Widget")
+        self.assertEqual(corrected["quantity"], 2)
+        audit = self.db.one("SELECT * FROM admin_audit WHERE action='business_transaction_corrected' AND admin_id=?", (9,))
+        self.assertIsNotNone(audit)
+        self.assertIn("before=", audit["details"])
+        self.assertIn("after=", audit["details"])
+
     def test_top_clients_and_reload_candidates_rank_repeat_history(self):
         now = datetime.now(timezone.utc)
         self.memory.record(1001, "client", "Reload Item", quantity=2, occurred_at=now)

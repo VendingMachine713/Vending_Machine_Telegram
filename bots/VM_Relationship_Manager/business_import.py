@@ -17,7 +17,7 @@ from business_memory import (
 from database import Database, utcnow
 
 
-IMPORT_SCHEMA_VERSION = 1
+IMPORT_SCHEMA_VERSION = 2
 IMPORT_SCHEMA = """
 CREATE TABLE IF NOT EXISTS business_import_receipts (
     import_key TEXT PRIMARY KEY,
@@ -29,6 +29,21 @@ CREATE TABLE IF NOT EXISTS business_import_receipts (
 );
 CREATE INDEX IF NOT EXISTS idx_business_import_tx
     ON business_import_receipts(transaction_id);
+CREATE TABLE IF NOT EXISTS business_import_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_file TEXT NOT NULL,
+    status TEXT NOT NULL,
+    total_rows INTEGER NOT NULL DEFAULT 0,
+    valid_rows INTEGER NOT NULL DEFAULT 0,
+    duplicate_rows INTEGER NOT NULL DEFAULT 0,
+    problem_rows INTEGER NOT NULL DEFAULT 0,
+    recorded_by INTEGER,
+    details TEXT,
+    created_at TEXT NOT NULL,
+    completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_business_import_runs_created
+    ON business_import_runs(created_at DESC);
 """
 
 REQUIRED_COLUMNS = {"contact", "role", "product"}
@@ -93,6 +108,7 @@ class ImportResult:
     inserted: int
     skipped_duplicates: int
     transaction_ids: tuple[int, ...]
+    run_id: int | None = None
 
 
 class BusinessHistoryImporter:
@@ -341,16 +357,22 @@ class BusinessHistoryImporter:
         source_file: str = "<memory>",
         recorded_by: int | None = None,
     ) -> ImportResult:
+        stamp = utcnow()
+        run_id = self.db.execute(
+            "INSERT INTO business_import_runs(source_file,status,created_at,recorded_by) VALUES(?,?,?,?)",
+            (source_file[:255], "validating", stamp, recorded_by),
+        )
         preview = self.preview_text(text, source_file=source_file)
         if preview.problems:
             details = "; ".join(
                 f"row {item.source_row}: {item.message}" for item in preview.problems[:10]
             )
+            self.db.execute("UPDATE business_import_runs SET status='rejected',total_rows=?,valid_rows=?,duplicate_rows=?,problem_rows=?,details=?,completed_at=? WHERE id=?", (preview.total_rows, len(preview.valid_rows), preview.duplicate_count, len(preview.problems), details[:2000], utcnow(), run_id))
             raise ValueError(f"Import validation failed: {details}")
 
         inserted_ids: list[int] = []
         skipped = preview.duplicate_count
-        stamp = utcnow()
+        self.db.execute("UPDATE business_import_runs SET status='applying',total_rows=?,valid_rows=?,duplicate_rows=?,problem_rows=? WHERE id=?", (preview.total_rows, len(preview.valid_rows), preview.duplicate_count, len(preview.problems), run_id))
         with self.db.connect() as con:
             for row in preview.valid_rows:
                 # Race-safe idempotency check inside the write transaction.
@@ -434,13 +456,21 @@ class BusinessHistoryImporter:
                 )
                 inserted_ids.append(tx_id)
 
+        self.db.execute("UPDATE business_import_runs SET status='applied',completed_at=? WHERE id=?", (utcnow(), run_id))
         return ImportResult(
             source_file=source_file,
             inserted=len(inserted_ids),
             skipped_duplicates=skipped,
             transaction_ids=tuple(inserted_ids),
+            run_id=run_id,
         )
 
     def apply_file(self, path: Path, *, recorded_by: int | None = None) -> ImportResult:
         text = path.read_text(encoding="utf-8-sig")
         return self.apply_text(text, source_file=path.name, recorded_by=recorded_by)
+
+    def audit_runs(self, limit: int = 20):
+        return self.db.all(
+            "SELECT * FROM business_import_runs ORDER BY id DESC LIMIT ?",
+            (max(1, min(int(limit), 100)),),
+        )

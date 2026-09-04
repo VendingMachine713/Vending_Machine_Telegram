@@ -158,6 +158,15 @@ class BusinessHistoryImporterTests(unittest.TestCase):
         self.assertEqual(clients[0]["transaction_count"], 2)
         self.assertEqual(suppliers[0]["telegram_id"], 1002)
 
+    def test_import_run_audit_records_applied_and_rejected_runs(self):
+        csv_text = HEADER + "1001,client,Audit Product,1,unit,10,AUD,2026-01-01,,audit\n"
+        result = self.importer.apply_text(csv_text, source_file="audit.csv", recorded_by=55)
+        self.assertIsNotNone(result.run_id)
+        self.assertEqual(self.importer.audit_runs(1)[0]["status"], "applied")
+        with self.assertRaises(ValueError):
+            self.importer.apply_text("contact,role\n1001,client\n", source_file="bad.csv", recorded_by=55)
+        self.assertEqual(self.importer.audit_runs(1)[0]["status"], "rejected")
+
 
 if __name__ == "__main__":
     unittest.main()

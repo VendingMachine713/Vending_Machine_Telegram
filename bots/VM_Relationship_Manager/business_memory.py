@@ -257,6 +257,47 @@ class BusinessMemory:
             (transaction_id,),
         )
 
+    def correct_transaction(
+        self,
+        transaction_id: int,
+        *,
+        recorded_by: int,
+        role: str | None = None,
+        product: str | None = None,
+        quantity: float | None = None,
+        total: str | int | float | Decimal | None = None,
+        currency: str | None = None,
+        note: str | None = None,
+        occurred_at: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Apply an explicit correction and retain a before/after audit trail."""
+        before = self.transaction(transaction_id)
+        if not before:
+            raise ValueError("Business transaction was not found.")
+        next_role = (role or before["role"]).strip().lower()
+        if next_role not in VALID_ROLES:
+            raise ValueError("Role must be client or supplier.")
+        product_row = self._product(product or before["product_name"])
+        qty = float(quantity if quantity is not None else before["quantity"])
+        if qty <= 0:
+            raise ValueError("Quantity must be a positive number.")
+        next_currency = (currency or before["currency"] or "AUD").strip().upper()
+        money = parse_money(total if total is not None else (before["total_minor_units"] / 100 if before["total_minor_units"] is not None else None), next_currency)
+        next_note = (note if note is not None else before["note"])
+        next_date = self._occurred_iso(occurred_at) if occurred_at is not None else before["occurred_at"]
+        after_values = {"role": next_role, "product": product_row["normalized_name"], "quantity": qty, "total_minor_units": money.minor_units if money else None, "currency": money.currency if money else next_currency, "occurred_at": next_date, "note": next_note}
+        before_values = {key: before[key] for key in after_values if key != "product"}
+        before_values["product"] = before["normalized_name"]
+        stamp = utcnow()
+        self.db.execute(
+            """UPDATE business_transactions SET role=?,product_id=?,quantity=?,total_minor_units=?,currency=?,occurred_at=?,note=?,updated_at=? WHERE id=?""",
+            (next_role, product_row["id"], qty, after_values["total_minor_units"], after_values["currency"], next_date, next_note, stamp, transaction_id),
+        )
+        details = f"transaction={transaction_id}; before={before_values}; after={after_values}"
+        self.db.execute("INSERT INTO admin_audit(admin_id,action,telegram_id,details,created_at) VALUES(?,?,?,?,?)", (recorded_by, "business_transaction_corrected", before["telegram_id"], details[:4000], stamp))
+        self.db.execute("INSERT INTO relationship_events(telegram_id,event_type,details,created_at) VALUES(?,?,?,?)", (before["telegram_id"], "business_transaction_corrected", f"transaction:{transaction_id}", stamp))
+        return self.transaction(transaction_id)
+
     def history(self, telegram_id: int, limit: int = 20):
         self._contact(telegram_id)
         return self.db.all(
