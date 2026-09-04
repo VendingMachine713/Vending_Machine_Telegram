@@ -138,6 +138,8 @@ def test_publisher_persists_canonical_intelligence_event(tmp_path: Path):
 
 
 def test_publisher_fails_closed_on_source_mismatch(tmp_path: Path):
+    db = PlatformDB(root=tmp_path)
+    db.init()
     record = IntelligenceRecord.from_evidence(
         kind=IntelligenceKind.FACT,
         record_type="activity_observed",
@@ -152,4 +154,4 @@ def test_publisher_fails_closed_on_source_mismatch(tmp_path: Path):
     publisher = BotEventPublisher("VM_Relationship_Manager", tmp_path)
     assert publisher.intelligence(record) is None
     assert "source does not match" in (publisher.last_error or "")
-    assert PlatformDB(root=tmp_path).events(limit=10) == []
+    assert db.events(limit=10) == []
