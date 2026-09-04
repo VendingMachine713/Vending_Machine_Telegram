@@ -1,5 +1,17 @@
 # VM Relationship Manager Changelog
 
+## Unreleased — Low-Touch Business Capture
+
+- Added business action buttons directly to every private contact profile: `+ Client deal` and `+ Supplier deal`.
+- Added contact-aware product suggestions so repeated products can be recorded with one tap.
+- Added recent global product fallback so newly classified contacts can reuse existing product identities without typing them again.
+- Added first-product/new-product capture by sending the product name as the next message after choosing the client/supplier role.
+- Added a five-minute pending-capture expiry and explicit Cancel control so ordinary contact search resumes automatically.
+- Added `Repeat last business deal` for contacts with history; the shortcut repeats role/product/quantity/unit but deliberately does not copy an old monetary value.
+- Quick capture records one unit and no inferred transaction value unless the operator uses the existing full `/deal` command for detailed quantity/value/note entry.
+- Existing contact IDs are reused automatically; normal business recording no longer requires CSV editing or manual Telegram-ID lookup.
+- CSV import remains available only for genuine bulk historical migration/recovery work.
+
 ## Unreleased — Passive Business Intelligence
 
 - Added explicit private `/available Product Name` and `/unavailable Product Name` status controls for products already known to Business Memory.
