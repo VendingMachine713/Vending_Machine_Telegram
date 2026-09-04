@@ -54,6 +54,14 @@ CREATE TABLE IF NOT EXISTS marketplace_matches(
   PRIMARY KEY(demand_chat_id,demand_message_id,supply_chat_id,supply_message_id)
 );
 CREATE INDEX IF NOT EXISTS ix_marketplace_matches_status ON marketplace_matches(status,updated_utc DESC);
+CREATE TABLE IF NOT EXISTS marketplace_match_feedback(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  demand_chat_id INTEGER NOT NULL, demand_message_id INTEGER NOT NULL,
+  supply_chat_id INTEGER NOT NULL, supply_message_id INTEGER NOT NULL,
+  owner_user_id INTEGER NOT NULL, outcome TEXT NOT NULL,
+  created_utc TEXT NOT NULL,
+  UNIQUE(demand_chat_id,demand_message_id,supply_chat_id,supply_message_id,owner_user_id)
+);
 CREATE TABLE IF NOT EXISTS search_audit(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER,
@@ -471,6 +479,17 @@ class Store:
     def acknowledge_market_match(self, demand_chat_id, demand_message_id, supply_chat_id, supply_message_id):
         with self.conn() as c:
             return c.execute("UPDATE marketplace_matches SET status='acknowledged',updated_utc=? WHERE demand_chat_id=? AND demand_message_id=? AND supply_chat_id=? AND supply_message_id=?", (utc_now(), demand_chat_id, demand_message_id, supply_chat_id, supply_message_id)).rowcount
+
+    def record_match_feedback(self, demand_chat_id, demand_message_id, supply_chat_id, supply_message_id, owner_user_id, outcome):
+        if outcome not in {"positive", "negative"}:
+            return False
+        with self.conn() as c:
+            c.execute("INSERT OR REPLACE INTO marketplace_match_feedback(demand_chat_id,demand_message_id,supply_chat_id,supply_message_id,owner_user_id,outcome,created_utc) VALUES(?,?,?,?,?,?,?)", (demand_chat_id,demand_message_id,supply_chat_id,supply_message_id,owner_user_id,outcome,utc_now()))
+            return True
+
+    def match_engine_stats(self):
+        with self.conn() as c:
+            return c.execute("SELECT outcome,COUNT(*) AS count FROM marketplace_match_feedback GROUP BY outcome ORDER BY outcome").fetchall()
 
     def record_search(self, user_id, query):
         with self.conn() as c:
