@@ -186,3 +186,55 @@ def canonical_risk_fusion_summary(
         }
     )
     return result
+
+
+def risk_adjusted_canonical_opportunities(
+    *,
+    root: Path | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Attach fused risk to canonical opportunities without suppressing candidates.
+
+    ``opportunity_score`` remains the original Opportunity Engine score for backward
+    readability. ``risk_adjusted_score`` is a passive ranking aid only. High-risk
+    candidates remain visible and are marked for operator review rather than removed.
+    """
+    from .opportunity_intelligence import canonical_opportunities
+
+    root = root or project_root()
+    opportunities = canonical_opportunities(root=root, limit=max(1, min(500, int(limit))))
+    risk = canonical_risk_fusion_summary(root=root, limit=max(200, int(limit) * 10))
+    risk_by_subject = {
+        str(row["canonical_subject_id"]): row
+        for row in risk.get("subjects", [])
+        if row.get("canonical_subject_id")
+    }
+    rows: list[dict[str, Any]] = []
+    for opportunity in opportunities:
+        subject = str(opportunity.get("canonical_subject_id") or "")
+        fused = risk_by_subject.get(subject)
+        risk_score = float(fused.get("risk_score") or 0.0) if fused else 0.0
+        base_score = float(opportunity.get("opportunity_score") or 0.0)
+        adjusted = round(max(0.0, base_score * (1.0 - min(0.8, risk_score / 125.0))), 2)
+        row = dict(opportunity)
+        row.update(
+            {
+                "risk_fusion_applied": True,
+                "risk_score": round(risk_score, 2),
+                "risk_level": fused.get("risk_level") if fused else "NONE",
+                "risk_reasons": list(fused.get("risk_reasons", [])) if fused else [],
+                "risk_adjusted_score": adjusted,
+                "risk_review_required": bool(fused and fused.get("review_required")),
+                "automatic_suppression": False,
+                "candidate_visible": True,
+            }
+        )
+        rows.append(row)
+    rows.sort(
+        key=lambda row: (
+            -float(row["risk_adjusted_score"]),
+            -float(row.get("confidence") or 0.0),
+            str(row["canonical_subject_id"]),
+        )
+    )
+    return rows
