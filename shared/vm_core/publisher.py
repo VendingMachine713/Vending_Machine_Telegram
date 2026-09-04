@@ -4,6 +4,7 @@ from typing import Any
 
 from .events import emit, correlation_id
 from .heartbeat import record_heartbeat
+from .intelligence_contracts import IntelligenceRecord
 
 
 class BotEventPublisher:
@@ -116,6 +117,27 @@ class BotEventPublisher:
             subject_type=subject_type,
             subject_id=subject_id,
             evidence=evidence or {},
+        )
+
+    def intelligence(self, record: IntelligenceRecord) -> int | None:
+        """Publish one canonical VM Brain trust-layer record.
+
+        Record confidence/freshness are calculated by the trust contract before
+        publishing, keeping bot producers from inventing unexplained scores.
+        The publisher remains failure-isolated just like all other telemetry.
+        """
+        if record.source != self.source:
+            self.last_error = (
+                "IntelligenceContractError: record source does not match publisher source"
+            )
+            return None
+        return self._publish(
+            record.event_type,
+            record.event_payload(),
+            subject_type=record.subject_type,
+            subject_id=record.subject_id,
+            evidence=record.event_evidence(),
+            correlation_id=f"brain:{record.kind.value}:{record.subject_type}:{record.subject_id}",
         )
 
     def action(self, action_type: str, *, actor_id: str | int | None = None,
