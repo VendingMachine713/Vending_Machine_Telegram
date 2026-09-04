@@ -14,6 +14,7 @@ from shared.vm_core.canonical_review_feedback import (
 )
 from shared.vm_core.db import PlatformDB
 from shared.vm_core.intelligence_trust import canonical_entity_id
+from shared.vm_core.mission_control import mission_control
 
 
 class CanonicalReviewFeedbackTests(unittest.TestCase):
@@ -102,6 +103,12 @@ class CanonicalReviewFeedbackTests(unittest.TestCase):
             self.assertFalse(summary["automatic_outcome_recording"])
             self.assertFalse(summary["automatic_rule_change"])
             self.assertFalse(summary["automatic_execution"])
+            control = mission_control(root)
+            self.assertEqual(control["headline"]["canonical_review_outcomes"], 1)
+            self.assertEqual(control["headline"]["canonical_reviews_awaiting_outcome"], 0)
+            self.assertFalse(control["automatic_acceptance"])
+            self.assertFalse(control["automatic_execution"])
+            self.assertFalse(control["external_action_authority"])
 
     def test_outcome_before_completion_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
