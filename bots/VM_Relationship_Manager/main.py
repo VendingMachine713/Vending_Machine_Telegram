@@ -8,6 +8,8 @@ from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
 from admin_bot import AdminBot
+from business_admin import BusinessAdmin
+from business_memory import BusinessMemory
 from config import load_settings
 from database import Database, utcnow
 from jobs import BackgroundJobs
@@ -57,6 +59,16 @@ async def main():
     engine = RelationshipEngine(db)
     monitor = TelegramMonitor(settings, engine)
     admin_bot = AdminBot(settings, db, engine, monitor=monitor)
+
+    business_memory = BusinessMemory(db)
+    business_admin = BusinessAdmin(
+        settings,
+        db,
+        business_memory,
+        monitor=monitor,
+    )
+    business_admin.register(admin_bot.app)
+
     jobs = BackgroundJobs(settings, db, engine)
 
     def health(component: str, status: str, details: str):
@@ -69,6 +81,7 @@ async def main():
         publisher.heartbeat(status=status, component=component, details=details)
 
     health("system", "starting", "VM Relationship Manager starting")
+    health("business_memory", "online", "Business CRM schema initialized")
     publisher.started(database=str(settings.database_path))
 
     stop_event = asyncio.Event()
