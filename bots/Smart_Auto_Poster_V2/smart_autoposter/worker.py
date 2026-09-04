@@ -407,13 +407,19 @@ class Worker:
     def finish_error(self, job, error, permanent=False, retry_at=None, account=None, kind: str | None = None):
         now = utcnow()
         with self.db.connect() as con:
-            attempts = int(job.get("attempts", 0)) + 1
+            prior_attempts = int(job.get("attempts", 0))
+            # Telegram backpressure/wait conditions are scheduling constraints, not
+            # destination delivery failures. Do not burn the finite send-attempt
+            # budget merely because Telegram told us to wait.
+            no_attempt_cost = {"worker_busy", "flood_wait", "slow_mode"}
+            attempts = prior_attempts if kind in no_attempt_cost else prior_attempts + 1
             max_attempts = int(job.get("max_attempts", 4))
-            if permanent or attempts >= max_attempts:
+            if permanent or (kind not in no_attempt_cost and attempts >= max_attempts):
                 status, due = "failed", job["due_at"]
             else:
                 status = "retry"
-                due = retry_at or (datetime.now(timezone.utc) + timedelta(seconds=self.retry_delay_seconds(attempts, kind))).isoformat(timespec="seconds")
+                delay_attempt = max(1, prior_attempts + 1)
+                due = retry_at or (datetime.now(timezone.utc) + timedelta(seconds=self.retry_delay_seconds(delay_attempt, kind))).isoformat(timespec="seconds")
             con.execute("UPDATE queue SET status=?,account_key=?,attempts=?,due_at=?,error_kind=?,last_error=?,resolved_at=?,updated_at=? WHERE id=?",
                         (status, account, attempts, due, kind, error[:1000], now if status in {'failed','quarantined','cancelled','expired'} else None, now, job["id"]))
             if kind == "slow_mode" and retry_at:
@@ -430,10 +436,17 @@ class Worker:
                     if self.notifier is not None:
                         self.notifier.emit("WARNING", "Destination quarantined", f"{job['group_name']} was quarantined after repeated failures.", dedupe_key=f"quarantine:{job['group_id']}", dedupe_window_seconds=86400)
             if account:
-                cooldown = retry_at if kind == "flood_wait" else None
-                con.execute('''UPDATE accounts SET consecutive_failures=consecutive_failures+1,last_error=?,last_failure_at=?,
-                               cooldown_until=COALESCE(?,cooldown_until),health_score=MAX(0,health_score-?),last_heartbeat_at=?,updated_at=? WHERE account_key=?''',
-                            (error[:1000], now, cooldown, 12 if kind in {'flood_wait','network'} else 6, now, now, account))
+                cooldown = retry_at if kind in {"flood_wait", "worker_busy"} else None
+                benign_backpressure = kind in {"worker_busy", "slow_mode"}
+                if benign_backpressure:
+                    con.execute('''UPDATE accounts SET last_error=?,last_failure_at=?,
+                                   cooldown_until=COALESCE(?,cooldown_until),last_heartbeat_at=?,updated_at=?
+                                   WHERE account_key=?''',
+                                (error[:1000], now, cooldown, now, now, account))
+                else:
+                    con.execute('''UPDATE accounts SET consecutive_failures=consecutive_failures+1,last_error=?,last_failure_at=?,
+                                   cooldown_until=COALESCE(?,cooldown_until),health_score=MAX(0,health_score-?),last_heartbeat_at=?,updated_at=? WHERE account_key=?''',
+                                (error[:1000], now, cooldown, 12 if kind in {'flood_wait','network'} else 6, now, now, account))
         self.db.event("ERROR" if permanent else "WARNING", "send_failure", error[:800], account_key=account, group_id=job["group_id"], campaign_id=job["campaign_id"])
 
     async def run_forever(self, auth, session_names=None):
