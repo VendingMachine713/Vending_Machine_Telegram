@@ -86,7 +86,7 @@ def _evidence_from_event(row: dict[str, Any]) -> EvidenceRef | None:
 
 
 def correlate_relationship_search(*, root: Path | None = None, limit: int = 1000) -> dict[str, int]:
-    """Correlate canonical relationship state with Universal Search activity.
+    """Correlate canonical Relationship Manager state with Universal Search activity.
 
     Produces an inference only. It does not create a recommendation or execute an
     action. Supporting evidence points to durable canonical event IDs and is
@@ -96,13 +96,23 @@ def correlate_relationship_search(*, root: Path | None = None, limit: int = 1000
     relationship_rows = [
         row
         for row in query_intelligence_events(
-            AuditQuery(event_type_prefix="intelligence.signal.relationship_", limit=limit),
+            AuditQuery(
+                event_type_prefix="intelligence.signal.relationship_",
+                source="VM_Relationship_Manager",
+                subject_type="chat",
+                limit=limit,
+            ),
             root=root,
         )
         if row.get("event_type") in _RELATIONSHIP_TYPES
     ]
     search_rows = query_intelligence_events(
-        AuditQuery(event_type_prefix=_SEARCH_TYPE, source="Universal_Search", limit=limit),
+        AuditQuery(
+            event_type_prefix=_SEARCH_TYPE,
+            source="Universal_Search",
+            subject_type="chat",
+            limit=limit,
+        ),
         root=root,
     )
     relationships = _latest_by_subject(relationship_rows)
