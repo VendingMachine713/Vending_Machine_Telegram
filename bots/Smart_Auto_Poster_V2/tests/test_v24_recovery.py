@@ -92,6 +92,43 @@ class RecoveryAndLifecycleTests(unittest.TestCase):
         self.assertEqual(d[1], 0)
         self.assertEqual(tuple(q), ("retry", "slow_mode"))
 
+    def test_slow_mode_does_not_consume_attempt_budget(self):
+        retry = (datetime.now(timezone.utc) + timedelta(minutes=4)).isoformat(timespec="seconds")
+        with self.db.connect() as con:
+            con.execute("UPDATE queue SET attempts=3,max_attempts=4 WHERE job_key='j1'")
+        self.worker.finish_error(self.job(), "slow_mode: test", retry_at=retry, account="primary", kind="slow_mode")
+        with self.db.connect() as con:
+            q = con.execute("SELECT status,attempts,error_kind FROM queue WHERE job_key='j1'").fetchone()
+        self.assertEqual(tuple(q), ("retry", 3, "slow_mode"))
+
+    def test_worker_busy_sets_account_cooldown_without_penalty_or_attempt_cost(self):
+        retry = (datetime.now(timezone.utc) + timedelta(minutes=2)).isoformat(timespec="seconds")
+        with self.db.connect() as con:
+            con.execute("UPDATE queue SET attempts=2,max_attempts=4 WHERE job_key='j1'")
+        self.worker.finish_error(
+            self.job(),
+            "worker_busy: Telegram workers are too busy",
+            retry_at=retry,
+            account="primary",
+            kind="worker_busy",
+        )
+        with self.db.connect() as con:
+            q = con.execute("SELECT status,attempts,error_kind FROM queue WHERE job_key='j1'").fetchone()
+            a = con.execute("SELECT cooldown_until,consecutive_failures,health_score FROM accounts WHERE account_key='primary'").fetchone()
+        self.assertEqual(tuple(q), ("retry", 2, "worker_busy"))
+        self.assertEqual(a[0], retry)
+        self.assertEqual(a[1], 0)
+        self.assertEqual(a[2], 100)
+
+    def test_flood_wait_does_not_consume_attempt_budget(self):
+        retry = (datetime.now(timezone.utc) + timedelta(minutes=3)).isoformat(timespec="seconds")
+        with self.db.connect() as con:
+            con.execute("UPDATE queue SET attempts=3,max_attempts=4 WHERE job_key='j1'")
+        self.worker.finish_error(self.job(), "flood_wait: test", retry_at=retry, account="primary", kind="flood_wait")
+        with self.db.connect() as con:
+            q = con.execute("SELECT status,attempts,error_kind FROM queue WHERE job_key='j1'").fetchone()
+        self.assertEqual(tuple(q), ("retry", 3, "flood_wait"))
+
     def test_network_error_does_not_quarantine_destination(self):
         self.worker.finish_error(self.job(), "network: down", account="primary", kind="network")
         with self.db.connect() as con:
