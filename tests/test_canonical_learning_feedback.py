@@ -62,7 +62,7 @@ class CanonicalLearningFeedbackTests(unittest.TestCase):
                 """
             )
 
-    def _outcome(self, db: PlatformDB, recommendation_id: int, key: str, outcome: str) -> None:
+    def _record_outcome(self, db: PlatformDB, recommendation_id: int, key: str, outcome: str) -> None:
         self._ensure_outcomes(db)
         with db.connect() as con:
             con.execute(
@@ -124,8 +124,8 @@ class CanonicalLearningFeedbackTests(unittest.TestCase):
             db.init()
             first = self._seed_recommendation(db, "canonical:test:1")
             second = self._seed_recommendation(db, "canonical:test:2")
-            self._outcome(db, first, "canonical:test:1", "POSITIVE")
-            self._outcome(db, second, "canonical:test:2", "NEGATIVE")
+            self._record_outcome(db, first, "canonical:test:1", "POSITIVE")
+            self._record_outcome(db, second, "canonical:test:2", "NEGATIVE")
             summary = canonical_learning_feedback_summary(root=root)
             self.assertEqual(summary["recorded_outcomes"], 2)
             self.assertEqual(summary["known_binary_outcomes"], 2)
