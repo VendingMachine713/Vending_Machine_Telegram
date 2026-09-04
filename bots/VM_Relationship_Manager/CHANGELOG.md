@@ -1,5 +1,14 @@
 # VM Relationship Manager Changelog
 
+## Unreleased — Business Memory Dashboard Integration
+
+- Embedded private Business Memory totals into the main `/rm` relationship dashboard.
+- Added repeat-client, repeat-supplier and 30-day reconnect counts to the operator surface.
+- Embedded recorded business roles, one-off/repeat pattern, transaction count, products and first/last business dates into private `/person` profiles when business history exists.
+- Recorded AUD transaction value is shown only as business history; it is not used as a trust or relationship score.
+- Business data remains hidden from non-private admin chats.
+- Kept integration additive through a small wrapper layer over the existing Relationship Manager admin bot to reduce regression risk.
+
 ## 1.2.0 — Relationship Intelligence + Passive Attention
 
 - Added Relationship Health (0–100), separate from relationship strength and trust.
