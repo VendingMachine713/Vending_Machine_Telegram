@@ -12,6 +12,7 @@ from .canonical_review_feedback import canonical_review_feedback_summary
 from .db import PlatformDB
 from .decision_engine import decision_summary
 from .entity_graph import entity_graph
+from .fleet_heartbeat import fleet_heartbeat_snapshot
 from .group_search_intelligence import group_search_intelligence_summary
 from .health_contract import health_snapshot
 from .intelligence_trust import trust_foundation_summary
@@ -22,10 +23,9 @@ from .platform_registry import service_registry
 from .relationship_intelligence import relationship_intelligence_summary
 from .rule_health import health_summary
 from .service_adapters import adapter_registry
-from .service_telemetry import service_telemetry_snapshot
 
 MISSION_CONTROL_CONTRACT_VERSION = 4
-MISSION_CONTROL_PLATFORM_REVISION = 2
+MISSION_CONTROL_PLATFORM_REVISION = 3
 
 
 def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, Any]:
@@ -62,7 +62,8 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
 
     registry = service_registry(root)
     adapters = adapter_registry(root)
-    telemetry = service_telemetry_snapshot(root)
+    fleet_heartbeat = fleet_heartbeat_snapshot(root)
+    telemetry = fleet_heartbeat["telemetry"]
     platform_health = health_snapshot(db.health_records())
     platform_intelligence = incident_intelligence_snapshot(root, limit=limit)
     rule_health = health_summary(root)
@@ -86,6 +87,12 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "adapter_supported_services": adapters["supported_count"],
             "adapter_ready_services": adapters["ready_count"],
             "adapter_evidence_required": adapters["evidence_required_count"],
+            "fleet_heartbeat_status": fleet_heartbeat["status"],
+            "fleet_heartbeat_integrated_services": fleet_heartbeat["integrated_service_count"],
+            "fleet_heartbeat_expected_services": fleet_heartbeat["expected_service_count"],
+            "fleet_heartbeat_integration_coverage_percent": fleet_heartbeat["integration_coverage_percent"],
+            "fleet_heartbeat_observed_coverage_percent": fleet_heartbeat["observed_coverage_percent"],
+            "fleet_heartbeat_incident_candidates": fleet_heartbeat["incident_candidate_count"],
             "telemetry_status": telemetry["status"],
             "telemetry_running_services": telemetry["running_count"],
             "telemetry_fresh_running": telemetry["fresh_running_count"],
@@ -132,6 +139,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "adapter_evidence_required": [
                 row for row in adapters["services"] if row["status"] == "EVIDENCE_REQUIRED"
             ],
+            "fleet_heartbeat_incident_candidates": fleet_heartbeat["incident_candidates"],
             "telemetry_attention_services": telemetry["attention_services"],
             "telemetry_late_services": telemetry["late_services"],
             "correlated_incident_intelligence_subjects": platform_intelligence["correlated_subjects"],
@@ -162,6 +170,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "registry": registry,
             "adapters": adapters,
             "telemetry": telemetry,
+            "fleet_heartbeat": fleet_heartbeat,
             "health": platform_health,
             "incident_intelligence": platform_intelligence,
         },
