@@ -18,6 +18,7 @@ from shared.vm_core.progress import format_progress
 from shared.vm_core.progress_registry import format_all_progress
 from shared.vm_core.admin_exceptions import admin_exceptions,format_admin_exceptions
 from shared.vm_core.incident_runtime import incident_timeline
+from shared.vm_core.autoposter_recovery import recovery_preview, format_recovery_preview
 MUTATING={'backup','support','start','stop','restart','supervise','poster_start','poster_stop','poster_restart'}
 POSTER_SERVICE='Smart_Auto_Poster_V2'
 
@@ -60,7 +61,7 @@ def help_text(cfg):
         '/vm\n/status\n/health\n/progress\n/intelligence\n/brain\n/registry\n/jobs\n/doctor\n/exceptions\n/incidents\n/backup\n/support\n'
         '/start <service>\n/stop <service>\n/restart <service>\n/supervise\n\n'
         'SMART AUTO POSTER\n'
-        '/poster\n/poster_status\n/poster_progress\n/poster_health\n/poster_queue\n/poster_campaigns\n'
+        '/poster\n/poster_status\n/poster_progress\n/poster_health\n/poster_queue\n/poster_campaigns\n/poster_recovery_preview\n'
         '/poster_start\n/poster_stop\n/poster_restart\n\n'
         'Mutating commands: '+('ENABLED' if cfg['allow_mutations'] else 'DISABLED')
     )
@@ -130,6 +131,9 @@ def handle_command(user_id:int,text:str,cfg:dict[str,Any]|None=None)->str:
     if cmd=='poster': return _poster_help(cfg)
     if cmd=='poster_status': return _poster_status_text()
     if cmd=='poster_progress': return _poster_progress_text()
+    if cmd=='poster_recovery_preview':
+        try: return format_recovery_preview(recovery_preview(ROOT))[:3900]
+        except Exception as exc: return f'SMART AUTO POSTER RECOVERY PREVIEW\nUnavailable: {type(exc).__name__}'
     if cmd=='poster_health': return _poster_cli('health')
     if cmd=='poster_queue': return _poster_cli('queue')
     if cmd=='poster_campaigns': return _poster_cli('campaigns')
