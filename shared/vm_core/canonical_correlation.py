@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -12,12 +13,11 @@ from .paths import project_root
 from .publisher import BotEventPublisher
 
 
-_RELATIONSHIP_TYPES = {
-    "intelligence.signal.relationship_dormant_presence",
-    "intelligence.signal.relationship_cooling_presence",
-}
+_RELATIONSHIP_TYPE = "intelligence.signal.relationship_dormant_presence"
 _SEARCH_TYPE = "intelligence.signal.search_activity_spike"
+_GUARD_TYPE = "intelligence.signal.guard_risk_elevated"
 _INFERENCE_TYPE = "relationship_reengagement_opportunity"
+_GUARD_MAX_AGE = timedelta(hours=6)
 
 
 def _payload(row: dict[str, Any]) -> dict[str, Any]:
@@ -26,6 +26,18 @@ def _payload(row: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError, json.JSONDecodeError):
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _parse_time(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _latest_by_subject(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -85,27 +97,34 @@ def _evidence_from_event(row: dict[str, Any]) -> EvidenceRef | None:
     )
 
 
-def correlate_relationship_search(*, root: Path | None = None, limit: int = 1000) -> dict[str, int]:
-    """Correlate canonical Relationship Manager state with Universal Search activity.
+def _recent_guard(row: dict[str, Any] | None, *, now: datetime) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    observed = _parse_time(row.get("created_at_utc"))
+    if observed is None or now - observed > _GUARD_MAX_AGE:
+        return None
+    return row
 
-    Produces an inference only. It does not create a recommendation or execute an
-    action. Supporting evidence points to durable canonical event IDs and is
-    provenance-verified before publication.
+
+def correlate_relationship_search(*, root: Path | None = None, limit: int = 1000) -> dict[str, int]:
+    """Correlate canonical dormant-relationship and Search activity with optional Guard risk.
+
+    During migration, opportunity creation intentionally mirrors the established
+    legacy path by requiring a *dormant* relationship. Cooling relationships remain
+    bridged canonically but are not promoted to opportunity inference until shadow
+    parity is proven and that expansion is separately governed.
     """
     root = root or project_root()
-    relationship_rows = [
-        row
-        for row in query_intelligence_events(
-            AuditQuery(
-                event_type_prefix="intelligence.signal.relationship_",
-                source="VM_Relationship_Manager",
-                subject_type="chat",
-                limit=limit,
-            ),
-            root=root,
-        )
-        if row.get("event_type") in _RELATIONSHIP_TYPES
-    ]
+    now = datetime.now(timezone.utc)
+    relationship_rows = query_intelligence_events(
+        AuditQuery(
+            event_type_prefix=_RELATIONSHIP_TYPE,
+            source="VM_Relationship_Manager",
+            subject_type="chat",
+            limit=limit,
+        ),
+        root=root,
+    )
     search_rows = query_intelligence_events(
         AuditQuery(
             event_type_prefix=_SEARCH_TYPE,
@@ -115,26 +134,44 @@ def correlate_relationship_search(*, root: Path | None = None, limit: int = 1000
         ),
         root=root,
     )
+    guard_rows = query_intelligence_events(
+        AuditQuery(
+            event_type_prefix=_GUARD_TYPE,
+            source="VM_Guard",
+            subject_type="chat",
+            limit=limit,
+        ),
+        root=root,
+    )
     relationships = _latest_by_subject(relationship_rows)
     searches = _latest_by_subject(search_rows)
-    result = {"matched_subjects": 0, "published": 0, "skipped_existing": 0, "invalid_evidence": 0}
+    guards = _latest_by_subject(guard_rows)
+    result = {
+        "matched_subjects": 0,
+        "published": 0,
+        "guard_suppressed": 0,
+        "skipped_existing": 0,
+        "invalid_evidence": 0,
+    }
 
     for subject_id in sorted(set(relationships) & set(searches)):
         result["matched_subjects"] += 1
         relationship = relationships[subject_id]
         search = searches[subject_id]
-        event_ids = (int(relationship["id"]), int(search["id"]))
+        guard = _recent_guard(guards.get(subject_id), now=now)
+        supporting_rows = [relationship, search]
+        if guard is not None:
+            supporting_rows.append(guard)
+        event_ids = tuple(int(row["id"]) for row in supporting_rows)
         signature = _support_signature(event_ids)
         if _already_correlated(root, subject_id, signature):
             result["skipped_existing"] += 1
             continue
 
         evidence_items = tuple(
-            item
-            for item in (_evidence_from_event(relationship), _evidence_from_event(search))
-            if item is not None
+            item for item in (_evidence_from_event(row) for row in supporting_rows) if item is not None
         )
-        if len(evidence_items) != 2:
+        if len(evidence_items) != len(supporting_rows):
             result["invalid_evidence"] += 1
             continue
         provenance = verify_record_evidence(evidence_items, root=root)
@@ -142,28 +179,49 @@ def correlate_relationship_search(*, root: Path | None = None, limit: int = 1000
             result["invalid_evidence"] += 1
             continue
 
-        relationship_payload = _payload(relationship)
-        search_payload = _payload(search)
-        relationship_attributes = relationship_payload.get("attributes") or {}
-        search_attributes = search_payload.get("attributes") or {}
+        relationship_attributes = _payload(relationship).get("attributes") or {}
+        search_attributes = _payload(search).get("attributes") or {}
+        guard_attributes = _payload(guard).get("attributes") if guard is not None else {}
+        try:
+            relationship_score = float(relationship_attributes.get("score") or 0.0)
+            activity_score = float(search_attributes.get("score") or 0.0)
+            guard_score = float((guard_attributes or {}).get("score") or 0.0)
+        except (TypeError, ValueError):
+            result["invalid_evidence"] += 1
+            continue
+
+        base_score = min(100.0, (activity_score * 0.55) + (relationship_score * 0.45))
+        suppressed = guard is not None and guard_score >= 60.0
+        opportunity_score = min(base_score, 40.0) if suppressed else base_score
+        if suppressed:
+            result["guard_suppressed"] += 1
+
+        rationale = (
+            "A dormant relationship is present in a chat whose indexed activity is materially "
+            "above its recent baseline"
+        )
+        if suppressed:
+            rationale += "; recent VM Guard risk suppresses progression beyond review"
+
         record = IntelligenceRecord.from_evidence(
             kind=IntelligenceKind.INFERENCE,
             record_type=_INFERENCE_TYPE,
             source="vm_core",
             subject_type="chat",
             subject_id=subject_id,
-            rationale=(
-                "A cooling or dormant relationship is present in a chat whose indexed "
-                "activity is materially above its recent baseline"
-            ),
+            rationale=rationale,
             evidence=evidence_items,
             half_life_seconds=48 * 3600,
             attributes={
                 "support_signature": signature,
                 "supporting_event_ids": sorted(event_ids),
-                "relationship_state": relationship_attributes.get("lifecycle_stage"),
+                "relationship_state": "dormant",
                 "relationship_score": relationship_attributes.get("relationship_score"),
                 "activity_ratio": search_attributes.get("ratio"),
+                "guard_risk_score": guard_score,
+                "guard_evidence_recent": guard is not None,
+                "suppressed": suppressed,
+                "opportunity_score": opportunity_score,
                 "opportunity_class": "reengagement",
                 "polarity": "positive",
                 "recommendation_created": False,
