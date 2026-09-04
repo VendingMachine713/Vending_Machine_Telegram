@@ -17,18 +17,21 @@ _SIGNAL_SOURCES: dict[str, str] = {
     "relationship_dormant_presence": "VM_Relationship_Manager",
     "relationship_cooling_presence": "VM_Relationship_Manager",
     "search_activity_spike": "Universal_Search",
+    "guard_risk_elevated": "VM_Guard",
 }
 
 _HALF_LIFE_SECONDS: dict[str, float] = {
     "relationship_dormant_presence": 7 * 24 * 3600,
     "relationship_cooling_presence": 7 * 24 * 3600,
     "search_activity_spike": 24 * 3600,
+    "guard_risk_elevated": 6 * 3600,
 }
 
 _POLARITY: dict[str, str] = {
     "relationship_dormant_presence": "negative",
     "relationship_cooling_presence": "negative",
     "search_activity_spike": "positive",
+    "guard_risk_elevated": "negative",
 }
 
 _SAFE_EVIDENCE_KEYS = {
