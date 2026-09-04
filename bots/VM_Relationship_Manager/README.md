@@ -168,6 +168,9 @@ monitor.py
 admin_bot.py
 business_memory.py
 business_admin.py
+business_import.py
+import_business_history.py
+business_history_template.csv
 jobs.py
 requirements.txt
 .env.example
@@ -359,3 +362,56 @@ Relationship Manager changes are covered by a dedicated GitHub Actions compile/t
 cd .\bots\VM_Relationship_Manager
 py -m unittest discover -s tests -p "test_*.py" -v
 ```
+
+## Historical Business Memory import
+
+Use `business_history_template.csv` to backfill previous client and supplier history. Bulk import is intentionally stricter than normal contact search: `contact` must be an existing Relationship Manager Telegram ID or an exact username. Fuzzy names are rejected so a historical record cannot silently attach to the wrong person.
+
+Required columns:
+
+```text
+contact,role,product
+```
+
+Supported optional columns:
+
+```text
+quantity,unit,total,currency,occurred_at,note,external_id
+```
+
+`role` must be `client` or `supplier`. `occurred_at` may be `YYYY-MM-DD` or an ISO-8601 timestamp with a timezone. If an exact time was not recorded, use a date only. `external_id` is recommended when available because it provides the strongest idempotency key.
+
+### 1. Preview first
+
+From the permanent Relationship Manager folder:
+
+```powershell
+py import_business_history.py .\business_history_template.csv
+```
+
+Preview is the default. It validates the complete file, resolves contacts, reports invalid rows, and reports rows that have already been imported. It does not insert business transaction rows.
+
+### 2. Apply only after the preview is clean
+
+```powershell
+py import_business_history.py .\business_history_template.csv --apply
+```
+
+To attribute the import in `admin_audit`:
+
+```powershell
+py import_business_history.py .\business_history_template.csv --apply --admin-id YOUR_TELEGRAM_ID
+```
+
+### Import safety
+
+- invalid rows cause the apply operation to fail before transaction rows are written
+- repeated imports are idempotent through `external_id` or a deterministic normalized row fingerprint
+- duplicate rows inside one CSV are skipped
+- unknown contacts fail closed and must be resolved/rescanned first
+- exact usernames are case-insensitive; fuzzy display names are never used for bulk writes
+- monetary values use integer minor units in storage
+- import receipts link each accepted CSV row to the created transaction
+- importing does not send any Telegram messages
+
+If multiple genuinely separate historical transactions have otherwise identical data, give each row a unique `external_id`; otherwise safe de-duplication will treat them as one record.
