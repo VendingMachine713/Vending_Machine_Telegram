@@ -230,3 +230,24 @@ class Database:
     def all(self, sql: str, params: Iterable[Any] = ()):
         with self.connect() as con:
             return con.execute(sql, tuple(params)).fetchall()
+
+    def backup_to(self, target: Path) -> Path:
+        """Create a transactionally consistent SQLite backup, including WAL state."""
+        target = Path(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temp = target.with_name(target.name + ".tmp")
+        temp.unlink(missing_ok=True)
+
+        with self._lock:
+            source = sqlite3.connect(self.path, timeout=30)
+            destination = sqlite3.connect(temp, timeout=30)
+            try:
+                source.execute("PRAGMA busy_timeout=30000")
+                source.backup(destination)
+                destination.commit()
+            finally:
+                destination.close()
+                source.close()
+
+        temp.replace(target)
+        return target

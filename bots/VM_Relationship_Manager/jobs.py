@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import shutil
 from datetime import datetime, timezone
-from pathlib import Path
 
 from config import Settings
 from database import Database, utcnow
@@ -42,7 +40,7 @@ class BackgroundJobs:
                 should_daily = not last_daily or (now - datetime.fromisoformat(last_daily["created_at"])).total_seconds() >= 86400
                 if should_daily:
                     self._backup()
-                    self._health("daily_backup", "ok", "Relationship database backup attempted.")
+                    self._health("daily_backup", "ok", "Relationship database backup completed.")
 
                 self._health("scheduler", "ok", "Background cycle completed.")
             except Exception as e:
@@ -58,7 +56,7 @@ class BackgroundJobs:
             return
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         target = self.settings.backup_dir / f"vm_relationships_{stamp}.db"
-        shutil.copy2(self.settings.database_path, target)
+        self.db.backup_to(target)
 
         backups = sorted(self.settings.backup_dir.glob("vm_relationships_*.db"), reverse=True)
         for old in backups[14:]:
