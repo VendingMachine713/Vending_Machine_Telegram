@@ -19,6 +19,7 @@ from .opportunity_intelligence import opportunity_summary
 from .paths import project_root
 from .platform_aggregation import incident_intelligence_snapshot
 from .platform_registry import service_registry
+from .posting_intelligence import posting_intelligence_summary
 from .relationship_intelligence import relationship_intelligence_summary
 from .rule_health import health_summary
 from .service_adapters import adapter_registry
@@ -50,6 +51,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
         limit=max(100, limit * 20),
         group_limit=limit,
     )
+    posting_intelligence = posting_intelligence_summary(root=root, limit=limit)
     canonical = canonical_operator_summary(root=root)
     canonical_recommendations = canonical_recommendation_summary(root=root, limit=limit)
     canonical_lifecycle = canonical_review_lifecycle_summary(root=root, limit=max(100, limit * 10))
@@ -76,6 +78,14 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
     for incident in incidents:
         severity = str(incident.get("severity") or "INFO").upper()
         severity_counts[severity] = severity_counts.get(severity, 0) + 1
+
+    posting_attention = [
+        row
+        for row in posting_intelligence["destinations"]
+        if row["delivery_health"] in {"ATTENTION", "DEGRADED"}
+        or row["needs_review"]
+        or row["quarantined"]
+    ]
 
     return {
         "contract_version": MISSION_CONTROL_CONTRACT_VERSION,
@@ -110,6 +120,10 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "relationship_cooling": relationship_intelligence["state_counts"].get("COOLING", 0),
             "group_search_intelligence_status": group_search_intelligence["status"],
             "group_activity_profiles": group_search_intelligence["group_count"],
+            "posting_intelligence_status": posting_intelligence["status"],
+            "posting_destinations": posting_intelligence["destination_count"],
+            "posting_attention_destinations": len(posting_attention),
+            "posting_uncertain_queue": posting_intelligence["queue_counts"].get("uncertain", 0),
             "trust_event_store": trust_foundation["event_store_status"],
             "canonical_subject_coverage": trust_foundation["canonical_subject_coverage"],
             "noncanonical_intelligence_subject_events": trust_foundation["noncanonical_subject_events"],
@@ -145,6 +159,8 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "group_activity_profiles": group_search_intelligence["groups"],
             "group_search_malformed_events": group_search_intelligence["malformed_events"],
             "group_search_noncanonical_events_ignored": group_search_intelligence["noncanonical_events_ignored"],
+            "posting_destinations": posting_attention,
+            "posting_malformed_rows": posting_intelligence["malformed_rows"],
             "noncanonical_intelligence_subject_events": trust_foundation["noncanonical_subject_events"],
             "canonical_readiness_reasons": list(readiness["reasons"]),
             "canonical_evidence_stale": bool(evidence_health["stale"]),
@@ -172,6 +188,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
         "trust_foundation": trust_foundation,
         "relationship_intelligence": relationship_intelligence,
         "group_search_intelligence": group_search_intelligence,
+        "posting_intelligence": posting_intelligence,
         "canonical": canonical,
         "canonical_recommendations": canonical_recommendations,
         "canonical_recommendation_lifecycle": canonical_lifecycle,
