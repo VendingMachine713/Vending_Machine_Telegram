@@ -33,7 +33,7 @@ class BusinessHistoryImporterTests(unittest.TestCase):
             (telegram_id, username, display_name, stamp, stamp, stamp, stamp),
         )
 
-    def test_preview_is_read_only_and_resolves_id_and_username(self):
+    def test_preview_is_read_only_for_transactions_and_resolves_id_and_username(self):
         csv_text = HEADER + (
             "1001,client,Product A,2,unit,120.50,AUD,2026-08-01,old order,a1\n"
             "@bob,supplier,Product B,10,box,500,AUD,2026-08-02T09:30:00+09:30,old supply,b1\n"
@@ -87,6 +87,14 @@ class BusinessHistoryImporterTests(unittest.TestCase):
         self.assertEqual(second.inserted, 0)
         self.assertEqual(second.skipped_duplicates, 1)
 
+    def test_hash_idempotency_is_stable_when_date_is_omitted(self):
+        csv_text = HEADER + "@alice,client,Product A,1,unit,,AUD,,old order,\n"
+        first = self.importer.apply_text(csv_text)
+        second = self.importer.apply_text(csv_text)
+        self.assertEqual(first.inserted, 1)
+        self.assertEqual(second.inserted, 0)
+        self.assertEqual(second.skipped_duplicates, 1)
+
     def test_duplicate_rows_inside_one_file_are_skipped(self):
         row = "1001,client,Product A,2,unit,120.50,AUD,2026-08-01,same,dup-1\n"
         preview = self.importer.preview_text(HEADER + row + row)
@@ -96,7 +104,7 @@ class BusinessHistoryImporterTests(unittest.TestCase):
         self.assertEqual(result.inserted, 1)
         self.assertEqual(result.skipped_duplicates, 1)
 
-    def test_validation_failure_writes_nothing(self):
+    def test_validation_failure_writes_no_transactions(self):
         csv_text = HEADER + (
             "1001,client,Product A,2,unit,100,AUD,2026-08-01,good,g1\n"
             "9999,client,Product B,1,unit,20,AUD,2026-08-02,bad,g2\n"
@@ -118,13 +126,21 @@ class BusinessHistoryImporterTests(unittest.TestCase):
         self.assertIn("missing required", messages)
         self.assertIn("unknown column", messages)
 
+    def test_extra_row_values_are_rejected(self):
+        csv_text = HEADER + (
+            "1001,client,A,1,unit,,AUD,2026-08-01,note,id-1,unexpected\n"
+        )
+        preview = self.importer.preview_text(csv_text)
+        self.assertFalse(preview.can_apply)
+        self.assertIn("more values", preview.problems[0].message)
+
     def test_naive_timestamp_is_rejected_but_date_only_is_allowed(self):
-        bad = HEADER + "1001,client,A,1,unit,,AUD,2026-08-01T10:30:00,,,\n"
+        bad = HEADER + "1001,client,A,1,unit,,AUD,2026-08-01T10:30:00,,\n"
         preview = self.importer.preview_text(bad)
         self.assertFalse(preview.can_apply)
         self.assertIn("timezone", preview.problems[0].message)
 
-        good = HEADER + "1001,client,A,1,unit,,AUD,2026-08-01,,,\n"
+        good = HEADER + "1001,client,A,1,unit,,AUD,2026-08-01,,\n"
         preview = self.importer.preview_text(good)
         self.assertTrue(preview.can_apply)
         self.assertIn("T12:00:00+00:00", preview.valid_rows[0].occurred_at)
