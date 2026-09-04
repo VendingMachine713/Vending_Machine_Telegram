@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 
 from .events import emit, correlation_id
+from .heartbeat import record_heartbeat
 
 
 class BotEventPublisher:
@@ -46,9 +47,36 @@ class BotEventPublisher:
         )
 
     def heartbeat(self, status: str = "ok", **details: Any) -> int | None:
+        counters = details.pop("counters", None)
+        active_task = details.pop("active_task", None)
+        last_success_utc = details.pop("last_success_utc", None)
+        last_error = details.pop("last_error", None)
+        recovery_state = details.pop("recovery_state", None)
+        try:
+            record_heartbeat(
+                self.source,
+                self.instance_id,
+                status=status,
+                active_task=active_task,
+                counters=counters if isinstance(counters, dict) else {},
+                last_success_utc=last_success_utc,
+                last_error=last_error,
+                recovery_state=recovery_state,
+                root=self.root,
+            )
+        except Exception as exc:
+            self.last_error = f"{type(exc).__name__}: {exc}"
         return self._publish(
             "service.heartbeat",
-            {"status": status, **details},
+            {
+                "status": status,
+                "active_task": active_task,
+                "counters": counters if isinstance(counters, dict) else {},
+                "last_success_utc": last_success_utc,
+                "last_error": last_error,
+                "recovery_state": recovery_state,
+                **details,
+            },
             subject_type="service",
             subject_id=self.source,
             severity="WARNING" if status.lower() not in {"ok", "online", "idle", "healthy"} else "INFO",
