@@ -28,6 +28,23 @@ _PERMANENT_NAMES = (
 PERMANENT = tuple(getattr(errors, name) for name in _PERMANENT_NAMES if hasattr(errors, name))
 
 
+def album_timeout_seconds(media_count: int) -> int:
+    """Bound album delivery time while giving large Telegram albums enough headroom."""
+    count = max(1, int(media_count))
+    return min(180, max(60, 18 * count))
+
+
+def is_file_reference_expired(exc: Exception) -> bool:
+    """Recognise Telethon/Telegram expired cached media-reference failures."""
+    name = type(exc).__name__.lower()
+    text = str(exc).lower().replace("-", "_")
+    if "filereferenceexpired" in name or "file_reference_expired" in name:
+        return True
+    if "file_reference" in text and "expired" in text:
+        return True
+    return "file reference" in text and "expired" in text
+
+
 class TelegramPool:
     def __init__(self, api_id: int, api_hash: str, sessions: dict[str, str], staging_chats: dict[str, int | None] | None = None,
                  media_cache_dir: Path = Path("data/cache")):
@@ -38,6 +55,18 @@ class TelegramPool:
         self.staging_chats = staging_chats or {}
         self.media_caches: dict[str, MediaCache] = {}
         self.media_cache_dir = Path(media_cache_dir)
+        self._send_locks: dict[str, asyncio.Lock] = {}
+
+    def _send_lock(self, account_key: str) -> asyncio.Lock:
+        lock = self._send_locks.get(account_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._send_locks[account_key] = lock
+        return lock
+
+    def account_busy(self, account_key: str) -> bool:
+        lock = self._send_locks.get(account_key)
+        return bool(lock and lock.locked())
 
     async def connect(self):
         self.media_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -46,6 +75,7 @@ class TelegramPool:
             await c.connect()
             self.clients[key] = c
             self.media_caches[key] = MediaCache(key, c, self.staging_chats.get(key), self.media_cache_dir)
+            self._send_lock(key)
 
     async def disconnect(self):
         if self.clients:
@@ -68,8 +98,10 @@ class TelegramPool:
     def connection_state(self) -> dict[str, bool]:
         out = {}
         for key, c in self.clients.items():
-            try: out[key] = bool(c.is_connected())
-            except Exception: out[key] = False
+            try:
+                out[key] = bool(c.is_connected())
+            except Exception:
+                out[key] = False
         return out
 
     async def authorization(self) -> dict[str, dict]:
@@ -100,7 +132,6 @@ class TelegramPool:
                 "forum": bool(getattr(e, "forum", False)),
             })
         return rows
-
 
     @staticmethod
     def _history_message_row(account_key: str, msg) -> dict:
@@ -166,25 +197,48 @@ class TelegramPool:
             rows.append(self._history_message_row(account_key, msg))
         return rows
 
-    async def send(self, account_key: str, group_id: int, caption: str, media: Iterable[str], mode: str, topic_id: int | None = None):
-        c = self.clients[account_key]
-        entity = await c.get_entity(group_id)
-        kwargs = {}
-        if topic_id:
-            # Telethon accepts reply_to for the message/topic root when posting in forums.
-            kwargs["reply_to"] = int(topic_id)
-        if mode == "text":
-            msg = await c.send_message(entity, caption, **kwargs)
-            return [msg.id]
-        files = [str(Path(x)) for x in media]
-        if not files:
-            raise RuntimeError("Photo-mode destination has no media files")
-        cached = await self.media_caches[account_key].get(files)
+    async def _send_photo_album(self, account_key: str, entity, files: list[str], caption: str, kwargs: dict):
+        cache = self.media_caches.get(account_key)
+        timeout = album_timeout_seconds(len(files))
+        cached = await asyncio.wait_for(cache.get(files), timeout=timeout) if cache else None
         send_files = cached if cached else files
-        messages = await c.send_file(entity, send_files, caption=caption or None, **kwargs)
-        if not isinstance(messages, list):
-            messages = [messages]
-        return [m.id for m in messages]
+        try:
+            return await asyncio.wait_for(
+                self.clients[account_key].send_file(entity, send_files, caption=caption or None, **kwargs),
+                timeout=timeout,
+            )
+        except Exception as exc:
+            # Telegram's persisted media references eventually expire. Invalidate only
+            # this album, restage the original local files once, then make one retry.
+            if not cached or not cache or not is_file_reference_expired(exc):
+                raise
+            await cache.invalidate(files)
+            refreshed = await asyncio.wait_for(cache.get(files), timeout=timeout)
+            retry_files = refreshed if refreshed else files
+            return await asyncio.wait_for(
+                self.clients[account_key].send_file(entity, retry_files, caption=caption or None, **kwargs),
+                timeout=timeout,
+            )
+
+    async def send(self, account_key: str, group_id: int, caption: str, media: Iterable[str], mode: str, topic_id: int | None = None):
+        """Send with at most one in-flight Telegram delivery per account."""
+        async with self._send_lock(account_key):
+            c = self.clients[account_key]
+            entity = await c.get_entity(group_id)
+            kwargs = {}
+            if topic_id:
+                # Telethon accepts reply_to for the message/topic root when posting in forums.
+                kwargs["reply_to"] = int(topic_id)
+            if mode == "text":
+                msg = await c.send_message(entity, caption, **kwargs)
+                return [msg.id]
+            files = [str(Path(x)) for x in media]
+            if not files:
+                raise RuntimeError("Photo-mode destination has no media files")
+            messages = await self._send_photo_album(account_key, entity, files, caption, kwargs)
+            if not isinstance(messages, list):
+                messages = [messages]
+            return [m.id for m in messages]
 
 
 def retry_time(seconds: int, buffer: int = 5) -> str:
@@ -198,6 +252,10 @@ def classify_exception(exc: Exception) -> tuple[str, str | None, bool]:
         return "slow_mode", retry_time(exc.seconds), False
     if isinstance(exc, PERMANENT):
         return type(exc).__name__, None, True
+    if is_file_reference_expired(exc):
+        # TelegramPool already performs one targeted cache refresh. If that retry also
+        # fails, keep the queue retryable rather than misclassifying the media as bad.
+        return "file_reference_expired", retry_time(30), False
     name = type(exc).__name__
     text = str(exc).lower()
     lname = name.lower()

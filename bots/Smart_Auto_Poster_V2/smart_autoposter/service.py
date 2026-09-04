@@ -16,7 +16,7 @@ from .maintenance import cleanup_storage, prune_database, database_integrity
 
 
 class AutoPosterService:
-    """Runs scheduler + queue worker + recovery + watchdog + optional admin control bot."""
+    """Runs scheduler + bounded delivery workers + recovery + watchdog."""
 
     def __init__(self, db, pool, settings, poll_seconds=5, scheduler_seconds=15):
         self.db = db
@@ -49,7 +49,6 @@ class AutoPosterService:
         self.scheduler = Scheduler(db, limits=limits)
         self.watchdog = Watchdog(db, stale_seconds=settings.heartbeat_stale_seconds, notifier=self.notifier)
         self.stop_requested = False
-        self.admin_task = None
         self.network_ok = True
         self._reconnect_backoff = settings.reconnect_initial_seconds
 
@@ -61,8 +60,10 @@ class AutoPosterService:
         keep = max(1, int(self.settings.auto_backup_keep))
         backups = sorted(self.settings.backup_dir.glob("smart_autoposter_auto_*.sqlite3"), key=lambda p: p.stat().st_mtime, reverse=True)
         for old in backups[keep:]:
-            try: old.unlink()
-            except OSError: pass
+            try:
+                old.unlink()
+            except OSError:
+                pass
         self.watchdog.beat("backup", "ok", {"path": str(dst)})
         return dst
 
@@ -101,8 +102,11 @@ class AutoPosterService:
     def _maintenance(self):
         integrity = database_integrity(self.db)
         cleanup = cleanup_storage(
-            log_dir=self.settings.log_dir, backup_dir=self.settings.backup_dir, diagnostics_dir=self.settings.diagnostics_dir,
-            log_days=self.settings.log_retention_days, backup_keep=self.settings.auto_backup_keep,
+            log_dir=self.settings.log_dir,
+            backup_dir=self.settings.backup_dir,
+            diagnostics_dir=self.settings.diagnostics_dir,
+            log_days=self.settings.log_retention_days,
+            backup_keep=self.settings.auto_backup_keep,
         )
         pruned = prune_database(self.db, event_days=self.settings.event_retention_days, queue_days=self.settings.queue_history_days)
         details = {"integrity": integrity, "cleanup": cleanup, "database_prune": pruned}
@@ -155,20 +159,32 @@ class AutoPosterService:
         self._reconnect_backoff = min(self.settings.reconnect_max_seconds, max(self.settings.reconnect_initial_seconds, self._reconnect_backoff * 2))
         return auth
 
-    async def _start_admin(self):
-        if not self.settings.admin_bot_enabled:
-            print("[ADMIN BOT] Disabled (set ADMIN_BOT_TOKEN + ADMIN_USER_IDS to enable).")
-            return None
-        try:
-            from .admin_bot import TelegramAdminController
-            controller = TelegramAdminController(self.db, self.settings, self.safety)
-            task = await controller.start_background()
-            print("[ADMIN BOT] Telegram control centre starting.")
-            return task
-        except Exception as exc:
-            self.db.event("ERROR", "admin_bot_start_failed", str(exc)[:800])
-            self.notifier.emit("IMPORTANT", "Admin bot failed to start", str(exc)[:1000], dedupe_key="admin-bot-start-failed", dedupe_window_seconds=3600)
-            return None
+    async def _run_worker_batch(self, auth: dict) -> bool:
+        """Run a bounded two-slot delivery batch.
+
+        TelegramPool serializes each account independently, so at most one send per
+        account is in flight while primary and secondary may make progress in parallel.
+        """
+        results = await asyncio.gather(
+            self.worker.run_once(auth),
+            self.worker.run_once(auth),
+            return_exceptions=True,
+        )
+        worked = False
+        for result in results:
+            if isinstance(result, BaseException):
+                self.watchdog.beat("worker", "error", str(result))
+                self.db.event("ERROR", "worker_loop_error", str(result)[:800])
+                self.notifier.emit(
+                    "IMPORTANT",
+                    "Worker error",
+                    str(result)[:1200],
+                    dedupe_key=f"worker:{type(result).__name__}",
+                    dedupe_window_seconds=3600,
+                )
+                continue
+            worked = bool(result) or worked
+        return worked
 
     async def run(self):
         problems = validate(self.db)
@@ -191,8 +207,7 @@ class AutoPosterService:
         self.watchdog.beat("service", "ok", {"started_at": datetime.now(timezone.utc).isoformat()})
         self.watchdog.beat("scheduler", "idle")
         self.watchdog.beat("worker", "idle")
-        self.admin_task = await self._start_admin()
-        print("[RUNNING] Smart Auto Poster V3.0 active (scheduler + worker + recovery + watchdog). Ctrl+C to stop.")
+        print("[RUNNING] Smart Auto Poster active (scheduler + bounded workers + recovery + watchdog). Ctrl+C to stop.")
         loop = asyncio.get_running_loop()
         last_schedule = 0.0
         last_safety = 0.0
@@ -211,16 +226,6 @@ class AutoPosterService:
             while not self.stop_requested:
                 now = loop.time()
                 self.watchdog.beat("service", "ok")
-
-                if self.settings.admin_bot_enabled and self.admin_task and self.admin_task.done():
-                    try:
-                        exc = self.admin_task.exception()
-                    except BaseException:
-                        exc = None
-                    self.db.event("WARNING", "admin_bot_stopped", str(exc or "Admin bot task stopped")[:800])
-                    self.notifier.emit("IMPORTANT", "Admin bot stopped", str(exc or "The Telegram admin task stopped and is being restarted."),
-                                       dedupe_key="admin-bot-stopped", dedupe_window_seconds=3600)
-                    self.admin_task = await self._start_admin()
 
                 if now - last_network >= self.settings.watchdog_seconds:
                     auth = await self._recover_network(auth)
@@ -243,18 +248,21 @@ class AutoPosterService:
                     last_schedule = now
 
                 if now - last_safety >= safety_interval:
-                    state = self.safety.evaluate(); last_safety = now
+                    state = self.safety.evaluate()
+                    last_safety = now
                     if state.paused and not state.manual:
                         self.notifier.emit("CRITICAL", "Circuit breaker active", state.reason or "Outbound posting paused", dedupe_key="circuit-breaker-active", dedupe_window_seconds=3600)
                 else:
                     state = self.safety.status()
 
                 if now - last_auth_refresh >= self.settings.auth_refresh_seconds and self.network_ok:
-                    auth = await self._refresh_auth(auth); last_auth_refresh = now
+                    auth = await self._refresh_auth(auth)
+                    last_auth_refresh = now
 
                 if self.settings.auto_backup_hours > 0 and now - last_backup >= self.settings.auto_backup_hours * 3600:
                     try:
-                        dst = self._auto_backup(); print(f"[BACKUP] {dst}")
+                        dst = self._auto_backup()
+                        print(f"[BACKUP] {dst}")
                     except Exception as exc:
                         self.db.event("WARNING", "auto_backup_failed", str(exc)[:800])
                         self.notifier.emit("IMPORTANT", "Automatic backup failed", str(exc)[:1000], dedupe_key="auto-backup-failed", dedupe_window_seconds=21600)
@@ -282,17 +290,22 @@ class AutoPosterService:
                     last_rescan = now
 
                 if now - last_summary >= self.settings.daily_summary_hours * 3600:
-                    try: self._daily_summary()
-                    except Exception as exc: self.db.event("WARNING", "daily_summary_failed", str(exc)[:800])
+                    try:
+                        self._daily_summary()
+                    except Exception as exc:
+                        self.db.event("WARNING", "daily_summary_failed", str(exc)[:800])
                     last_summary = now
 
                 if now - last_weekly >= self.settings.weekly_summary_hours * 3600:
-                    try: self._weekly_summary()
-                    except Exception as exc: self.db.event("WARNING", "weekly_summary_failed", str(exc)[:800])
+                    try:
+                        self._weekly_summary()
+                    except Exception as exc:
+                        self.db.event("WARNING", "weekly_summary_failed", str(exc)[:800])
                     last_weekly = now
 
                 if now - last_maintenance >= self.settings.maintenance_hours * 3600:
-                    try: self._maintenance()
+                    try:
+                        self._maintenance()
                     except Exception as exc:
                         self.db.event("WARNING", "maintenance_failed", str(exc)[:800])
                     last_maintenance = now
@@ -317,19 +330,9 @@ class AutoPosterService:
                     await asyncio.sleep(min(self._reconnect_backoff, max(5, self.poll_seconds)))
                     continue
 
-                try:
-                    worked = await self.worker.run_once(auth)
-                    self.watchdog.beat("worker", "ok" if worked else "idle", {"worked": bool(worked)})
-                except Exception as exc:
-                    self.watchdog.beat("worker", "error", str(exc))
-                    self.db.event("ERROR", "worker_loop_error", str(exc)[:800])
-                    self.notifier.emit("IMPORTANT", "Worker error", str(exc)[:1200], dedupe_key=f"worker:{type(exc).__name__}", dedupe_window_seconds=3600)
-                    worked = False
+                worked = await self._run_worker_batch(auth)
+                self.watchdog.beat("worker", "ok" if worked else "idle", {"worked": bool(worked)})
                 if not worked:
                     await asyncio.sleep(self.poll_seconds)
         finally:
             self.watchdog.beat("service", "stopped")
-            if self.admin_task:
-                self.admin_task.cancel()
-                try: await self.admin_task
-                except BaseException: pass
