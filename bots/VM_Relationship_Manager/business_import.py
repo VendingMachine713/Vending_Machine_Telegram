@@ -8,7 +8,12 @@ from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import Any
 
-from business_memory import VALID_ROLES, normalise_product_name, parse_money
+from business_memory import (
+    BusinessMemory,
+    VALID_ROLES,
+    normalise_product_name,
+    parse_money,
+)
 from database import Database, utcnow
 
 
@@ -100,6 +105,9 @@ class BusinessHistoryImporter:
 
     def __init__(self, db: Database):
         self.db = db
+        # The importer may be used directly by tests/tools, so make the business
+        # schema dependency explicit instead of relying on runtime startup order.
+        self.memory = BusinessMemory(db)
         self.init()
 
     def init(self) -> None:
@@ -218,7 +226,8 @@ class BusinessHistoryImporter:
         unit = " ".join((row.get("unit") or "unit").strip().split())[:32] or "unit"
         currency = self._currency(row.get("currency"))
         money = parse_money(row.get("total"), currency)
-        occurred_at = self._occurred_at(row.get("occurred_at"))
+        occurred_raw = (row.get("occurred_at") or "").strip()
+        occurred_at = self._occurred_at(occurred_raw)
         note = (row.get("note") or "").strip()[:1000] or None
         values = {
             "telegram_id": telegram_id,
@@ -228,7 +237,10 @@ class BusinessHistoryImporter:
             "unit": unit,
             "total_minor_units": money.minor_units if money else None,
             "currency": money.currency if money else currency,
-            "occurred_at": occurred_at,
+            # Keep row-hash dedupe stable when no date was supplied. The actual
+            # transaction still receives an import timestamp, but rerunning the
+            # same historical CSV does not create another transaction.
+            "occurred_at": occurred_at if occurred_raw else "<unspecified>",
             "note": note or "",
         }
         import_key = self._fingerprint(values, row.get("external_id"))
@@ -255,6 +267,9 @@ class BusinessHistoryImporter:
             return preview
 
         headers = [self._clean_header(item) for item in reader.fieldnames]
+        if any(not item for item in headers):
+            preview.problems.append(ImportProblem(1, "CSV contains a blank column name"))
+            return preview
         if len(headers) != len(set(headers)):
             preview.problems.append(ImportProblem(1, "CSV contains duplicate column names"))
             return preview
@@ -274,7 +289,20 @@ class BusinessHistoryImporter:
         # DictReader preserves original header spelling, so normalize row keys.
         seen_in_file: set[str] = set()
         for source_row, raw_row in enumerate(reader, start=2):
-            if raw_row is None or all(not (value or "").strip() for value in raw_row.values()):
+            if raw_row is None:
+                continue
+            extra = raw_row.get(None)
+            if extra and any((item or "").strip() for item in extra):
+                preview.total_rows += 1
+                preview.problems.append(
+                    ImportProblem(source_row, "row contains more values than the CSV header")
+                )
+                continue
+            if all(
+                not (value or "").strip()
+                for key, value in raw_row.items()
+                if key is not None
+            ):
                 continue
             preview.total_rows += 1
             row = {
