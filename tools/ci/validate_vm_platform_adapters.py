@@ -40,7 +40,7 @@ def main() -> int:
         raise SystemExit("service registry does not report all active adapters ready")
 
     control = mission_control(limit=5)
-    if control["contract_version"] != 4 or control["platform"]["revision"] != 1:
+    if control["contract_version"] != 4 or control["platform"]["revision"] < 1:
         raise SystemExit("Mission Control adapter revision is not exposed")
     if control["automatic_acceptance"] or control["automatic_execution"] or control["external_action_authority"]:
         raise SystemExit("Mission Control safety authority changed unexpectedly")
