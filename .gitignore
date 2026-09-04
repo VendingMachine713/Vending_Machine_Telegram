@@ -211,4 +211,7 @@ diagnostics/
 
 # Keep sanitized examples trackable.
 !bots/Smart_Auto_Poster_V2/config/telegram_recommended_config.example.csv
+
+# Private Relationship Manager imports contain real business history.
+bots/VM_Relationship_Manager/business_history_import*.csv
 # ===== END PUBLIC RELEASE HARDENING =====
