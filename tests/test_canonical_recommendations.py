@@ -10,6 +10,7 @@ from shared.vm_core.canonical_recommendations import (
 )
 from shared.vm_core.db import PlatformDB
 from shared.vm_core.intelligence_trust import canonical_entity_id
+from shared.vm_core.mission_control import mission_control
 
 
 class CanonicalRecommendationTests(unittest.TestCase):
@@ -87,6 +88,12 @@ class CanonicalRecommendationTests(unittest.TestCase):
             self.assertFalse(summary["automatic_acceptance"])
             self.assertFalse(summary["automatic_execution"])
             self.assertFalse(summary["external_action_authority"])
+            control = mission_control(root)
+            self.assertEqual(control["headline"]["canonical_review_recommendations"], 5)
+            self.assertEqual(len(control["attention"]["canonical_review_recommendations"]), 5)
+            self.assertFalse(control["automatic_acceptance"])
+            self.assertFalse(control["automatic_execution"])
+            self.assertFalse(control["external_action_authority"])
 
     def test_suppressed_inference_is_never_proposed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
