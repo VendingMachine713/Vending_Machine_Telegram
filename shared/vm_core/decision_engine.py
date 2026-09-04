@@ -220,7 +220,7 @@ def canonical_decisions(
 
     rows.sort(
         key=lambda item: (
-            item["disposition"] == "RISK_REVIEW_FIRST",
+            item["disposition"] != "RISK_REVIEW_FIRST",
             -float(item["decision_score"]),
             -float(item["forecast_probability"]),
             str(item["canonical_subject_id"]),
