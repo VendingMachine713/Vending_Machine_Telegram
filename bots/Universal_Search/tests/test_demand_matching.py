@@ -33,6 +33,13 @@ class DemandMatchingTests(unittest.TestCase):
             self.assertEqual(store.acknowledge_market_match(row["demand_chat_id"], row["demand_message_id"], row["supply_chat_id"], row["supply_message_id"]), 1)
             self.assertEqual(store.market_matches(), [])
 
+    def test_feedback_is_owner_scoped_and_deduplicated(self):
+        with tempfile.TemporaryDirectory() as d:
+            store = Store(Path(d) / "demand.db")
+            self.assertTrue(store.record_match_feedback(1, 2, 3, 4, 9, "positive"))
+            self.assertTrue(store.record_match_feedback(1, 2, 3, 4, 9, "negative"))
+            self.assertEqual([(r["outcome"], r["count"]) for r in store.match_engine_stats()], [("negative", 1)])
+
 
 if __name__ == "__main__":
     unittest.main()

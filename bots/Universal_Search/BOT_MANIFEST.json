@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "name": "Universal_Search",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "status": "existing",
   "classification": "CANONICAL",
   "entrypoint": "main.py",
@@ -56,7 +56,9 @@
     "owner_only_marketplace_queries",
     "passive_demand_supply_matching",
     "durable_match_review_queue",
-    "no_historic_match_flood"
+    "no_historic_match_flood",
+    "conservative_match_feedback",
+    "match_engine_calibration_telemetry"
   ],
   "lifecycle": {
     "managed_by_vm": true,

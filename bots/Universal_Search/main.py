@@ -544,6 +544,23 @@ async def ackmatch_cmd(update, context):
     await update.effective_message.reply_text("✅ Match acknowledged." if changed else "Match not found.")
 
 
+async def matchfeedback_cmd(update, context):
+    if not private_admin(update): return await deny(update)
+    if len(context.args) != 5 or context.args[4].lower() not in {"positive", "negative"}:
+        await update.effective_message.reply_text("Use /matchfeedback DEMAND_CHAT DEMAND_MESSAGE SUPPLY_CHAT SUPPLY_MESSAGE positive|negative"); return
+    try: args = [int(x) for x in context.args[:4]]
+    except ValueError:
+        await update.effective_message.reply_text("Match identifiers must be numeric."); return
+    store.record_match_feedback(*args, update.effective_user.id, context.args[4].lower())
+    await update.effective_message.reply_text("✅ Feedback recorded. Matching thresholds remain unchanged until reviewed.")
+
+
+async def matchengine_cmd(update, context):
+    if not private_admin(update): return await deny(update)
+    rows = store.match_engine_stats()
+    await update.effective_message.reply_text("Match Engine v2 feedback (read-only):\n" + ("\n".join(f"{r['outcome']}: {r['count']}" for r in rows) or "No feedback recorded yet.") + "\n\nThresholds are fixed and require explicit review to change.")
+
+
 async def backfill_status_cmd(update, context):
     if not private_admin(update):
         return await deny(update)
@@ -723,6 +740,8 @@ def main():
     app.add_handler(CommandHandler("marketstats", marketstats_cmd))
     app.add_handler(CommandHandler("matches", matches_cmd))
     app.add_handler(CommandHandler("ackmatch", ackmatch_cmd))
+    app.add_handler(CommandHandler("matchfeedback", matchfeedback_cmd))
+    app.add_handler(CommandHandler("matchengine", matchengine_cmd))
     app.add_handler(CallbackQueryHandler(search_page_callback, pattern=r"^us:"))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, index_message))
     if not admin_id() and not central_owner_ids(ROOT):
