@@ -18,11 +18,15 @@ def fingerprint(paths: Iterable[str]) -> str:
                 h.update(chunk)
     return h.hexdigest()
 
+
 class MediaCache:
     """Per-account persistent staging-message cache.
 
     State contains message IDs only. Telegram sessions remain local and are never copied.
+    Cached Telegram media references can expire; callers may invalidate one fingerprint
+    and restage the original local files without clearing unrelated cache entries.
     """
+
     def __init__(self, account_key: str, client, staging_chat_id: int | None, state_dir: Path = Path(".")):
         self.account_key = account_key
         self.client = client
@@ -32,7 +36,8 @@ class MediaCache:
         self._lock = asyncio.Lock()
 
     def _load_state(self) -> dict:
-        if not self.path.exists(): return {"version": 1, "items": {}}
+        if not self.path.exists():
+            return {"version": 1, "items": {}}
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
             return data if isinstance(data, dict) and isinstance(data.get("items"), dict) else {"version": 1, "items": {}}
@@ -40,9 +45,23 @@ class MediaCache:
             return {"version": 1, "items": {}}
 
     def _save_state(self, data: dict):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         tmp.replace(self.path)
+
+    async def invalidate(self, media: list[str]) -> bool:
+        """Remove one cached album fingerprint from memory and persistent state."""
+        if not media:
+            return False
+        fp = fingerprint(media)
+        async with self._lock:
+            removed = self._memory.pop(fp, None) is not None
+            state = self._load_state()
+            if state["items"].pop(fp, None) is not None:
+                removed = True
+                self._save_state(state)
+            return removed
 
     async def get(self, media: list[str]):
         if not self.staging_chat_id or not media:
@@ -59,13 +78,15 @@ class MediaCache:
                 ids = [int(x) for x in item.get("message_ids", [])]
                 if ids:
                     msgs = await self.client.get_messages(self.staging_chat_id, ids=ids)
-                    if not isinstance(msgs, list): msgs = [msgs]
+                    if not isinstance(msgs, list):
+                        msgs = [msgs]
                     if len(msgs) == len(ids) and all(m is not None and getattr(m, "media", None) is not None for m in msgs):
                         refs = [m.media for m in msgs]
                         self._memory[fp] = refs
                         return refs
             messages = await self.client.send_file(self.staging_chat_id, media)
-            if not isinstance(messages, list): messages = [messages]
+            if not isinstance(messages, list):
+                messages = [messages]
             refs = [m.media for m in messages]
             state["items"][fp] = {
                 "staging_chat_id": int(self.staging_chat_id),

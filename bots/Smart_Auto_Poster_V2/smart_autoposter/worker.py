@@ -16,6 +16,9 @@ from .telegram_io import classify_exception
 from .time_rules import quiet_until
 
 
+COLLAPSED_ACCOUNT_HEALTH = 5
+
+
 class Worker:
     def __init__(self, db: Database, pool, poll_seconds=5, timezone_name="Australia/Adelaide", min_send_gap_seconds=3, safety=None, notifier=None):
         self.db = db
@@ -140,8 +143,8 @@ class Worker:
 
         Fresh pending work is deliberately preferred over retry/deferred work, and
         destinations with a clean recent history are preferred over repeatedly failing
-        destinations. This keeps one problematic group from holding up the healthy
-        path while preserving campaign priority and due-time ordering.
+        destinations. Retry/deferred work is unpinned at claim time so a healthy
+        authorised account can take over. UNCERTAIN rows are never eligible here.
         """
         now = utcnow()
         with self.db.connect() as con:
@@ -170,39 +173,73 @@ class Worker:
                                  LIMIT 1''', (now, now, now, now, now)).fetchone()
             if not row:
                 return None
-            changed = con.execute("UPDATE queue SET status='sending',updated_at=? WHERE id=? AND status IN ('pending','retry','deferred')", (now, row["id"]))
+            prior_status = str(row["status"])
+            changed = con.execute(
+                """UPDATE queue
+                   SET status='sending',
+                       account_key=CASE WHEN status IN ('retry','deferred') THEN NULL ELSE account_key END,
+                       updated_at=?
+                   WHERE id=? AND status IN ('pending','retry','deferred')""",
+                (now, row["id"]),
+            )
             if changed.rowcount != 1:
                 return None
-            return dict(row)
+            job = dict(row)
+            if prior_status in {"retry", "deferred"}:
+                job["account_key"] = None
+            job["claimed_from_status"] = prior_status
+            return job
 
     def _account_rows(self):
         with self.db.connect() as con:
             rows = con.execute("SELECT * FROM accounts").fetchall()
         return {r["account_key"]: dict(r) for r in rows}
 
+    @staticmethod
+    def _health(account: dict | None) -> int:
+        if not account:
+            return 100
+        value = account.get("health_score")
+        return int(value) if value is not None else 100
+
+    def _account_busy(self, key: str) -> bool:
+        checker = getattr(self.pool, "account_busy", None)
+        if not callable(checker):
+            return False
+        try:
+            return bool(checker(key))
+        except Exception:
+            return False
+
     def choose_account(self, job, auth):
         rows = self._account_rows()
         now = datetime.now(timezone.utc)
 
         if job.get("account_key"):
+            # A remaining account key is an explicit hard pin on fresh work. Safe
+            # retry/deferred rows are unpinned by claim() before they reach here.
             candidates = [job["account_key"]]
         else:
             preferred = (job["preferred_account"] or "primary").lower()
-            candidates = []
-            if preferred in {"primary", "secondary"}:
-                candidates.append(preferred)
-            elif preferred == "both":
-                def balance_key(key):
-                    r = rows.get(key, {})
-                    health = int(r.get("health_score") or 0)
-                    last = r.get("last_success_at") or ""
-                    return (-health, last, key)
-                candidates.extend(sorted(["primary", "secondary"], key=balance_key))
-            for key in ["primary", "secondary"]:
-                if key not in candidates:
-                    candidates.append(key)
+            if preferred == "both":
+                candidates = sorted(
+                    ["primary", "secondary"],
+                    key=lambda key: (-self._health(rows.get(key)), rows.get(key, {}).get("last_success_at") or "", key),
+                )
+            elif preferred in {"primary", "secondary"}:
+                alternate = "secondary" if preferred == "primary" else "primary"
+                candidates = [preferred, alternate]
+                preferred_health = self._health(rows.get(preferred))
+                alternate_health = self._health(rows.get(alternate))
+                if preferred_health <= COLLAPSED_ACCOUNT_HEALTH and alternate_health > preferred_health:
+                    # Destination affinity is a preference, not a mandate to continue
+                    # using a collapsed account when a healthier authorised route exists.
+                    candidates = [alternate, preferred]
+            else:
+                candidates = ["primary", "secondary"]
 
         cooling = []
+        busy = False
         accessible_authorized = False
         for key in candidates:
             if key not in {"primary", "secondary"}:
@@ -214,6 +251,9 @@ class Worker:
             accessible_authorized = True
             account = rows.get(key, {})
             if not bool(account.get("enabled", 1)):
+                continue
+            if self._account_busy(key):
+                busy = True
                 continue
             raw = account.get("cooldown_until")
             if raw:
@@ -239,6 +279,8 @@ class Worker:
                     pass
             return key, None, None
 
+        if busy:
+            return None, (now + timedelta(seconds=1)).isoformat(timespec="seconds"), "account_busy"
         if cooling:
             return None, min(cooling).isoformat(timespec="seconds"), "account_cooldown_or_pacing"
         if accessible_authorized:
@@ -424,7 +466,7 @@ class Worker:
                         (status, account, attempts, due, kind, error[:1000], now if status in {'failed','quarantined','cancelled','expired'} else None, now, job["id"]))
             if kind == "slow_mode" and retry_at:
                 con.execute("UPDATE destinations SET next_eligible_at=?,updated_at=? WHERE group_id=?", (retry_at, now, job["group_id"]))
-            penalize_destination = kind not in {"network", "worker_busy", "flood_wait", "slow_mode", "no_authorized_account", "account_disabled", "account_cooldown", "account_cooldown_or_pacing"}
+            penalize_destination = kind not in {"network", "worker_busy", "flood_wait", "slow_mode", "no_authorized_account", "account_disabled", "account_cooldown", "account_cooldown_or_pacing", "account_busy"}
             if penalize_destination:
                 con.execute("UPDATE destinations SET consecutive_failures=consecutive_failures+1,updated_at=? WHERE group_id=?", (now, job["group_id"]))
                 failures = con.execute("SELECT consecutive_failures FROM destinations WHERE group_id=?", (job["group_id"],)).fetchone()[0]
