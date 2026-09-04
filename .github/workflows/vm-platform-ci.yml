@@ -61,7 +61,7 @@ jobs:
             echo false
           }
 
-          platform=$(match_any '^shared/' '^tests/' '^tools/ci/' '^tools/(PREFLIGHT_ADMIN_RUNTIME_CUTOVER|CUTOVER_ADMIN_COMMAND_CENTRE|RECOVER_ADMIN_COMMAND_CENTRE)\.ps1$' '^vm\.py$')
+          platform=$(match_any '^shared/' '^tests/' '^tools/ci/' '^tools/(PREFLIGHT_ADMIN_RUNTIME_CUTOVER|CUTOVER_ADMIN_RUNTIME|RECOVER_ADMIN_COMMAND_CENTRE)\.ps1$' '^vm\.py$')
           universal_search=$(match_any '^bots/Universal_Search/')
           vm_guard=$(match_any '^bots/VM_Guard/')
           admin_command_centre=$(match_any '^bots/Admin_Command_Centre/')
