@@ -12,6 +12,7 @@ from .canonical_review_feedback import canonical_review_feedback_summary
 from .db import PlatformDB
 from .decision_engine import decision_summary
 from .entity_graph import entity_graph
+from .group_search_intelligence import group_search_intelligence_summary
 from .health_contract import health_snapshot
 from .intelligence_trust import trust_foundation_summary
 from .opportunity_intelligence import opportunity_summary
@@ -40,6 +41,11 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
         root=root,
         limit=max(100, limit * 20),
         profile_limit=limit,
+    )
+    group_search_intelligence = group_search_intelligence_summary(
+        root=root,
+        limit=max(100, limit * 20),
+        group_limit=limit,
     )
     canonical = canonical_operator_summary(root=root)
     canonical_recommendations = canonical_recommendation_summary(root=root, limit=limit)
@@ -87,6 +93,8 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "relationship_profiles": relationship_intelligence["profile_count"],
             "relationship_dormant": relationship_intelligence["state_counts"].get("DORMANT", 0),
             "relationship_cooling": relationship_intelligence["state_counts"].get("COOLING", 0),
+            "group_search_intelligence_status": group_search_intelligence["status"],
+            "group_activity_profiles": group_search_intelligence["group_count"],
             "trust_event_store": trust_foundation["event_store_status"],
             "canonical_subject_coverage": trust_foundation["canonical_subject_coverage"],
             "noncanonical_intelligence_subject_events": trust_foundation["noncanonical_subject_events"],
@@ -113,6 +121,9 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "relationship_profiles": relationship_intelligence["profiles"],
             "relationship_malformed_events": relationship_intelligence["malformed_events"],
             "relationship_noncanonical_events_ignored": relationship_intelligence["noncanonical_events_ignored"],
+            "group_activity_profiles": group_search_intelligence["groups"],
+            "group_search_malformed_events": group_search_intelligence["malformed_events"],
+            "group_search_noncanonical_events_ignored": group_search_intelligence["noncanonical_events_ignored"],
             "noncanonical_intelligence_subject_events": trust_foundation["noncanonical_subject_events"],
             "canonical_readiness_reasons": list(readiness["reasons"]),
             "canonical_evidence_stale": bool(evidence_health["stale"]),
@@ -135,6 +146,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
         "rule_health": rule_health,
         "trust_foundation": trust_foundation,
         "relationship_intelligence": relationship_intelligence,
+        "group_search_intelligence": group_search_intelligence,
         "canonical": canonical,
         "canonical_recommendations": canonical_recommendations,
         "canonical_recommendation_lifecycle": canonical_lifecycle,
