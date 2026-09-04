@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .canonical_calibration import canonical_calibration_summary
 from .canonical_health import canonical_evidence_health_summary
 from .canonical_shadow import ParityPolicy, evaluate_legacy_canonical_parity
 from .intelligence_audit import AuditQuery, audit_summary, query_intelligence_events
@@ -102,9 +103,11 @@ def canonical_operator_summary(*, root: Path | None = None) -> dict[str, Any]:
     root = root or project_root()
     readiness = canonical_recommendation_readiness(root=root)
     evidence_health = canonical_evidence_health_summary(root=root)
+    calibration = canonical_calibration_summary(root=root)
     return {
         "canonical_readiness": asdict(readiness),
         "evidence_health": evidence_health,
+        "calibration": calibration,
         "intelligence_audit": audit_summary(root=root),
         "operator_action_required": not readiness.ready_for_recommendation_development,
         "recommended_operator_action": (

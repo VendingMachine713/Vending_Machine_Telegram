@@ -26,6 +26,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
     canonical = canonical_operator_summary(root=root)
     readiness = canonical["canonical_readiness"]
     evidence_health = canonical["evidence_health"]
+    calibration = canonical["calibration"]
 
     runtime_counts: dict[str, int] = {}
     for service in services:
@@ -54,6 +55,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "canonical_shadow_samples": readiness["canonical_inference_count"],
             "canonical_parity": readiness["parity_status"],
             "canonical_evidence_health": evidence_health["status"],
+            "canonical_calibration": calibration["status"],
         },
         "attention": {
             "incidents": incidents,
@@ -62,6 +64,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "blocked_opportunities": [row for row in opportunities["top_opportunities"] if row["blocked"]],
             "canonical_readiness_reasons": list(readiness["reasons"]),
             "canonical_evidence_stale": bool(evidence_health["stale"]),
+            "canonical_calibration_review_required": calibration["status"] == "REVIEW_REQUIRED",
         },
         "opportunities": opportunities["top_opportunities"],
         "decisions": decisions["top_decisions"],
