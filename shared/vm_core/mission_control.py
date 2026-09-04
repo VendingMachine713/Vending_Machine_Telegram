@@ -16,6 +16,7 @@ from .fleet_heartbeat import fleet_heartbeat_snapshot
 from .group_search_intelligence import group_search_intelligence_summary
 from .health_contract import health_snapshot
 from .intelligence_trust import trust_foundation_summary
+from .learning import canonical_learning_feedback_summary
 from .opportunity_intelligence import opportunity_summary
 from .paths import project_root
 from .platform_aggregation import incident_intelligence_snapshot
@@ -44,6 +45,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
     risk_fusion = canonical_risk_fusion_summary(root=root, limit=max(100, limit * 20))
     risk_adjusted_opportunities = risk_adjusted_canonical_opportunities(root=root, limit=limit)
     predictions = prediction_summary(root=root, limit=limit)
+    learning_feedback = canonical_learning_feedback_summary(root=root)
     graph = entity_graph(root, limit=max(100, limit * 10))
     trust_foundation = trust_foundation_summary(root=root, limit=max(100, limit * 10))
     relationship_intelligence = relationship_intelligence_summary(
@@ -135,6 +137,10 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "prediction_count": predictions["prediction_count"],
             "prediction_empirical_base_rate_used": predictions["empirical_base_rate_used"],
             "prediction_verified_outcomes": predictions["verified_outcome_count"],
+            "learning_feedback_status": learning_feedback["status"],
+            "learning_completed_outcome_coverage": learning_feedback["outcome_coverage_completed"],
+            "learning_completed_without_outcome": learning_feedback["completed_without_outcome"],
+            "prediction_backtest_status": learning_feedback["prediction_backtest_status"],
             "entities": graph["node_count"],
             "relationships": graph["edge_count"],
             "relationship_intelligence_status": relationship_intelligence["status"],
@@ -175,6 +181,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "correlated_incident_intelligence_subjects": platform_intelligence["correlated_subjects"],
             "conflicts": decisions["conflicts"],
             "canonical_decisions": decisions["canonical_top_decisions"],
+            "learning_review_flags": learning_feedback["learning_review_flags"],
             "rollback_recommendations": rule_health["rollback_recommendations"],
             "blocked_opportunities": [row for row in opportunities["top_opportunities"] if row["blocked"]],
             "canonical_opportunities": opportunities["canonical_top_opportunities"],
@@ -220,6 +227,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
         "decisions": decisions["top_decisions"],
         "canonical_decisions": decisions["canonical_top_decisions"],
         "decision_summary": decisions,
+        "learning_feedback": learning_feedback,
         "rule_health": rule_health,
         "trust_foundation": trust_foundation,
         "relationship_intelligence": relationship_intelligence,
