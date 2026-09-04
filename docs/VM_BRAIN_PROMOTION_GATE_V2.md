@@ -26,7 +26,7 @@ If any required condition fails, the state remains `SHADOW_EVIDENCE_REQUIRED` an
 `canonical_calibration_review_required`
 : Enough verified positive/negative outcomes exist to evaluate calibration and the confidence model is materially miscalibrated.
 
-Calibration does not block promotion while there are fewer than the configured minimum verified outcomes; the system reports `INSUFFICIENT_DATA` instead of pretending the model is calibrated.
+Calibration does not block promotion while there are fewer than the configured minimum verified outcomes; the system reports `INSUFFICIENT_DATA` instead of pretending the model is calibrated. Once the minimum is reached, only a demonstrated `REVIEW_REQUIRED` calibration state adds a calibration hold; insufficient data is never silently treated as proof of model quality.
 
 ## Safety
 
