@@ -166,9 +166,12 @@ database.py
 relationship_engine.py
 monitor.py
 admin_bot.py
+business_memory.py
+business_admin.py
 jobs.py
 requirements.txt
 .env.example
+tests/
 ```
 
 ## Planned integration points
@@ -317,3 +320,42 @@ New passive commands:
 - `/slipping` — higher-value relationships whose health needs watching.
 
 Smart cycle alerts are suggestions only. The Relationship Manager never contacts another person automatically.
+
+## Business Memory CRM
+
+Business Memory adds a private client/supplier history layer to the existing Relationship Manager database.
+It is designed for manual recording plus passive recall: record an interaction once, then use the history later to identify regular clients, previous buyers of a product, established suppliers, and people worth touching base with.
+
+Business Memory is additive. It does not replace Telegram relationship scoring and it does not automatically contact anyone.
+
+### Commands
+
+```text
+/business
+/deal client @username | Product Name | 2 | 120.00 | optional note
+/deal supplier @username | Product Name | 10 | 500.00 | optional note
+/history @username
+/clients
+/clients Product Name
+/suppliers
+/suppliers Product Name
+/reload Product Name
+/touchbase 30
+```
+
+For `/deal`, only the role/contact and product are required. Quantity defaults to `1`; total value and note may be left blank. Monetary totals are stored as integer minor units and default to AUD.
+
+`/reload` is deliberately read-only: it ranks previous clients for a product so the operator can review who to contact. `/touchbase` identifies previous clients whose last recorded transaction is older than the chosen number of days. Neither command sends messages automatically.
+
+### Privacy and security
+
+Business-memory commands are restricted to configured admin IDs and private chats with the admin bot. Business history remains in the existing Relationship Manager SQLite database and is included in the normal database backup path. Product names, quantities, optional transaction totals, and optional operator notes are stored; Telegram message bodies are not captured by this feature.
+
+### Quality gate
+
+Relationship Manager changes are covered by a dedicated GitHub Actions compile/test job. Local focused tests can be run with:
+
+```powershell
+cd .\bots\VM_Relationship_Manager
+py -m unittest discover -s tests -p "test_*.py" -v
+```
