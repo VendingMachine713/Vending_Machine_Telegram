@@ -19,12 +19,12 @@ class VMIntelligenceTests(unittest.TestCase):
                 version = con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0]
                 event = con.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
                 tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            self.assertEqual(version, "3")
+            self.assertEqual(version, "4")
             self.assertEqual(event["event_version"], 1)
             self.assertEqual(event["severity"], "INFO")
             self.assertIn("incidents", tables)
             self.assertIn("intelligence_signals", tables)
-            self.assertIn("intelligence_recommendations", tables)
+            self.assertIn("intelligence_recommendations", tables)\n            self.assertIn("service_heartbeats", tables)
 
     def test_structured_event_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp:
