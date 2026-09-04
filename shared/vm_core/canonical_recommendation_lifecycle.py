@@ -38,6 +38,13 @@ def _parse_utc(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _int_or_zero(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _latest_inference(root: Path, subject_id: str) -> dict[str, Any] | None:
     rows = query_intelligence_events(
         AuditQuery(
@@ -49,7 +56,7 @@ def _latest_inference(root: Path, subject_id: str) -> dict[str, Any] | None:
         ),
         root=root,
     )
-    return max(rows, key=lambda row: int(row.get("id") or 0), default=None)
+    return max(rows, key=lambda row: _int_or_zero(row.get("id")), default=None)
 
 
 def expire_canonical_review_proposals(
@@ -93,7 +100,7 @@ def expire_canonical_review_proposals(
         subject_id = str(recommendation.get("subject_id") or "").strip()
         recommendation_key = str(recommendation.get("recommendation_key") or "").strip()
         evidence = _json_dict(recommendation.get("evidence_json"))
-        expected_event_id = int(evidence.get("canonical_inference_event_id") or 0)
+        expected_event_id = _int_or_zero(evidence.get("canonical_inference_event_id"))
         expected_signature = str(evidence.get("support_signature") or "").strip()
         if not subject_id or not recommendation_key or expected_event_id <= 0 or not expected_signature:
             reason = "invalid_provenance"
@@ -111,7 +118,7 @@ def expire_canonical_review_proposals(
                     reason = "invalid_inference_timestamp"
                 elif max(0.0, (now - created).total_seconds() / 3600.0) > stale_hours:
                     reason = "stale_canonical_inference"
-                elif int(latest.get("id") or 0) != expected_event_id and latest_signature != expected_signature:
+                elif _int_or_zero(latest.get("id")) != expected_event_id and latest_signature != expected_signature:
                     reason = "superseded_canonical_inference"
                 elif bool(latest_attributes.get("suppressed")):
                     reason = "latest_inference_suppressed"
