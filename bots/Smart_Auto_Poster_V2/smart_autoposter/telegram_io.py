@@ -101,6 +101,71 @@ class TelegramPool:
             })
         return rows
 
+
+    @staticmethod
+    def _history_message_row(account_key: str, msg) -> dict:
+        date = getattr(msg, "date", None)
+        if date is not None and getattr(date, "tzinfo", None) is None:
+            date = date.replace(tzinfo=timezone.utc)
+        reply = getattr(msg, "reply_to", None)
+        return {
+            "account_key": account_key,
+            "id": int(getattr(msg, "id")),
+            "date": date.isoformat() if date is not None else None,
+            "text": getattr(msg, "message", None) or "",
+            "out": bool(getattr(msg, "out", False)),
+            "grouped_id": getattr(msg, "grouped_id", None),
+            "has_media": getattr(msg, "media", None) is not None,
+            "reply_to_msg_id": getattr(reply, "reply_to_msg_id", None) if reply is not None else None,
+            "reply_to_top_id": getattr(reply, "reply_to_top_id", None) if reply is not None else None,
+        }
+
+    async def message_evidence_by_ids(self, account_key: str, group_id: int, message_ids: Iterable[int]):
+        """Read specific message IDs from one destination without sending anything."""
+        c = self.clients[account_key]
+        entity = await c.get_entity(group_id)
+        ids = [int(x) for x in message_ids]
+        if not ids:
+            return []
+        messages = await c.get_messages(entity, ids=ids)
+        if messages is None:
+            return []
+        if not isinstance(messages, (list, tuple)):
+            messages = [messages]
+        return [
+            self._history_message_row(account_key, msg)
+            for msg in messages
+            if msg is not None and getattr(msg, "id", None) is not None
+        ]
+
+    async def history_window(self, account_key: str, group_id: int, start: datetime, end: datetime, *, limit: int = 300):
+        """Return outbound message metadata in a bounded UTC time window.
+
+        Message bodies are read only for exact payload comparison. Media bytes are
+        never downloaded and this method performs no Telegram mutation.
+        """
+        c = self.clients[account_key]
+        entity = await c.get_entity(group_id)
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+        rows = []
+        async for msg in c.iter_messages(entity, limit=max(1, int(limit)), offset_date=end):
+            date = getattr(msg, "date", None)
+            if date is None:
+                continue
+            if date.tzinfo is None:
+                date = date.replace(tzinfo=timezone.utc)
+            if date < start:
+                break
+            if date > end:
+                continue
+            if not bool(getattr(msg, "out", False)):
+                continue
+            rows.append(self._history_message_row(account_key, msg))
+        return rows
+
     async def send(self, account_key: str, group_id: int, caption: str, media: Iterable[str], mode: str, topic_id: int | None = None):
         c = self.clients[account_key]
         entity = await c.get_entity(group_id)

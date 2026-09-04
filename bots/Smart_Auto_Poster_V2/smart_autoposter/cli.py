@@ -36,6 +36,7 @@ from .collections import CollectionSpec, upsert_collection, list_collections, co
 from .rules import upsert_rule, list_rules, apply_rules, evaluate_rule
 from .recommendations import generate_recommendations, list_recommendations, apply_recommendation, dismiss_recommendation
 from .reports import daily_report_text, weekly_report_text
+from .uncertain_reconciliation import audit_uncertain_deliveries, format_reconciliation_report
 
 
 def db_for(settings: Settings):
@@ -572,6 +573,38 @@ def cmd_accounts_check(args):
     asyncio.run(async_accounts_check(args))
 
 
+async def async_reconcile_uncertain(args):
+    try:
+        from .telegram_io import TelegramPool
+    except ImportError as exc:
+        raise RuntimeError("Telegram dependencies are not installed. Run setup first.") from exc
+    s = Settings.load(True); s.ensure_dirs(); db = db_for(s)
+    with RuntimeLock(s.runtime_lock_path):
+        pool = TelegramPool(s.api_id, s.api_hash, s.sessions, s.staging_chats, s.media_cache_dir)
+        await pool.connect()
+        try:
+            report = await audit_uncertain_deliveries(
+                db,
+                pool,
+                limit=args.limit,
+                before_seconds=args.before_seconds,
+                after_seconds=args.after_seconds,
+                history_limit=args.history_limit,
+            )
+            if args.json:
+                print(json.dumps(report, indent=2, ensure_ascii=False, default=str))
+            else:
+                print(format_reconciliation_report(report))
+        finally:
+            await pool.disconnect()
+
+
+def cmd_reconcile_uncertain(args):
+    asyncio.run(async_reconcile_uncertain(args))
+
+
+
+
 async def async_login_account(args):
     try:
         from telethon import TelegramClient
@@ -1011,6 +1044,7 @@ def build_parser():
     a=sp.add_parser("validate"); a.set_defaults(func=cmd_validate)
     a=sp.add_parser("scan"); a.set_defaults(func=cmd_scan)
     a=sp.add_parser("accounts-check"); a.set_defaults(func=cmd_accounts_check)
+    a=sp.add_parser("reconcile-uncertain"); a.add_argument("--limit",type=int,default=100); a.add_argument("--before-seconds",type=int,default=120); a.add_argument("--after-seconds",type=int,default=900); a.add_argument("--history-limit",type=int,default=300); a.add_argument("--json",action="store_true"); a.set_defaults(func=cmd_reconcile_uncertain)
     a=sp.add_parser("login-account"); a.add_argument("account", choices=["primary","secondary"]); a.add_argument("--reset", action="store_true"); a.set_defaults(func=cmd_login_account)
 
     a=sp.add_parser("add-content"); a.add_argument("content_id"); a.add_argument("--caption"); a.add_argument("--caption-file"); a.add_argument("--media",nargs="*"); a.set_defaults(func=cmd_add_content)
