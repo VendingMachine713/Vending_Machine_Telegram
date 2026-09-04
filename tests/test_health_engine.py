@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from shared.vm_core.health_engine import health_snapshot
+from shared.vm_core.heartbeat import record_heartbeat
 
 
 class UniversalHealthEngineTests(unittest.TestCase):
@@ -39,6 +40,7 @@ class UniversalHealthEngineTests(unittest.TestCase):
             status.return_value = [{
                 "name": "Demo", "runtime_status": "RUNNING", "process_alive": True, "pid": 111
             }]
+            record_heartbeat("Demo", "test-instance", root=root)
             report = health_snapshot(root)
             self.assertEqual(report["status"], "HEALTHY")
             self.assertEqual(report["services"][0]["status"], "HEALTHY")

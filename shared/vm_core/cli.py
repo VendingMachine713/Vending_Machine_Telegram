@@ -32,6 +32,8 @@ from .platform_registry import service_registry, write_service_registry, format_
 from .config_registry import configuration_registry, write_configuration_registry, format_configuration_registry
 from .runtime_registry import runtime_registry, write_runtime_registry, format_runtime_registry
 from .core1_readiness import core1_readiness, format_core1_readiness
+from .heartbeat import heartbeat_snapshot, format_heartbeat_snapshot
+from .watchdog import watchdog_snapshot, format_watchdog_snapshot
 
 def _json(obj): print(json.dumps(obj,indent=2,ensure_ascii=False,default=str))
 
@@ -66,6 +68,8 @@ def build_parser():
         ("doctor","Run diagnostics."),("inspect","Write safe structure report."),
         ("inventory","Refresh machine-readable inventory."),("health","Run service health checks."),
         ("health-v2","Run universal health classification."),
+        ("heartbeats","Show universal heartbeat freshness."),
+        ("watchdog","Run read-only universal watchdog analysis."),
         ("env","Show environment/developer tools."),("deps","Show dependency inventory."),
         ("test","Run platform self-tests."),("check","Run release pre-flight checks."),
         ("support","Create safe support bundle."),("registry","Sync/show shared registries."),
@@ -116,6 +120,10 @@ def main(argv=None):
         report=core1_readiness(root); print(format_core1_readiness(report)); return 0 if report["status"]=="PASS" else 2
     if c=="health-v2":
         report=health_snapshot(root); print(format_health_snapshot(report)); return 2 if report["status"]=="ATTENTION_REQUIRED" else 0
+    if c=="heartbeats":
+        report=heartbeat_snapshot(root); print(format_heartbeat_snapshot(report)); return 2 if report["summary"]["EXPIRED"] else 0
+    if c=="watchdog":
+        report=watchdog_snapshot(root); print(format_watchdog_snapshot(report)); return 2 if report["state"]=="ATTENTION_REQUIRED" else 0
     if c=="intelligence":
         print(format_intelligence_summary(intelligence_summary(root, refresh=True))); return 0
     if c=="init":

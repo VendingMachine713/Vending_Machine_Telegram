@@ -10,6 +10,7 @@ from .paths import project_root
 from .runtime_requirements import runtime_configuration_status
 from .services import service_status
 from .sqlite_helpers import integrity_check
+from .heartbeat import heartbeat_snapshot
 
 HEALTH_SCHEMA_VERSION = 1
 
@@ -56,6 +57,7 @@ def _db_signals(bot) -> list[HealthSignal]:
 def health_snapshot(root: Path | None = None) -> dict[str, Any]:
     root = root or project_root()
     runtime = {row["name"]: row for row in service_status(root)}
+    heartbeats = {item["service"]: item for item in heartbeat_snapshot(root)["heartbeats"]}
     services: list[dict[str, Any]] = []
 
     for bot in discover_bots(root):
@@ -88,6 +90,17 @@ def health_snapshot(root: Path | None = None) -> dict[str, Any]:
             signals.append(HealthSignal("runnable", "ATTENTION_REQUIRED", "no entrypoint or launcher"))
         else:
             signals.append(HealthSignal("runnable", "HEALTHY", "runnable target detected"))
+
+        heartbeat = heartbeats.get(bot.folder)
+        if process_alive:
+            if heartbeat is None:
+                signals.append(HealthSignal("heartbeat", "DEGRADED", "no universal heartbeat recorded"))
+            elif heartbeat["freshness"] == "FRESH":
+                signals.append(HealthSignal("heartbeat", "HEALTHY", f"fresh age={heartbeat['age_seconds']:.1f}s"))
+            elif heartbeat["freshness"] == "STALE":
+                signals.append(HealthSignal("heartbeat", "DEGRADED", f"stale age={heartbeat['age_seconds']:.1f}s"))
+            else:
+                signals.append(HealthSignal("heartbeat", "ATTENTION_REQUIRED", f"expired age={heartbeat['age_seconds']:.1f}s"))
 
         signals.extend(_db_signals(bot))
         services.append({
