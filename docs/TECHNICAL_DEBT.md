@@ -2,7 +2,8 @@
 
 ## TD-001 — Bot-specific VM Core adapters
 Priority: High
-The five bots are discovered and managed generically. Deep bot-specific adapters should be added as each bot reaches its next milestone.
+Status: Foundation resolved in v4.1
+The five active bots now have conservative VM Core adapter profiles with validated repository evidence, read surfaces, capabilities, and safe operations. Deeper bot-internal adapters remain incremental work and must not bypass existing bot boundaries.
 
 ## TD-002 — Relationship Manager nested duplicate folder
 Priority: High
@@ -10,7 +11,8 @@ Detected in VM Doctor. Do not automatically delete; inspect/classify contents be
 
 ## TD-003 — Unknown entrypoints
 Priority: High
-Admin Command Centre, Universal Search and VM Guard require structure inspection if generic detection cannot resolve launch targets.
+Status: Resolved for the five active bots
+Admin Command Centre, Universal Search, VM Guard, VM Relationship Manager, and Smart Auto Poster now have high-confidence manifest entrypoints and adapter evidence. Preserve generic detection for future/unknown services.
 
 ## TD-004 — Auto Poster stale runtime-lock Windows test
 Priority: Medium
