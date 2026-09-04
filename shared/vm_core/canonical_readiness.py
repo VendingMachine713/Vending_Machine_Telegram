@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import json
 from pathlib import Path
 from typing import Any
 
@@ -62,8 +63,6 @@ def canonical_recommendation_readiness(
 
     suppressed = 0
     for row in latest.values():
-        import json
-
         try:
             payload = json.loads(row.get("payload_json") or "{}")
         except (TypeError, ValueError, json.JSONDecodeError):
