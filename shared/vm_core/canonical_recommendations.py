@@ -52,6 +52,30 @@ def _existing_recommendation(db: PlatformDB, recommendation_key: str) -> dict[st
     return dict(row) if row is not None else None
 
 
+def _latest_expired_predecessor(
+    db: PlatformDB,
+    *,
+    subject_id: str,
+    replacement_key: str,
+) -> dict[str, Any] | None:
+    """Return the newest expired canonical review for the subject, if any.
+
+    Terminal predecessor rows are not modified. Lineage is attached to the new
+    proposal and written as a separate audit event.
+    """
+    with db.connect() as con:
+        row = con.execute(
+            """
+            SELECT * FROM intelligence_recommendations
+            WHERE recommendation_type=? AND subject_type='chat' AND subject_id=?
+              AND status='EXPIRED' AND recommendation_key<>?
+            ORDER BY id DESC LIMIT 1
+            """,
+            (_RECOMMENDATION_TYPE, subject_id, replacement_key),
+        ).fetchone()
+    return dict(row) if row is not None else None
+
+
 def propose_canonical_reengagement_reviews(
     *,
     root: Path | None = None,
@@ -72,6 +96,7 @@ def propose_canonical_reengagement_reviews(
         "considered": 0,
         "created": 0,
         "refreshed": 0,
+        "supersession_links": 0,
         "skipped_not_ready": 0,
         "skipped_suppressed": 0,
         "skipped_low_score": 0,
@@ -137,6 +162,11 @@ def propose_canonical_reengagement_reviews(
         priority = max(0.0, min(100.0, opportunity_score))
         recommendation_key = _recommendation_key(subject_id, support_signature)
         existed = _existing_recommendation(db, recommendation_key) is not None
+        predecessor = None if existed else _latest_expired_predecessor(
+            db,
+            subject_id=subject_id,
+            replacement_key=recommendation_key,
+        )
         evidence = {
             "canonical_inference_event_id": inference_event_id,
             "support_signature": support_signature,
@@ -155,6 +185,14 @@ def propose_canonical_reengagement_reviews(
             "automatic_execution": False,
             "external_action_authority": False,
         }
+        if predecessor is not None:
+            evidence.update(
+                {
+                    "supersedes_recommendation_id": int(predecessor["id"]),
+                    "supersedes_recommendation_key": str(predecessor["recommendation_key"]),
+                    "supersession_reason": "new_canonical_evidence_after_expiry",
+                }
+            )
         recommendation_id = db.upsert_recommendation(
             recommendation_key,
             _RECOMMENDATION_TYPE,
@@ -173,6 +211,19 @@ def propose_canonical_reengagement_reviews(
             result["refreshed"] += 1
             continue
 
+        proposal_evidence = {
+            "canonical_inference_event_id": inference_event_id,
+            "support_signature": support_signature,
+            "rule_id": _RULE_ID,
+            "rule_version": _RULE_VERSION,
+        }
+        if predecessor is not None:
+            proposal_evidence.update(
+                {
+                    "supersedes_recommendation_id": int(predecessor["id"]),
+                    "supersedes_recommendation_key": str(predecessor["recommendation_key"]),
+                }
+            )
         db.add_event(
             "recommendation.proposed",
             "vm_core.canonical_recommendations",
@@ -187,13 +238,30 @@ def propose_canonical_reengagement_reviews(
             subject_type="chat",
             subject_id=subject_id,
             correlation_id=f"recommendation:{recommendation_id}",
-            evidence={
-                "canonical_inference_event_id": inference_event_id,
-                "support_signature": support_signature,
-                "rule_id": _RULE_ID,
-                "rule_version": _RULE_VERSION,
-            },
+            evidence=proposal_evidence,
         )
+        if predecessor is not None:
+            db.add_event(
+                "recommendation.supersedes",
+                "vm_core.canonical_recommendations",
+                {
+                    "predecessor_recommendation_key": str(predecessor["recommendation_key"]),
+                    "replacement_recommendation_key": recommendation_key,
+                    "reason": "new_canonical_evidence_after_expiry",
+                    "automatic_acceptance": False,
+                    "automatic_execution": False,
+                },
+                subject_type="chat",
+                subject_id=subject_id,
+                correlation_id=f"recommendation:{recommendation_id}",
+                evidence={
+                    "predecessor_recommendation_id": int(predecessor["id"]),
+                    "replacement_recommendation_id": recommendation_id,
+                    "canonical_inference_event_id": inference_event_id,
+                    "support_signature": support_signature,
+                },
+            )
+            result["supersession_links"] += 1
         result["created"] += 1
     return result
 
