@@ -16,6 +16,8 @@ from shared.vm_core.intelligence import intelligence_summary,format_intelligence
 from shared.vm_core.autoposter_progress import smart_auto_poster_progress
 from shared.vm_core.progress import format_progress
 from shared.vm_core.progress_registry import format_all_progress
+from shared.vm_core.admin_exceptions import admin_exceptions,format_admin_exceptions
+from shared.vm_core.incident_runtime import incident_timeline
 MUTATING={'backup','support','start','stop','restart','supervise','poster_start','poster_stop','poster_restart'}
 POSTER_SERVICE='Smart_Auto_Poster_V2'
 
@@ -55,7 +57,7 @@ def parse_command(text:str):
 def help_text(cfg):
     return (
         'VM ADMIN COMMAND CENTRE\n\n'
-        '/vm\n/status\n/health\n/progress\n/intelligence\n/brain\n/registry\n/jobs\n/doctor\n/backup\n/support\n'
+        '/vm\n/status\n/health\n/progress\n/intelligence\n/brain\n/registry\n/jobs\n/doctor\n/exceptions\n/incidents\n/backup\n/support\n'
         '/start <service>\n/stop <service>\n/restart <service>\n/supervise\n\n'
         'SMART AUTO POSTER\n'
         '/poster\n/poster_status\n/poster_progress\n/poster_health\n/poster_queue\n/poster_campaigns\n'
@@ -140,6 +142,10 @@ def handle_command(user_id:int,text:str,cfg:dict[str,Any]|None=None)->str:
         rows=PlatformDB(root=ROOT).jobs(10); return 'VM JOBS\n'+(('No recent jobs.') if not rows else '\n'.join(f"#{r['id']} {r['status']:<10} {r['job_type']}" for r in rows))
     if cmd=='doctor':
         s=run_doctor(ROOT)['summary']; return f"VM DOCTOR\nPASS: {s['PASS']}\nINFO: {s['INFO']}\nWARN: {s['WARN']}\nFAIL: {s['FAIL']}"
+    if cmd=='exceptions': return format_admin_exceptions(admin_exceptions(ROOT))[:3900]
+    if cmd=='incidents':
+        rows=incident_timeline(ROOT,10)
+        return 'VM INCIDENTS\n'+(('No incidents.') if not rows else '\n'.join(f"#{r['id']} {r['status']:<9} {r['severity']:<8} {r['incident_key']}" for r in rows))
     if cmd in MUTATING and not cfg['allow_mutations']: return 'Mutating commands are disabled. Set VM_ADMIN_ALLOW_MUTATIONS=true locally after reviewing safety.'
     if cmd=='backup': return 'Backup created:\n'+str(create_backup(ROOT))
     if cmd=='support': return 'Support bundle created:\n'+str(create_support_bundle(ROOT))
