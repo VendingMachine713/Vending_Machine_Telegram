@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import unittest
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -117,7 +118,7 @@ class IntelligenceTrustTests(unittest.TestCase):
             root = Path(tmp)
             path = PlatformDB(root=root).path
             path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(path) as con:
+            with closing(sqlite3.connect(path)) as con:
                 con.execute("CREATE TABLE untouched(value TEXT)")
             evidence = EvidenceRef(
                 source="Universal_Search",
@@ -127,7 +128,7 @@ class IntelligenceTrustTests(unittest.TestCase):
             result = verify_evidence_provenance(evidence, root=root)
             self.assertFalse(result.valid)
             self.assertEqual(result.reason, "events_table_missing")
-            with sqlite3.connect(path) as con:
+            with closing(sqlite3.connect(path)) as con:
                 tables = {
                     row[0]
                     for row in con.execute(
