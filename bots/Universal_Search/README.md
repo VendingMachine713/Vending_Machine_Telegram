@@ -4,13 +4,18 @@ Universal Search indexes Telegram messages into a local SQLite database and prov
 
 ## Current version
 
-**v1.4.0**
+**v1.5.0**
 
 v1.4 adds passive, read-only marketplace intelligence. Indexed messages are
 conservatively classified as sale, wanted, trade, or service listings. Status,
 AUD price, condition, location, confidence, repost grouping, and append-only
 price history are stored locally. No marketplace command sends or edits a
 Telegram message.
+
+v1.5 adds passive WTB/demand matching against active sale, trade, and service
+listings. Matches are token-overlap candidates stored in a durable review queue;
+historical backfill never creates matches. `/matches` and `/ackmatch` are
+private-owner-only and do not contact either party automatically.
 
 ## Core capabilities
 
@@ -101,6 +106,8 @@ A successful alert resets the watch failure counter.
 /listing CHAT_ID MESSAGE_ID
 /pricehistory GROUP_KEY
 /marketstats
+/matches
+/ackmatch DEMAND_CHAT DEMAND_MESSAGE SUPPLY_CHAT SUPPLY_MESSAGE
 ```
 
 Cross-chat search is deliberately restricted to the claimed Universal Search admin. This prevents the bot-owned index from exposing messages from one indexed group to arbitrary users in another context.

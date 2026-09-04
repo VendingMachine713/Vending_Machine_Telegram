@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS marketplace_listings(
   sender_id INTEGER, listing_key TEXT NOT NULL, group_key TEXT NOT NULL,
   kind TEXT NOT NULL, status TEXT NOT NULL, price_cents INTEGER,
   currency TEXT, condition TEXT, location TEXT, confidence REAL NOT NULL,
+  match_terms TEXT NOT NULL DEFAULT '',
   first_seen_utc TEXT NOT NULL, last_seen_utc TEXT NOT NULL,
   PRIMARY KEY(chat_id,message_id)
 );
@@ -45,6 +46,14 @@ CREATE TABLE IF NOT EXISTS marketplace_price_history(
   observed_utc TEXT NOT NULL, UNIQUE(chat_id,message_id,price_cents)
 );
 CREATE INDEX IF NOT EXISTS ix_marketplace_price_group ON marketplace_price_history(group_key,observed_utc DESC);
+CREATE TABLE IF NOT EXISTS marketplace_matches(
+  demand_chat_id INTEGER NOT NULL, demand_message_id INTEGER NOT NULL,
+  supply_chat_id INTEGER NOT NULL, supply_message_id INTEGER NOT NULL,
+  score REAL NOT NULL, status TEXT NOT NULL DEFAULT 'new',
+  created_utc TEXT NOT NULL, updated_utc TEXT NOT NULL,
+  PRIMARY KEY(demand_chat_id,demand_message_id,supply_chat_id,supply_message_id)
+);
+CREATE INDEX IF NOT EXISTS ix_marketplace_matches_status ON marketplace_matches(status,updated_utc DESC);
 CREATE TABLE IF NOT EXISTS search_audit(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER,
@@ -234,6 +243,9 @@ class Store:
         if "source" not in cols:
             c.execute("ALTER TABLE indexed_messages ADD COLUMN source TEXT NOT NULL DEFAULT 'live'")
         c.execute("CREATE INDEX IF NOT EXISTS ix_messages_source ON indexed_messages(source)")
+        market_cols = {r["name"] for r in c.execute("PRAGMA table_info(marketplace_listings)")}
+        if "match_terms" not in market_cols:
+            c.execute("ALTER TABLE marketplace_listings ADD COLUMN match_terms TEXT NOT NULL DEFAULT ''")
         try:
             c.execute(
                 "CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5("
@@ -315,10 +327,12 @@ class Store:
                 now = utc_now()
                 first_seen = prior[0] if prior else now
                 c.execute("""INSERT INTO marketplace_listings
-                    (chat_id,message_id,sender_id,listing_key,group_key,kind,status,price_cents,currency,condition,location,confidence,first_seen_utc,last_seen_utc)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (chat_id,message_id,sender_id,listing.listing_key,listing.group_key,listing.kind,listing.status,listing.price_cents,listing.currency,listing.condition,listing.location,listing.confidence,first_seen,now))
+                    (chat_id,message_id,sender_id,listing_key,group_key,kind,status,price_cents,currency,condition,location,confidence,match_terms,first_seen_utc,last_seen_utc)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (chat_id,message_id,sender_id,listing.listing_key,listing.group_key,listing.kind,listing.status,listing.price_cents,listing.currency,listing.condition,listing.location,listing.confidence,listing.match_terms,first_seen,now))
                 if listing.price_cents is not None:
                     c.execute("INSERT OR IGNORE INTO marketplace_price_history(chat_id,message_id,group_key,price_cents,currency,observed_utc) VALUES(?,?,?,?,?,?)", (chat_id,message_id,listing.group_key,listing.price_cents,listing.currency or "AUD",now))
+                if source == "live":
+                    self._record_market_matches(c, chat_id, message_id, listing.match_terms, listing.kind, listing.status, now)
 
     @staticmethod
     def _filters(q: Query, chat_id, args: list, *, include_text_fallback=False) -> str:
@@ -429,6 +443,34 @@ class Store:
     def market_stats(self):
         with self.conn() as c:
             return c.execute("SELECT kind,status,COUNT(*) AS count FROM marketplace_listings GROUP BY kind,status ORDER BY kind,status").fetchall()
+
+    @staticmethod
+    def _record_market_matches(c, chat_id, message_id, terms, kind, status, now):
+        if not terms or status in {"sold", "pending"}:
+            return 0
+        wanted = kind == "wanted"
+        opposite = "NOT IN ('wanted')" if wanted else "= 'wanted'"
+        rows = c.execute("SELECT chat_id,message_id,match_terms FROM marketplace_listings WHERE kind " + opposite + " AND status IN ('active','available') AND match_terms<>''").fetchall()
+        inserted = 0
+        current = set(terms.split())
+        for row in rows:
+            overlap = current & set(row["match_terms"].split())
+            score = len(overlap) / max(1, len(current | set(row["match_terms"].split())))
+            if len(overlap) < 2 or score < 0.35:
+                continue
+            demand = (chat_id, message_id) if wanted else (row["chat_id"], row["message_id"])
+            supply = (row["chat_id"], row["message_id"]) if wanted else (chat_id, message_id)
+            cursor = c.execute("INSERT OR IGNORE INTO marketplace_matches(demand_chat_id,demand_message_id,supply_chat_id,supply_message_id,score,status,created_utc,updated_utc) VALUES(?,?,?,?,?,'new',?,?)", (*demand, *supply, round(score, 3), now, now))
+            inserted += max(0, cursor.rowcount)
+        return inserted
+
+    def market_matches(self, status="new", limit=50):
+        with self.conn() as c:
+            return c.execute("SELECT * FROM marketplace_matches WHERE status=? ORDER BY updated_utc DESC LIMIT ?", (status, max(1, min(int(limit), 100)))).fetchall()
+
+    def acknowledge_market_match(self, demand_chat_id, demand_message_id, supply_chat_id, supply_message_id):
+        with self.conn() as c:
+            return c.execute("UPDATE marketplace_matches SET status='acknowledged',updated_utc=? WHERE demand_chat_id=? AND demand_message_id=? AND supply_chat_id=? AND supply_message_id=?", (utc_now(), demand_chat_id, demand_message_id, supply_chat_id, supply_message_id)).rowcount
 
     def record_search(self, user_id, query):
         with self.conn() as c:

@@ -38,6 +38,7 @@ class Listing:
     condition: str | None
     location: str | None
     confidence: float
+    match_terms: str
 
 
 def _normal(text: str) -> str:
@@ -84,12 +85,14 @@ def extract_listing(chat_id: int, message_id: int, text: str) -> Listing | None:
     no_price = re.sub(r"\b\d{2,7}\b", " ", no_price)
     no_price = re.sub(r"\b(sold|available|still available|back available|pending|on hold|deposit taken)\b", " ", no_price)
     group_key = hashlib.sha256(no_price.encode("utf-8")).hexdigest()[:24]
+    ignored = {"selling", "sell", "sale", "for", "available", "wanted", "wtb", "looking", "trade", "wtt", "swap", "service", "repair", "the", "and", "in"}
+    match_terms = " ".join(sorted({t for t in no_price.split() if len(t) >= 3 and t not in ignored}))
     listing_key = hashlib.sha256(f"{chat_id}:{message_id}".encode()).hexdigest()[:32]
     confidence = min(0.99, 0.55 + (0.12 * cues) + (0.08 if price_cents is not None else 0))
     return Listing(listing_key, group_key, kind, status, price_cents, currency,
                    condition_match.group(1).lower() if condition_match else None,
                    location_match.group(1).strip() if location_match else None,
-                   round(confidence, 2))
+                   round(confidence, 2), match_terms)
 
 
 def utc_now() -> str:
