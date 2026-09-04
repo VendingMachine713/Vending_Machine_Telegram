@@ -16,6 +16,8 @@ from .publisher import BotEventPublisher
 _SIGNAL_SOURCES: dict[str, str] = {
     "relationship_dormant_presence": "VM_Relationship_Manager",
     "relationship_cooling_presence": "VM_Relationship_Manager",
+    "business_reload_opportunity": "VM_Relationship_Manager",
+    "business_dormant_client_opportunity": "VM_Relationship_Manager",
     "search_activity_spike": "Universal_Search",
     "guard_risk_elevated": "VM_Guard",
 }
@@ -23,6 +25,8 @@ _SIGNAL_SOURCES: dict[str, str] = {
 _HALF_LIFE_SECONDS: dict[str, float] = {
     "relationship_dormant_presence": 7 * 24 * 3600,
     "relationship_cooling_presence": 7 * 24 * 3600,
+    "business_reload_opportunity": 24 * 3600,
+    "business_dormant_client_opportunity": 7 * 24 * 3600,
     "search_activity_spike": 24 * 3600,
     "guard_risk_elevated": 6 * 3600,
 }
@@ -30,6 +34,8 @@ _HALF_LIFE_SECONDS: dict[str, float] = {
 _POLARITY: dict[str, str] = {
     "relationship_dormant_presence": "negative",
     "relationship_cooling_presence": "negative",
+    "business_reload_opportunity": "positive",
+    "business_dormant_client_opportunity": "positive",
     "search_activity_spike": "positive",
     "guard_risk_elevated": "negative",
 }
@@ -48,6 +54,15 @@ _SAFE_EVIDENCE_KEYS = {
     "ratio",
     "window_hours",
     "baseline_days",
+    "product_key",
+    "transaction_count",
+    "total_quantity",
+    "product_count",
+    "last_business_at",
+    "available_at",
+    "days_since_last_business",
+    "days_inactive",
+    "inactive_threshold_days",
 }
 
 
