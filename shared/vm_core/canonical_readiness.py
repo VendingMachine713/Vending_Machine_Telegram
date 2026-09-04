@@ -17,6 +17,10 @@ class ReadinessPolicy:
     minimum_canonical_inferences: int = 5
     maximum_suppressed_ratio: float = 1.0
     require_parity_pass: bool = True
+    require_fresh_evidence: bool = True
+    stale_after_hours: float = 72.0
+    require_acceptable_calibration_when_sufficient: bool = True
+    minimum_calibration_outcomes: int = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +32,9 @@ class CanonicalReadiness:
     suppressed_inference_count: int
     suppressed_ratio: float
     parity_status: str
+    evidence_health_status: str
+    calibration_status: str
+    calibration_known_outcomes: int
     recommendation_execution_enabled: bool = False
     automatic_execution: bool = False
 
@@ -40,13 +47,19 @@ def canonical_recommendation_readiness(
 ) -> CanonicalReadiness:
     """Assess whether canonical evidence is mature enough to *develop* recommendations.
 
-    This gate does not create, approve, or execute a recommendation. It only reports
-    whether the canonical migration has enough evidence to begin the next governed
-    development stage.
+    Promotion requires enough canonical subjects, legacy/canonical parity, fresh
+    evidence, acceptable suppression behavior, and—once enough verified outcomes
+    exist—no calibration review hold. This function creates no recommendation and
+    grants no execution authority.
     """
     root = root or project_root()
     policy = policy or ReadinessPolicy()
     parity = evaluate_legacy_canonical_parity(root=root, policy=parity_policy)
+    evidence_health = canonical_evidence_health_summary(
+        root=root,
+        stale_after_hours=max(1.0, float(policy.stale_after_hours)),
+    )
+    calibration = canonical_calibration_summary(root=root)
     rows = query_intelligence_events(
         AuditQuery(
             event_type_prefix="intelligence.inference.relationship_reengagement_opportunity",
@@ -83,6 +96,17 @@ def canonical_recommendation_readiness(
         reasons.append("legacy_canonical_parity_not_passed")
     if suppressed_ratio > max(0.0, min(1.0, float(policy.maximum_suppressed_ratio))):
         reasons.append("suppressed_ratio_exceeded")
+    if policy.require_fresh_evidence and bool(evidence_health.get("stale")):
+        reasons.append("canonical_evidence_stale")
+
+    known_outcomes = int(calibration.get("known_binary_outcomes") or 0)
+    calibration_minimum = max(1, int(policy.minimum_calibration_outcomes))
+    if (
+        policy.require_acceptable_calibration_when_sufficient
+        and known_outcomes >= calibration_minimum
+        and str(calibration.get("status") or "") == "REVIEW_REQUIRED"
+    ):
+        reasons.append("canonical_calibration_review_required")
 
     ready = not reasons
     return CanonicalReadiness(
@@ -93,6 +117,9 @@ def canonical_recommendation_readiness(
         suppressed_inference_count=suppressed,
         suppressed_ratio=suppressed_ratio,
         parity_status=parity.status,
+        evidence_health_status=str(evidence_health.get("status") or "NO_EVIDENCE"),
+        calibration_status=str(calibration.get("status") or "INSUFFICIENT_DATA"),
+        calibration_known_outcomes=known_outcomes,
         recommendation_execution_enabled=False,
         automatic_execution=False,
     )
@@ -111,7 +138,7 @@ def canonical_operator_summary(*, root: Path | None = None) -> dict[str, Any]:
         "intelligence_audit": audit_summary(root=root),
         "operator_action_required": not readiness.ready_for_recommendation_development,
         "recommended_operator_action": (
-            "Collect additional shadow evidence and resolve parity mismatches before canonical recommendation development."
+            "Collect fresh shadow evidence and resolve parity or calibration holds before canonical recommendation development."
             if not readiness.ready_for_recommendation_development
             else "Canonical evidence gate is satisfied; recommendation development may proceed under separate governance."
         ),
