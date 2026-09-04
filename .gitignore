@@ -214,4 +214,7 @@ diagnostics/
 
 # Private Relationship Manager imports contain real business history.
 bots/VM_Relationship_Manager/business_history_import*.csv
+
+# Smart Auto Poster media libraries contain private runtime content.
+bots/Smart_Auto_Poster_V2/content/library/
 # ===== END PUBLIC RELEASE HARDENING =====
