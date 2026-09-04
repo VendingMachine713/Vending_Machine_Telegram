@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from .canonical_readiness import canonical_operator_summary
+from .canonical_recommendation_lifecycle import canonical_review_lifecycle_summary
 from .canonical_recommendations import canonical_recommendation_summary
 from .db import PlatformDB
 from .decision_engine import decision_summary
@@ -26,6 +27,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
     graph = entity_graph(root, limit=max(100, limit * 10))
     canonical = canonical_operator_summary(root=root)
     canonical_recommendations = canonical_recommendation_summary(root=root, limit=limit)
+    canonical_lifecycle = canonical_review_lifecycle_summary(root=root, limit=max(100, limit * 10))
     readiness = canonical["canonical_readiness"]
     evidence_health = canonical["evidence_health"]
     calibration = canonical["calibration"]
@@ -59,6 +61,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "canonical_evidence_health": evidence_health["status"],
             "canonical_calibration": calibration["status"],
             "canonical_review_recommendations": canonical_recommendations["count"],
+            "canonical_review_expired": canonical_lifecycle["counts"].get("EXPIRED", 0),
         },
         "attention": {
             "incidents": incidents,
@@ -75,6 +78,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
         "rule_health": health_summary(root),
         "canonical": canonical,
         "canonical_recommendations": canonical_recommendations,
+        "canonical_recommendation_lifecycle": canonical_lifecycle,
         "graph_summary": {
             "node_count": graph["node_count"],
             "edge_count": graph["edge_count"],
