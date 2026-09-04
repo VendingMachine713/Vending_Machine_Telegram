@@ -12,6 +12,7 @@ from .canonical_review_feedback import canonical_review_feedback_summary
 from .db import PlatformDB
 from .decision_engine import decision_summary
 from .entity_graph import entity_graph
+from .intelligence_trust import trust_foundation_summary
 from .opportunity_intelligence import opportunity_summary
 from .paths import project_root
 from .rule_health import health_summary
@@ -28,6 +29,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
     decisions = decision_summary(root, limit=limit)
     opportunities = opportunity_summary(root, limit=limit)
     graph = entity_graph(root, limit=max(100, limit * 10))
+    trust_foundation = trust_foundation_summary(root=root, limit=max(100, limit * 10))
     canonical = canonical_operator_summary(root=root)
     canonical_recommendations = canonical_recommendation_summary(root=root, limit=limit)
     canonical_lifecycle = canonical_review_lifecycle_summary(root=root, limit=max(100, limit * 10))
@@ -61,6 +63,9 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "blocked_opportunities": opportunities["blocked_count"],
             "entities": graph["node_count"],
             "relationships": graph["edge_count"],
+            "trust_event_store": trust_foundation["event_store_status"],
+            "canonical_subject_coverage": trust_foundation["canonical_subject_coverage"],
+            "noncanonical_intelligence_subject_events": trust_foundation["noncanonical_subject_events"],
             "canonical_readiness": readiness["status"],
             "canonical_shadow_samples": readiness["canonical_inference_count"],
             "canonical_parity": readiness["parity_status"],
@@ -79,6 +84,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "conflicts": decisions["conflicts"],
             "rollback_recommendations": health_summary(root)["rollback_recommendations"],
             "blocked_opportunities": [row for row in opportunities["top_opportunities"] if row["blocked"]],
+            "noncanonical_intelligence_subject_events": trust_foundation["noncanonical_subject_events"],
             "canonical_readiness_reasons": list(readiness["reasons"]),
             "canonical_evidence_stale": bool(evidence_health["stale"]),
             "canonical_calibration_review_required": calibration["status"] == "REVIEW_REQUIRED",
@@ -92,6 +98,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
         "opportunities": opportunities["top_opportunities"],
         "decisions": decisions["top_decisions"],
         "rule_health": health_summary(root),
+        "trust_foundation": trust_foundation,
         "canonical": canonical,
         "canonical_recommendations": canonical_recommendations,
         "canonical_recommendation_lifecycle": canonical_lifecycle,
