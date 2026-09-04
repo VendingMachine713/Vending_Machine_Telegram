@@ -1,5 +1,13 @@
 # VM Relationship Manager Changelog
 
+## Unreleased — Business Memory Product View + Safe Backup
+
+- Added private `/product Product Name` view combining previous clients and suppliers in one read-only product history surface.
+- Added product-level deal counts, unique client/supplier counts, quantities, first/last transaction dates and optional recorded AUD history.
+- Preserved review-first behavior: product views never send Telegram messages to contacts.
+- Replaced raw live-database file copying with SQLite's transactional backup API so WAL-backed Business Memory records are included safely.
+- Added tests confirming Business Memory tables and rows survive backup/restore inspection.
+
 ## Unreleased — Business Memory Dashboard Integration
 
 - Embedded private Business Memory totals into the main `/rm` relationship dashboard.
