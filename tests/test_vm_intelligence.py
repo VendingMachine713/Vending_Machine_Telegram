@@ -24,7 +24,8 @@ class VMIntelligenceTests(unittest.TestCase):
             self.assertEqual(event["severity"], "INFO")
             self.assertIn("incidents", tables)
             self.assertIn("intelligence_signals", tables)
-            self.assertIn("intelligence_recommendations", tables)\n            self.assertIn("service_heartbeats", tables)
+            self.assertIn("intelligence_recommendations", tables)
+            self.assertIn("service_heartbeats", tables)
 
     def test_structured_event_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp:
