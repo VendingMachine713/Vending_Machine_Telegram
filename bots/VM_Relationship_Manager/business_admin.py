@@ -8,6 +8,7 @@ from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 from business_memory import BusinessMemory
+from business_import import BusinessHistoryImporter
 from business_signals import BusinessSignals
 from config import Settings
 from database import Database
@@ -41,6 +42,7 @@ class BusinessAdmin:
         self.memory = memory
         self.monitor = monitor
         self.signals = BusinessSignals(db)
+        self.importer = BusinessHistoryImporter(db)
 
     def register(self, app: Application) -> None:
         app.add_handler(CommandHandler("business", self.business))
@@ -52,6 +54,8 @@ class BusinessAdmin:
         app.add_handler(CommandHandler("touchbase", self.touchbase))
         app.add_handler(CommandHandler("available", self.available))
         app.add_handler(CommandHandler("unavailable", self.unavailable))
+        app.add_handler(CommandHandler("correctdeal", self.correctdeal))
+        app.add_handler(CommandHandler("importaudit", self.importaudit))
 
     async def _allowed(self, update: Update) -> bool:
         user = update.effective_user
@@ -247,6 +251,30 @@ class BusinessAdmin:
                 f"{escape(self._local_date(row['occurred_at']))}"
             )
         await update.effective_message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+    async def correctdeal(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self._allowed(update): return
+        raw = (update.effective_message.text or "").partition(" ")[2].strip()
+        parts = [part.strip() for part in raw.split("|", 5)]
+        if len(parts) < 3 or not parts[0].isdigit():
+            await update.effective_message.reply_text("Usage: /correctdeal ID | role | product | quantity | total | note")
+            return
+        try:
+            values = {"role": parts[1] or None, "product": parts[2] or None, "quantity": float(parts[3]) if len(parts) > 3 and parts[3] else None, "total": parts[4] or None, "note": parts[5] if len(parts) > 5 else None}
+            row = self.memory.correct_transaction(int(parts[0]), recorded_by=update.effective_user.id, **values)
+        except (ValueError, TypeError) as exc:
+            await update.effective_message.reply_text(str(exc)); return
+        await update.effective_message.reply_text(f"✅ Business record #{row['id']} corrected and audited. Use /history {row['telegram_id']} to review.")
+
+    async def importaudit(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await self._allowed(update): return
+        rows = self.importer.audit_runs(limit=15)
+        if not rows:
+            await update.effective_message.reply_text("No business imports recorded."); return
+        lines = ["Business import audit:"]
+        for row in rows:
+            lines.append(f"#{row['id']} {row['status']} {row['source_file']} — rows={row['total_rows']} valid={row['valid_rows']} duplicates={row['duplicate_rows']} problems={row['problem_rows']}")
+        await update.effective_message.reply_text("\n".join(lines)[:3900])
 
     async def clients(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await self._allowed(update):
