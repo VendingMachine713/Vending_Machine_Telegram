@@ -4,13 +4,17 @@ from collections import defaultdict
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import sqlite3
 from typing import Any
 
+from .canonical_review_calibration import canonical_review_calibration_summary
 from .db import PlatformDB, utcnow
 from .paths import project_root
 
 
 OUTCOME_TYPES = {"POSITIVE", "NEUTRAL", "NEGATIVE", "UNKNOWN"}
+_CANONICAL_RECOMMENDATION_TYPE = "canonical_relationship_reengagement_review"
+_MIN_BINARY_OUTCOMES = 8
 
 
 class LearningError(RuntimeError):
@@ -226,3 +230,162 @@ def learning_summary(root: Path | None = None) -> dict[str, Any]:
         "automatic_rule_change": False,
         "automatic_execution": False,
     }
+
+
+def _readonly_connect(path: Path) -> sqlite3.Connection | None:
+    if not path.exists():
+        return None
+    try:
+        con = sqlite3.connect(
+            f"file:{path.resolve().as_posix()}?mode=ro",
+            uri=True,
+            timeout=5,
+        )
+        con.row_factory = sqlite3.Row
+        con.execute("PRAGMA query_only=ON")
+        return con
+    except sqlite3.Error:
+        try:
+            con.close()  # type: ignore[possibly-undefined]
+        except (UnboundLocalError, sqlite3.Error):
+            pass
+        return None
+
+
+def canonical_learning_feedback_summary(
+    *,
+    root: Path | None = None,
+    limit: int = 5000,
+) -> dict[str, Any]:
+    """Return passive learning readiness and verified-outcome feedback health.
+
+    This extends the existing learning subsystem. It deliberately refuses to claim
+    historical prediction/decision accuracy until immutable prediction snapshots
+    exist. Current forecasts are recomputed views and must not be compared against
+    old outcomes as though they were the forecasts that existed at decision time.
+    """
+    root = root or project_root()
+    path = PlatformDB(root=root).path
+    result: dict[str, Any] = {
+        "status": "UNAVAILABLE",
+        "canonical_recommendations": 0,
+        "completed_recommendations": 0,
+        "recorded_outcomes": 0,
+        "completed_without_outcome": 0,
+        "outcome_coverage_completed": None,
+        "outcome_counts": {key: 0 for key in sorted(OUTCOME_TYPES)},
+        "known_binary_outcomes": 0,
+        "prediction_snapshot_events": 0,
+        "prediction_backtest_status": "NOT_READY_NO_IMMUTABLE_PREDICTION_SNAPSHOTS",
+        "decision_backtest_status": "NOT_READY_NO_IMMUTABLE_PREDICTION_SNAPSHOTS",
+        "learning_review_flags": [],
+        "read_only": True,
+        "automatic_model_training": False,
+        "automatic_trust_change": False,
+        "automatic_threshold_change": False,
+        "automatic_rule_change": False,
+        "automatic_execution": False,
+        "external_action_authority": False,
+    }
+    con = _readonly_connect(path)
+    if con is None:
+        return result
+    try:
+        tables = {
+            str(row[0])
+            for row in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name IN ('intelligence_recommendations','intelligence_outcomes','events')"
+            ).fetchall()
+        }
+        if "intelligence_recommendations" not in tables:
+            result["status"] = "RECOMMENDATIONS_TABLE_MISSING"
+            return result
+        try:
+            requested = max(1, min(10000, int(limit)))
+        except (TypeError, ValueError):
+            requested = 5000
+
+        recommendations = con.execute(
+            "SELECT id,status FROM intelligence_recommendations "
+            "WHERE recommendation_type=? ORDER BY id DESC LIMIT ?",
+            (_CANONICAL_RECOMMENDATION_TYPE, requested),
+        ).fetchall()
+        recommendation_ids = [int(row["id"]) for row in recommendations]
+        completed = {
+            int(row["id"])
+            for row in recommendations
+            if str(row["status"] or "").upper() == "COMPLETED"
+        }
+        outcome_rows: list[sqlite3.Row] = []
+        if recommendation_ids and "intelligence_outcomes" in tables:
+            placeholders = ",".join("?" for _ in recommendation_ids)
+            outcome_rows = con.execute(
+                f"SELECT recommendation_id,outcome_type,value_score,confidence,rule_id,rule_version "
+                f"FROM intelligence_outcomes WHERE recommendation_id IN ({placeholders})",
+                recommendation_ids,
+            ).fetchall()
+
+        outcome_by_id = {int(row["recommendation_id"]): row for row in outcome_rows}
+        counts = {key: 0 for key in sorted(OUTCOME_TYPES)}
+        for row in outcome_rows:
+            outcome_type = str(row["outcome_type"] or "UNKNOWN").upper()
+            if outcome_type not in counts:
+                outcome_type = "UNKNOWN"
+            counts[outcome_type] += 1
+        known_binary = counts["POSITIVE"] + counts["NEGATIVE"]
+        missing = sum(1 for recommendation_id in completed if recommendation_id not in outcome_by_id)
+        coverage = (
+            (len(completed) - missing) / len(completed)
+            if completed
+            else None
+        )
+
+        prediction_snapshots = 0
+        if "events" in tables:
+            prediction_snapshots = int(
+                con.execute(
+                    "SELECT COUNT(*) FROM events WHERE event_type IN "
+                    "('intelligence.prediction.snapshot','decision.prediction_snapshot')"
+                ).fetchone()[0]
+            )
+
+        result.update(
+            {
+                "status": "OK",
+                "canonical_recommendations": len(recommendations),
+                "completed_recommendations": len(completed),
+                "recorded_outcomes": len(outcome_rows),
+                "completed_without_outcome": missing,
+                "outcome_coverage_completed": round(coverage, 4) if coverage is not None else None,
+                "outcome_counts": counts,
+                "known_binary_outcomes": known_binary,
+                "prediction_snapshot_events": prediction_snapshots,
+            }
+        )
+        if prediction_snapshots:
+            result["prediction_backtest_status"] = "SNAPSHOTS_PRESENT_BACKTEST_NOT_IMPLEMENTED"
+            result["decision_backtest_status"] = "SNAPSHOTS_PRESENT_BACKTEST_NOT_IMPLEMENTED"
+    except sqlite3.Error:
+        result["status"] = "READ_ERROR"
+        return result
+    finally:
+        con.close()
+
+    calibration = canonical_review_calibration_summary(root=root)
+    result["calibration_status"] = calibration.get("status")
+    result["calibration_gap"] = calibration.get("calibration_gap")
+    result["brier_score"] = calibration.get("brier_score")
+    result["positive_rate"] = calibration.get("positive_rate")
+
+    flags: list[str] = []
+    if result["completed_without_outcome"]:
+        flags.append("COLLECT_MISSING_VERIFIED_OUTCOMES")
+    if int(result["known_binary_outcomes"] or 0) < _MIN_BINARY_OUTCOMES:
+        flags.append("COLLECT_MORE_BINARY_OUTCOMES")
+    if calibration.get("status") == "REVIEW_REQUIRED":
+        flags.append("REVIEW_CALIBRATION")
+    if int(result["prediction_snapshot_events"] or 0) == 0:
+        flags.append("DESIGN_IMMUTABLE_PREDICTION_SNAPSHOTS")
+    result["learning_review_flags"] = flags
+    return result
