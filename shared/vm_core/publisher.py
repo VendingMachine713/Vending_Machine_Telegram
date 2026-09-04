@@ -94,8 +94,11 @@ class BotEventPublisher:
 
     def stop_heartbeat_loop(self) -> None:
         stop = self._heartbeat_stop
+        thread = self._heartbeat_thread
         if stop is not None:
             stop.set()
+        if thread is not None and thread.is_alive():
+            thread.join()
         self._heartbeat_stop = None
         self._heartbeat_thread = None
 
