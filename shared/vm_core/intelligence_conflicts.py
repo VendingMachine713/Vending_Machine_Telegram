@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Iterable
 
 from .intelligence_contracts import IntelligenceRecord
 from .intelligence_replay import intelligence_fingerprint
@@ -26,21 +26,22 @@ def _polarity(record: IntelligenceRecord) -> str | None:
 def detect_conflicts(records: Iterable[IntelligenceRecord]) -> ConflictResult:
     """Detect exact duplicates and explicit polarity contradictions.
 
-    Contradictions are intentionally conservative: two records must target the same
-    subject and record type, and both must provide explicit opposing polarity.
-    Missing polarity never becomes an inferred conflict.
+    Contradictions are intentionally conservative: both records must have the same
+    intelligence kind, record type, and subject, and must explicitly declare
+    opposing positive/negative polarity. Missing or neutral polarity never becomes
+    an inferred conflict.
     """
     items = tuple(records)
-    seen: dict[str, IntelligenceRecord] = {}
+    seen: set[str] = set()
     duplicates: set[str] = set()
     contradictions: set[tuple[str, str]] = set()
 
     for record in items:
-        fp = intelligence_fingerprint(record)
-        if fp in seen:
-            duplicates.add(fp)
+        fingerprint = intelligence_fingerprint(record)
+        if fingerprint in seen:
+            duplicates.add(fingerprint)
         else:
-            seen[fp] = record
+            seen.add(fingerprint)
 
     for index, left in enumerate(items):
         left_polarity = _polarity(left)
@@ -48,14 +49,22 @@ def detect_conflicts(records: Iterable[IntelligenceRecord]) -> ConflictResult:
             continue
         for right in items[index + 1 :]:
             if (
-                left.subject_type != right.subject_type
+                left.kind != right.kind
+                or left.subject_type != right.subject_type
                 or left.subject_id != right.subject_id
                 or left.record_type != right.record_type
             ):
                 continue
             right_polarity = _polarity(right)
             if {left_polarity, right_polarity} == {"positive", "negative"}:
-                pair = tuple(sorted((intelligence_fingerprint(left), intelligence_fingerprint(right))))
+                pair = tuple(
+                    sorted(
+                        (
+                            intelligence_fingerprint(left),
+                            intelligence_fingerprint(right),
+                        )
+                    )
+                )
                 contradictions.add(pair)
 
     return ConflictResult(
