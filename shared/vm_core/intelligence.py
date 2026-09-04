@@ -11,6 +11,7 @@ from .db import PlatformDB
 from .health import run_health
 from .paths import project_root
 from .relationship_adapter import collect_relationship_presence
+from .workflow_evidence_adapter import collect_product_workflow_evidence
 
 RECOMMENDATION_RULE_VERSION = 1
 
@@ -38,6 +39,7 @@ def _collect_adapters(root: Path) -> dict[str, Any]:
         "bot_state": lambda: collect_all_bot_evidence(root),
         "search_activity": lambda: collect_search_activity(root),
         "relationship_presence": lambda: collect_relationship_presence(root),
+        "product_workflows": lambda: collect_product_workflow_evidence(root),
     }
     out: dict[str, Any] = {}
     for name, collect in collectors.items():
