@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from shared.vm_core.db import PlatformDB
-from shared.vm_core.service_telemetry import service_telemetry_snapshot
+from shared.vm_core.service_telemetry import TELEMETRY_CONTRACT_VERSION, service_telemetry_snapshot
 
 
 def main() -> int:
@@ -51,12 +51,14 @@ def main() -> int:
             now=datetime(2026, 9, 5, 0, 10, tzinfo=timezone.utc),
         )
 
-        assert snapshot["contract_version"] == 1
+        assert snapshot["contract_version"] == TELEMETRY_CONTRACT_VERSION == 2
         assert snapshot["status"] == "HEALTHY"
         assert snapshot["running_count"] == 1
         assert snapshot["fresh_running_count"] == 1
         assert snapshot["services"][0]["freshness"] == "FRESH"
         assert snapshot["services"][0]["counters"] == {"ticks": 1}
+        assert snapshot["services"][0]["runtime_updated_at_utc"]
+        assert snapshot["services"][0]["runtime_age_seconds"] is not None
         assert snapshot["read_only"] is True
         assert snapshot["automatic_execution"] is False
         assert snapshot["external_action_authority"] is False
