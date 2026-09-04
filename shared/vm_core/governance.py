@@ -10,8 +10,8 @@ from .paths import project_root
 
 
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
-    "PROPOSED": {"ACCEPTED", "DISMISSED"},
-    "BLOCKED": {"DISMISSED"},
+    "PROPOSED": {"ACCEPTED", "DISMISSED", "EXPIRED"},
+    "BLOCKED": {"DISMISSED", "EXPIRED"},
     "ACCEPTED": {"COMPLETED", "DISMISSED"},
     "DISMISSED": set(),
     "COMPLETED": set(),
