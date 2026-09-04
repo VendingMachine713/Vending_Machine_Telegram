@@ -7,6 +7,7 @@ from typing import Any
 from .confidence import recommendation_confidence_view
 from .db import PlatformDB
 from .paths import project_root
+from .prediction_intelligence import prediction_summary
 from .rule_health import rule_health
 from .rule_registry import effective_score_delta
 
@@ -53,7 +54,7 @@ def _duplicate_signature(item: dict[str, Any]) -> tuple[str, str, str, str]:
 
 
 def ranked_decisions(root: Path | None = None, *, limit: int = 50) -> list[dict[str, Any]]:
-    """Rank proposed recommendations without accepting or executing any action."""
+    """Rank proposed legacy recommendations without accepting or executing any action."""
     root = root or project_root()
     db = PlatformDB(root=root)
     db.init()
@@ -72,7 +73,6 @@ def ranked_decisions(root: Path | None = None, *, limit: int = 50) -> list[dict[
         )
         priority = _clamp100(float(row.get("priority") or 0) + governed_delta)
         risk_assessed = _component_available(evidence, "risk_score")
-        # Unknown risk is not zero risk. Treat missing/invalid risk as neutral-conservative.
         risk = _component(evidence, "risk_score", 50)
         urgency = _component(evidence, "urgency_score", priority)
         opportunity = _component(evidence, "opportunity_score", priority)
@@ -137,6 +137,98 @@ def ranked_decisions(root: Path | None = None, *, limit: int = 50) -> list[dict[
     return deduped[: max(1, int(limit))]
 
 
+def _canonical_disposition(prediction: dict[str, Any]) -> str:
+    probability = float(prediction.get("probability") or 0.0)
+    lower = float(prediction.get("lower_bound") or 0.0)
+    if bool(prediction.get("risk_review_required")):
+        return "RISK_REVIEW_FIRST"
+    if probability >= 0.70 and lower >= 0.50:
+        return "PRIORITISE_OPERATOR_REVIEW"
+    if probability >= 0.55:
+        return "REVIEW_WHEN_AVAILABLE"
+    return "DEFER_LOW_EXPECTED_VALUE"
+
+
+def canonical_decisions(
+    root: Path | None = None,
+    *,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Rank canonical operator-review choices from Predictions without taking action.
+
+    This is the shared Brain Decision Engine surface. It consumes the existing
+    prediction/risk/opportunity chain and produces an operator-review disposition,
+    not an executable instruction. No recommendation is created or accepted here.
+    """
+    root = root or project_root()
+    try:
+        requested = max(1, min(500, int(limit)))
+    except (TypeError, ValueError):
+        requested = 50
+    predictions = prediction_summary(root=root, limit=requested)
+    rows: list[dict[str, Any]] = []
+    for prediction in predictions.get("predictions", []):
+        subject = str(prediction.get("canonical_subject_id") or "").strip()
+        if not subject:
+            continue
+        try:
+            probability = max(0.0, min(1.0, float(prediction.get("probability") or 0.0)))
+            lower = max(0.0, min(1.0, float(prediction.get("lower_bound") or 0.0)))
+            confidence = max(0.0, min(1.0, float(prediction.get("source_confidence") or 0.0)))
+            risk = max(0.0, min(100.0, float(prediction.get("risk_score") or 0.0)))
+        except (TypeError, ValueError):
+            continue
+        raw_score = probability * 60.0 + lower * 20.0 + confidence * 20.0 - risk * 0.25
+        score = round(_clamp100(raw_score), 2)
+        disposition = _canonical_disposition(prediction)
+        reasons = [
+            f"forecast_probability={probability:.4f}",
+            f"forecast_lower_bound={lower:.4f}",
+            f"source_confidence={confidence:.4f}",
+            f"risk_score={risk:.2f}",
+        ]
+        if prediction.get("empirical_base_rate_used"):
+            reasons.append("verified_outcome_base_rate_used")
+        if prediction.get("risk_review_required"):
+            reasons.append("risk_review_required")
+        rows.append({
+            "canonical_subject_id": subject,
+            "decision_type": "operator_review_priority",
+            "disposition": disposition,
+            "decision_score": score,
+            "forecast_probability": probability,
+            "forecast_lower_bound": lower,
+            "forecast_upper_bound": prediction.get("upper_bound"),
+            "prediction_method": prediction.get("method"),
+            "source_opportunity_type": prediction.get("source_opportunity_type"),
+            "source_opportunity_score": prediction.get("source_opportunity_score"),
+            "risk_adjusted_score": prediction.get("risk_adjusted_score"),
+            "risk_score": risk,
+            "risk_level": prediction.get("risk_level"),
+            "source_confidence": confidence,
+            "reasons": reasons,
+            "requires_human_review": True,
+            "decision_is_advisory": True,
+            "recommendation_created": False,
+            "automatic_conflict_resolution": False,
+            "automatic_acceptance": False,
+            "automatic_execution": False,
+            "automatic_threshold_change": False,
+            "automatic_rule_change": False,
+            "external_action_authority": False,
+        })
+
+    rows.sort(
+        key=lambda item: (
+            item["disposition"] != "RISK_REVIEW_FIRST",
+            -float(item["decision_score"]),
+            -float(item["forecast_probability"]),
+            str(item["canonical_subject_id"]),
+        )
+    )
+    return rows[:requested]
+
+
 def decision_summary(root: Path | None = None, *, limit: int = 20) -> dict[str, Any]:
     rows = ranked_decisions(root, limit=limit)
     subjects: dict[tuple[str, str], list[dict[str, Any]]] = {}
@@ -158,6 +250,12 @@ def decision_summary(root: Path | None = None, *, limit: int = 20) -> dict[str, 
                 "automatic_resolution": False,
             })
 
+    canonical_rows = canonical_decisions(root, limit=limit)
+    disposition_counts: dict[str, int] = {}
+    for row in canonical_rows:
+        disposition = str(row["disposition"])
+        disposition_counts[disposition] = disposition_counts.get(disposition, 0) + 1
+
     return {
         "decision_count": len(rows),
         "top_decisions": rows,
@@ -165,8 +263,14 @@ def decision_summary(root: Path | None = None, *, limit: int = 20) -> dict[str, 
         "conflicts": conflicts,
         "duplicate_suppression": True,
         "unknown_risk_default": 50,
+        "canonical_decision_count": len(canonical_rows),
+        "canonical_top_decisions": canonical_rows,
+        "canonical_disposition_counts": dict(sorted(disposition_counts.items())),
+        "canonical_decisions_read_only": True,
         "automatic_conflict_resolution": False,
         "automatic_acceptance": False,
         "automatic_execution": False,
+        "automatic_threshold_change": False,
+        "automatic_rule_change": False,
         "external_action_authority": False,
     }
