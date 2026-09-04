@@ -36,6 +36,8 @@ from .heartbeat import heartbeat_snapshot, format_heartbeat_snapshot
 from .watchdog import watchdog_snapshot, format_watchdog_snapshot
 from .recovery_classifier import recovery_plan, format_recovery_plan
 from .recovery_executor import execute_recovery_plan
+from .admin_exceptions import admin_exceptions, format_admin_exceptions
+from .incident_runtime import incident_timeline
 
 def _json(obj): print(json.dumps(obj,indent=2,ensure_ascii=False,default=str))
 
@@ -71,6 +73,8 @@ def build_parser():
         ("inventory","Refresh machine-readable inventory."),("health","Run service health checks."),
         ("health-v2","Run universal health classification."),\n        ("heartbeats","Show universal heartbeat freshness."),\n        ("watchdog","Run read-only universal watchdog analysis."),\n        ("recovery-plan","Classify failures and show policy-gated recovery decisions."),
         ("recovery-execute","Preview or apply policy-gated safe lifecycle recovery."),
+        ("exceptions","Show admin-by-exception recovery attention items."),
+        ("incidents","Show recovery incident history."),
         ("env","Show environment/developer tools."),("deps","Show dependency inventory."),
         ("test","Run platform self-tests."),("check","Run release pre-flight checks."),
         ("support","Create safe support bundle."),("registry","Sync/show shared registries."),
@@ -130,6 +134,10 @@ def main(argv=None):
         report=recovery_plan(root); print(format_recovery_plan(report)); return 2 if report["summary"]["BLOCKED"] or report["summary"]["REVIEW_REQUIRED"] else 0
     if c=="recovery-execute":
         plan=recovery_plan(root); _json(execute_recovery_plan(plan,root,apply=args.apply_safe)); return 0
+    if c=="exceptions":
+        report=admin_exceptions(root); print(format_admin_exceptions(report)); return 2 if not report["quiet"] else 0
+    if c=="incidents":
+        _json(incident_timeline(root,50)); return 0
     if c=="intelligence":
         print(format_intelligence_summary(intelligence_summary(root, refresh=True))); return 0
     if c=="init":
