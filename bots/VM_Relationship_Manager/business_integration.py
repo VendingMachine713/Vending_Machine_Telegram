@@ -8,6 +8,7 @@ from telegram import Update
 
 from admin_bot import AdminBot
 from business_memory import BusinessMemory
+from business_signals import BusinessOperatorBrief, BusinessSignals
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class BusinessDashboardSnapshot:
     repeat_suppliers: int
     reconnect_candidates: int
     reconnect_days: int
+    available_products: int
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,7 @@ class BusinessViewData:
     def __init__(self, memory: BusinessMemory):
         self.memory = memory
         self.db = memory.db
+        self.signals = BusinessSignals(self.db)
 
     def dashboard_snapshot(
         self,
@@ -94,10 +97,10 @@ class BusinessViewData:
             repeat_suppliers=int(repeat_suppliers),
             reconnect_candidates=int(reconnect_candidates),
             reconnect_days=reconnect_days,
+            available_products=len(self.signals.available_products()),
         )
 
     def profile_snapshot(self, telegram_id: int) -> BusinessProfileSnapshot | None:
-        # Preserve BusinessMemory's fail-closed contact validation.
         self.memory.contact_summary(telegram_id)
 
         aggregate = self.db.one(
@@ -160,11 +163,18 @@ def _local_date(value: str, tz) -> str:
         return value
 
 
+def _contact_label(row) -> str:
+    name = row.get("display_name") or row.get("username") or str(row.get("telegram_id") or "Unknown")
+    username = row.get("username")
+    return f"{name} (@{username})" if username else str(name)
+
+
 def format_dashboard_section(snapshot: BusinessDashboardSnapshot) -> str:
     return (
         "\n\n<b>💼 Business Memory</b>\n"
         f"Clients: <b>{snapshot.clients}</b> · Suppliers: <b>{snapshot.suppliers}</b>\n"
         f"Products: <b>{snapshot.products}</b> · Deals: <b>{snapshot.transactions}</b>\n"
+        f"Available products: <b>{snapshot.available_products}</b>\n"
         f"Repeat clients: <b>{snapshot.repeat_clients}</b> · "
         f"Repeat suppliers: <b>{snapshot.repeat_suppliers}</b>\n"
         f"Reconnect {snapshot.reconnect_days}d+: <b>{snapshot.reconnect_candidates}</b>\n"
@@ -193,6 +203,33 @@ def format_profile_section(snapshot: BusinessProfileSnapshot, tz) -> str:
     )
     if snapshot.recorded_aud_values:
         text += f"\nRecorded AUD value: <b>${snapshot.aud_minor / 100:,.2f}</b>"
+    return text
+
+
+def format_operator_brief_section(brief: BusinessOperatorBrief, tz) -> str:
+    text = (
+        "\n\n<b>💼 Business actions</b>\n"
+        f"Available products: <b>{brief.available_products}</b> · "
+        f"Reload candidates: <b>{brief.reload_candidates}</b>\n"
+        f"Dormant clients {brief.inactive_days}d+: <b>{brief.dormant_clients}</b> · "
+        f"Repeat dormant: <b>{brief.repeat_dormant_clients}</b>"
+    )
+    if brief.top_reload:
+        text += "\n\n<b>Top reload opportunities</b>"
+        for row in brief.top_reload:
+            text += (
+                f"\n• {escape(_contact_label(row))} · {escape(str(row['product_name']))} · "
+                f"{int(row['transaction_count'])} deal(s) · "
+                f"last {escape(_local_date(str(row['last_transaction_at']), tz))}"
+            )
+    if brief.top_dormant:
+        text += "\n\n<b>Top reconnect candidates</b>"
+        for row in brief.top_dormant:
+            text += (
+                f"\n• {escape(_contact_label(row))} · {int(row['transaction_count'])} deal(s) · "
+                f"last {escape(_local_date(str(row['last_transaction_at']), tz))}"
+            )
+    text += "\n\nReview first; no contact is messaged automatically."
     return text
 
 
@@ -225,6 +262,7 @@ class BusinessIntegratedAdminBot(AdminBot):
     def __init__(self, settings, db, engine, business_memory: BusinessMemory, monitor=None):
         self.business_memory = business_memory
         self.business_views = BusinessViewData(business_memory)
+        self.business_signals = self.business_views.signals
         super().__init__(settings, db, engine, monitor=monitor)
 
     async def dashboard(self, update: Update, context):
@@ -247,3 +285,12 @@ class BusinessIntegratedAdminBot(AdminBot):
 
         suffix = format_profile_section(snapshot, self.settings.timezone)
         return await super()._send_profile_to(_MessageSuffixProxy(message, suffix), c)
+
+    async def _send_today(self, message):
+        chat = getattr(message, "chat", None)
+        if not chat or getattr(chat, "type", None) != "private":
+            return await super()._send_today(message)
+
+        brief = self.business_signals.operator_brief(inactive_days=30, limit=3)
+        suffix = format_operator_brief_section(brief, self.settings.timezone)
+        return await super()._send_today(_MessageSuffixProxy(message, suffix))
