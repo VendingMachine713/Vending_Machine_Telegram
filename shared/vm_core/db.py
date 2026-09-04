@@ -272,7 +272,6 @@ class PlatformDB:
         with self.connect() as con:
             return [dict(r) for r in con.execute("SELECT * FROM services ORDER BY name")]
 
-
     def record_heartbeat(
         self, service: str, instance_id: str, status: str, *,
         active_task: str | None = None, counters: dict[str, Any] | None = None,
@@ -524,3 +523,24 @@ class PlatformDB:
                     detail_json=excluded.detail_json,
                     checked_at_utc=excluded.checked_at_utc
             """, (service, status, json.dumps(detail, ensure_ascii=False), utcnow()))
+
+    def health_records(self) -> list[dict[str, Any]]:
+        """Return persisted health rows with decoded detail payloads."""
+        with self.connect() as con:
+            rows = con.execute(
+                "SELECT service,status,detail_json,checked_at_utc FROM service_health ORDER BY service"
+            ).fetchall()
+
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                detail = json.loads(row["detail_json"] or "{}")
+            except (TypeError, json.JSONDecodeError):
+                detail = {}
+            out.append({
+                "service": row["service"],
+                "status": row["status"],
+                "detail": detail if isinstance(detail, dict) else {},
+                "checked_at_utc": row["checked_at_utc"],
+            })
+        return out
