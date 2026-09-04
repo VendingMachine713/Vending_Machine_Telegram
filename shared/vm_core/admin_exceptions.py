@@ -13,6 +13,7 @@ def admin_exceptions(root: Path | None = None, limit: int = 20) -> dict[str, Any
     root = root or project_root()
     sync_recovery_incidents(root)
     db = PlatformDB(root=root)
+    db.init()
     plan = recovery_plan(root)
     exceptions = [
         row for row in plan.get("decisions", [])
