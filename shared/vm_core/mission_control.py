@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from .canonical_readiness import canonical_operator_summary
+from .canonical_recommendations import canonical_recommendation_summary
 from .db import PlatformDB
 from .decision_engine import decision_summary
 from .entity_graph import entity_graph
@@ -24,6 +25,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
     opportunities = opportunity_summary(root, limit=limit)
     graph = entity_graph(root, limit=max(100, limit * 10))
     canonical = canonical_operator_summary(root=root)
+    canonical_recommendations = canonical_recommendation_summary(root=root, limit=limit)
     readiness = canonical["canonical_readiness"]
     evidence_health = canonical["evidence_health"]
     calibration = canonical["calibration"]
@@ -56,6 +58,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "canonical_parity": readiness["parity_status"],
             "canonical_evidence_health": evidence_health["status"],
             "canonical_calibration": calibration["status"],
+            "canonical_review_recommendations": canonical_recommendations["count"],
         },
         "attention": {
             "incidents": incidents,
@@ -65,11 +68,13 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "canonical_readiness_reasons": list(readiness["reasons"]),
             "canonical_evidence_stale": bool(evidence_health["stale"]),
             "canonical_calibration_review_required": calibration["status"] == "REVIEW_REQUIRED",
+            "canonical_review_recommendations": canonical_recommendations["recommendations"],
         },
         "opportunities": opportunities["top_opportunities"],
         "decisions": decisions["top_decisions"],
         "rule_health": health_summary(root),
         "canonical": canonical,
+        "canonical_recommendations": canonical_recommendations,
         "graph_summary": {
             "node_count": graph["node_count"],
             "edge_count": graph["edge_count"],
