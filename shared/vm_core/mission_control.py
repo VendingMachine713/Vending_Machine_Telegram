@@ -12,13 +12,18 @@ from .canonical_review_feedback import canonical_review_feedback_summary
 from .db import PlatformDB
 from .decision_engine import decision_summary
 from .entity_graph import entity_graph
+from .health_contract import health_snapshot
 from .opportunity_intelligence import opportunity_summary
 from .paths import project_root
+from .platform_aggregation import incident_intelligence_snapshot
+from .platform_registry import service_registry
 from .rule_health import health_summary
+
+MISSION_CONTROL_CONTRACT_VERSION = 4
 
 
 def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, Any]:
-    """Return one passive, operator-oriented snapshot of VM Brain state."""
+    """Return one passive, operator-oriented snapshot of VM Brain and platform state."""
     root = root or project_root()
     db = PlatformDB(root=root)
     db.init()
@@ -38,6 +43,11 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
     evidence_health = canonical["evidence_health"]
     calibration = canonical["calibration"]
 
+    registry = service_registry(root)
+    platform_health = health_snapshot(db.health_records())
+    platform_intelligence = incident_intelligence_snapshot(root, limit=limit)
+    rule_health = health_summary(root)
+
     runtime_counts: dict[str, int] = {}
     for service in services:
         status = str(service.get("runtime_status") or "UNKNOWN").upper()
@@ -49,10 +59,14 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
         severity_counts[severity] = severity_counts.get(severity, 0) + 1
 
     return {
+        "contract_version": MISSION_CONTROL_CONTRACT_VERSION,
         "phase": "2 - Make Brain useful",
         "headline": {
             "services": len(services),
+            "registered_services": registry["service_count"],
             "runtime_counts": runtime_counts,
+            "health_unhealthy": platform_health["unhealthy_count"],
+            "health_not_ready": platform_health["not_ready_count"],
             "open_incidents": len(incidents),
             "incident_severity_counts": severity_counts,
             "active_signals": len(signals),
@@ -76,8 +90,10 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
         },
         "attention": {
             "incidents": incidents,
+            "unhealthy_services": platform_health["unhealthy_services"],
+            "correlated_incident_intelligence_subjects": platform_intelligence["correlated_subjects"],
             "conflicts": decisions["conflicts"],
-            "rollback_recommendations": health_summary(root)["rollback_recommendations"],
+            "rollback_recommendations": rule_health["rollback_recommendations"],
             "blocked_opportunities": [row for row in opportunities["top_opportunities"] if row["blocked"]],
             "canonical_readiness_reasons": list(readiness["reasons"]),
             "canonical_evidence_stale": bool(evidence_health["stale"]),
@@ -89,9 +105,15 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             ),
             "canonical_review_audit_malformed_rows": canonical_review_audit["malformed_rows"],
         },
+        "platform": {
+            "contract_version": MISSION_CONTROL_CONTRACT_VERSION,
+            "registry": registry,
+            "health": platform_health,
+            "incident_intelligence": platform_intelligence,
+        },
         "opportunities": opportunities["top_opportunities"],
         "decisions": decisions["top_decisions"],
-        "rule_health": health_summary(root),
+        "rule_health": rule_health,
         "canonical": canonical,
         "canonical_recommendations": canonical_recommendations,
         "canonical_recommendation_lifecycle": canonical_lifecycle,
