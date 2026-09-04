@@ -35,6 +35,7 @@ from .core1_readiness import core1_readiness, format_core1_readiness
 from .heartbeat import heartbeat_snapshot, format_heartbeat_snapshot
 from .watchdog import watchdog_snapshot, format_watchdog_snapshot
 from .recovery_classifier import recovery_plan, format_recovery_plan
+from .recovery_executor import execute_recovery_plan
 
 def _json(obj): print(json.dumps(obj,indent=2,ensure_ascii=False,default=str))
 
@@ -69,6 +70,7 @@ def build_parser():
         ("doctor","Run diagnostics."),("inspect","Write safe structure report."),
         ("inventory","Refresh machine-readable inventory."),("health","Run service health checks."),
         ("health-v2","Run universal health classification."),\n        ("heartbeats","Show universal heartbeat freshness."),\n        ("watchdog","Run read-only universal watchdog analysis."),\n        ("recovery-plan","Classify failures and show policy-gated recovery decisions."),
+        ("recovery-execute","Preview or apply policy-gated safe lifecycle recovery."),
         ("env","Show environment/developer tools."),("deps","Show dependency inventory."),
         ("test","Run platform self-tests."),("check","Run release pre-flight checks."),
         ("support","Create safe support bundle."),("registry","Sync/show shared registries."),
@@ -106,6 +108,7 @@ def build_parser():
     s.choices["supervise"].add_argument("--apply",action="store_true")
     s.choices["supervise-loop"].add_argument("--apply",action="store_true")
     s.choices["supervise-loop"].add_argument("--interval",type=int,default=60)
+    s.choices["recovery-execute"].add_argument("--apply-safe",action="store_true")
     return p
 
 def main(argv=None):
@@ -125,6 +128,8 @@ def main(argv=None):
         report=watchdog_snapshot(root); print(format_watchdog_snapshot(report)); return 2 if report["state"]=="ATTENTION_REQUIRED" else 0
     if c=="recovery-plan":
         report=recovery_plan(root); print(format_recovery_plan(report)); return 2 if report["summary"]["BLOCKED"] or report["summary"]["REVIEW_REQUIRED"] else 0
+    if c=="recovery-execute":
+        plan=recovery_plan(root); _json(execute_recovery_plan(plan,root,apply=args.apply_safe)); return 0
     if c=="intelligence":
         print(format_intelligence_summary(intelligence_summary(root, refresh=True))); return 0
     if c=="init":
