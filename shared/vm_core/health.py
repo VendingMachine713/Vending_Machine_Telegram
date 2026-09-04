@@ -9,6 +9,7 @@ from .health_contract import service_health_record
 from .manifests import discover_bots
 from .paths import project_root
 from .runtime_requirements import runtime_configuration_status
+from .service_adapters import adapter_status
 from .services import service_status
 
 
@@ -34,6 +35,7 @@ def run_health(root: Path | None = None) -> list[dict[str, Any]]:
 
     for bot in discover_bots(root):
         cfg = runtime_configuration_status(Path(bot.path))
+        adapter = adapter_status(bot)
         details: dict[str, Any] = {
             "classification": bot.classification,
             "entrypoint": bot.entrypoint,
@@ -43,6 +45,7 @@ def run_health(root: Path | None = None) -> list[dict[str, Any]]:
             "process_alive": runtime.get(bot.folder, {}).get("process_alive", False),
             "configuration": cfg,
             "databases": {},
+            "adapter": adapter,
         }
         for rel in bot.databases[:20]:
             details["databases"][rel] = _db_check(Path(bot.path) / rel)
@@ -55,6 +58,8 @@ def run_health(root: Path | None = None) -> list[dict[str, Any]]:
         elif bad_database:
             status = "DEGRADED"
         elif not bot.entrypoint and not bot.launchers:
+            status = "DEGRADED"
+        elif adapter["status"] == "EVIDENCE_REQUIRED":
             status = "DEGRADED"
         elif details["process_alive"]:
             status = "ALIVE"

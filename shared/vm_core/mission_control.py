@@ -20,8 +20,10 @@ from .platform_aggregation import incident_intelligence_snapshot
 from .platform_registry import service_registry
 from .relationship_intelligence import relationship_intelligence_summary
 from .rule_health import health_summary
+from .service_adapters import adapter_registry
 
 MISSION_CONTROL_CONTRACT_VERSION = 4
+MISSION_CONTROL_PLATFORM_REVISION = 1
 
 
 def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, Any]:
@@ -52,6 +54,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
     calibration = canonical["calibration"]
 
     registry = service_registry(root)
+    adapters = adapter_registry(root)
     platform_health = health_snapshot(db.health_records())
     platform_intelligence = incident_intelligence_snapshot(root, limit=limit)
     rule_health = health_summary(root)
@@ -72,6 +75,9 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
         "headline": {
             "services": len(services),
             "registered_services": registry["service_count"],
+            "adapter_supported_services": adapters["supported_count"],
+            "adapter_ready_services": adapters["ready_count"],
+            "adapter_evidence_required": adapters["evidence_required_count"],
             "runtime_counts": runtime_counts,
             "health_unhealthy": platform_health["unhealthy_count"],
             "health_not_ready": platform_health["not_ready_count"],
@@ -106,6 +112,9 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
         "attention": {
             "incidents": incidents,
             "unhealthy_services": platform_health["unhealthy_services"],
+            "adapter_evidence_required": [
+                row for row in adapters["services"] if row["status"] == "EVIDENCE_REQUIRED"
+            ],
             "correlated_incident_intelligence_subjects": platform_intelligence["correlated_subjects"],
             "conflicts": decisions["conflicts"],
             "rollback_recommendations": rule_health["rollback_recommendations"],
@@ -126,7 +135,9 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
         },
         "platform": {
             "contract_version": MISSION_CONTROL_CONTRACT_VERSION,
+            "revision": MISSION_CONTROL_PLATFORM_REVISION,
             "registry": registry,
+            "adapters": adapters,
             "health": platform_health,
             "incident_intelligence": platform_intelligence,
         },

@@ -108,6 +108,8 @@ jobs:
         run: ruff check tools/ci --output-format=github
       - name: Validate VM Platform Foundation contracts
         run: python -m tools.ci.validate_vm_platform_contracts
+      - name: Validate VM Platform service adapters
+        run: python -m tools.ci.validate_vm_platform_adapters
       - name: Validate Windows admin cutover scripts
         shell: pwsh
         run: |
