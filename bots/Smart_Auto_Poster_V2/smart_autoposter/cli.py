@@ -37,6 +37,7 @@ from .rules import upsert_rule, list_rules, apply_rules, evaluate_rule
 from .recommendations import generate_recommendations, list_recommendations, apply_recommendation, dismiss_recommendation
 from .reports import daily_report_text, weekly_report_text
 from .uncertain_reconciliation import audit_uncertain_deliveries, format_reconciliation_report
+from .topic_routing import topic_route_preview
 
 
 def db_for(settings: Settings):
@@ -386,6 +387,14 @@ async def async_scan(args):
             await pool.disconnect()
 
 def cmd_scan(args): asyncio.run(async_scan(args))
+
+
+def cmd_topic_route_preview(args):
+    s = Settings.load(False); db = db_for(s)
+    preview = topic_route_preview(db)
+    if args.only_attention:
+        preview["routes"] = [row for row in preview["routes"] if row["status"] != "READY"]
+    print(json.dumps(preview, indent=2, ensure_ascii=False))
 
 
 async def _telegram_runtime(args, mode: str):
@@ -1043,6 +1052,7 @@ def build_parser():
     a=sp.add_parser("import-config"); a.add_argument("--csv"); a.set_defaults(func=cmd_import)
     a=sp.add_parser("validate"); a.set_defaults(func=cmd_validate)
     a=sp.add_parser("scan"); a.set_defaults(func=cmd_scan)
+    a=sp.add_parser("topic-route-preview"); a.add_argument("--only-attention",action="store_true"); a.set_defaults(func=cmd_topic_route_preview)
     a=sp.add_parser("accounts-check"); a.set_defaults(func=cmd_accounts_check)
     a=sp.add_parser("reconcile-uncertain"); a.add_argument("--limit",type=int,default=100); a.add_argument("--before-seconds",type=int,default=120); a.add_argument("--after-seconds",type=int,default=900); a.add_argument("--history-limit",type=int,default=300); a.add_argument("--json",action="store_true"); a.set_defaults(func=cmd_reconcile_uncertain)
     a=sp.add_parser("login-account"); a.add_argument("account", choices=["primary","secondary"]); a.add_argument("--reset", action="store_true"); a.set_defaults(func=cmd_login_account)

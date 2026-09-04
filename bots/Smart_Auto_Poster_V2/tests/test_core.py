@@ -34,7 +34,7 @@ class CoreTests(unittest.TestCase):
     def test_schema_and_validation(self):
         self.assertEqual(validate(self.db), [])
         with self.db.connect() as con:
-            self.assertEqual(con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0], "6")
+            self.assertEqual(con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0], "7")
 
     def test_enqueue_duplicate_guard_per_run(self):
         a = enqueue_campaign(self.db, "C1", run_key="test-run")

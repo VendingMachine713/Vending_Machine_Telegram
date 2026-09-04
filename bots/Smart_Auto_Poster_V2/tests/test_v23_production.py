@@ -40,7 +40,7 @@ class V23ProductionTests(unittest.TestCase):
 
     def test_schema_v4_tables_and_columns(self):
         with self.db.connect() as con:
-            self.assertEqual(con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0], "6")
+            self.assertEqual(con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0], "7")
             tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertIn("campaign_content", tables)
             self.assertIn("content_usage", tables)

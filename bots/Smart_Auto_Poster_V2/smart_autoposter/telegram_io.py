@@ -133,6 +133,56 @@ class TelegramPool:
             })
         return rows
 
+    async def forum_topics(self, account_key: str, group_id: int) -> list[dict]:
+        """Discover visible forum topics without performing a Telegram mutation."""
+        from telethon.tl.functions.messages import GetForumTopicsRequest
+        from telethon.tl.types import ForumTopic
+
+        client = self.clients[account_key]
+        entity = await client.get_entity(group_id)
+        peer = await client.get_input_entity(entity)
+        rows: list[dict] = []
+        seen: set[int] = set()
+        offset_date = None
+        offset_id = 0
+        offset_topic = 0
+        for _page in range(50):
+            response = await client(
+                GetForumTopicsRequest(
+                    peer=peer,
+                    offset_date=offset_date,
+                    offset_id=offset_id,
+                    offset_topic=offset_topic,
+                    limit=100,
+                    q=None,
+                )
+            )
+            topics = list(getattr(response, "topics", None) or [])
+            usable = [topic for topic in topics if isinstance(topic, ForumTopic)]
+            added = 0
+            for topic in usable:
+                topic_id = int(topic.id)
+                if topic_id in seen:
+                    continue
+                seen.add(topic_id)
+                added += 1
+                rows.append(
+                    {
+                        "topic_id": topic_id,
+                        "title": str(getattr(topic, "title", "") or ""),
+                        "closed": bool(getattr(topic, "closed", False)),
+                        "hidden": bool(getattr(topic, "hidden", False)),
+                        "pinned": bool(getattr(topic, "pinned", False)),
+                    }
+                )
+            if len(topics) < 100 or not usable or added == 0:
+                break
+            last = usable[-1]
+            offset_topic = int(last.id)
+            offset_id = int(getattr(last, "top_message", 0) or last.id)
+            offset_date = getattr(last, "date", None)
+        return rows
+
     @staticmethod
     def _history_message_row(account_key: str, msg) -> dict:
         date = getattr(msg, "date", None)
