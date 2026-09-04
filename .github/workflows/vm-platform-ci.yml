@@ -112,6 +112,8 @@ jobs:
         run: python -m tools.ci.validate_vm_platform_adapters
       - name: Validate VM Platform passive telemetry
         run: python -m tools.ci.validate_vm_platform_telemetry
+      - name: Validate VM Platform fleet heartbeat coverage
+        run: python -m tools.ci.validate_vm_platform_fleet_heartbeat
       - name: Validate Windows admin cutover scripts
         shell: pwsh
         run: |
