@@ -1,41 +1,37 @@
-# VM Relationship Manager — Master Project Build
+# VM Relationship Manager
 
-# VM Relationship Manager V1
+A passive Telegram relationship-management and private Business Memory service for the Vending Machine ecosystem.
 
-A passive Telegram relationship-management service for the Vending Machine ecosystem.
-
-## V1 includes
+## Current capabilities
 
 - Automatic contact profiles keyed by permanent Telegram ID
 - Username/display-name change history
 - Shared-group tracking
 - Activity and active-day tracking
-- Relationship types and tags
-- Verification states
-- Relationship score
-- Trust score
-- Learned contact-cycle estimate
+- Relationship types, tags and verification states
+- Transparent relationship, trust and health scores
+- Momentum/lifecycle intelligence and learned contact cycles
 - Cooling/dormant detection
-- Manual follow-ups
-- Private admin notes
-- Meaningful event timeline
-- Attention queue
-- Admin Telegram bot dashboard
-- Search by ID, username or name
-- Daily score recalculation
-- SQLite WAL database
-- Rolling database backups
-- Admin audit log
-- Health log
+- Follow-ups, private notes and event timeline
+- Ranked `/today` admin-by-exception inbox
+- Daily/weekly relationship briefs
+- SQLite WAL database with transactional backups
+- Admin audit and health logs
+- Business Memory for client/supplier/product transaction history
+- Product-centric client/supplier views
+- Passive reload and dormant-client business signals
+- Privacy-reduced canonical VM Brain signal bridge
+- Low-touch business capture directly from contact-profile buttons
 
 ## Privacy design
 
 The monitor is metadata-first. It does **not** save message bodies by default.
 
-It records who interacted, when, where, and aggregate relationship information.
-Private notes entered by authorised admins are stored.
+It records identity/activity metadata and aggregate relationship information. Private notes entered by authorised admins are stored locally. Business Memory stores only business facts explicitly recorded/imported by the operator; it does not infer sales or supplier transactions from ordinary Telegram messages.
 
-## Important Telegram limitation
+The canonical Business Memory bridge does not copy private notes, message bodies, usernames, display names, raw Telegram contact IDs or product names into shared Brain evidence.
+
+## Telegram limitation
 
 The monitoring account can only observe chats/messages that the authorised Telegram account can legitimately access. A normal Telegram bot cannot silently read arbitrary groups it is not in or bypass Telegram permissions.
 
@@ -47,27 +43,15 @@ Python 3.11+ recommended.
 
 ### 2. Create a Telegram API application
 
-Get `api_id` and `api_hash` from Telegram's official API development page for your own account.
+Create an `api_id` and `api_hash` for your own Telegram account through Telegram's official API development page.
 
-### 3. Create the admin bot
+### 3. Create the private admin bot
 
-Create a Telegram bot through BotFather and copy its token.
+Create a Telegram bot through BotFather and store its token only in `.env`.
 
 ### 4. Configure
 
-Copy:
-
-```text
-.env.example
-```
-
-to:
-
-```text
-.env
-```
-
-Fill in:
+Copy `.env.example` to `.env` and fill in:
 
 ```text
 TELEGRAM_API_ID=
@@ -77,11 +61,9 @@ BOT_TOKEN=
 ADMIN_IDS=
 ```
 
-`ADMIN_IDS` is a comma-separated list of Telegram numeric IDs allowed to control the Relationship Manager.
+`ADMIN_IDS` is a comma-separated list of Telegram numeric IDs allowed to control Relationship Manager.
 
-### 5. Install
-
-Windows PowerShell:
+### 5. Install dependencies
 
 ```powershell
 py -m pip install -r requirements.txt
@@ -89,32 +71,89 @@ py -m pip install -r requirements.txt
 
 ### 6. Run
 
+Preferred Windows launcher:
+
+```powershell
+.\START_VM_RELATIONSHIPS.bat
+```
+
+Direct Python startup also works when the environment is already configured:
+
 ```powershell
 py main.py
 ```
 
-The first Telethon run may ask for the Telegram login code and, if enabled, your 2FA password. The session is then stored locally.
+The first Telethon run may ask for the Telegram login code and, if enabled, your 2FA password. The session is then stored locally and must not be committed.
 
-## Admin commands
+## Primary admin commands
 
 ```text
 /rm
-/relationships
 /person @username
 /person TELEGRAM_ID
-/note TELEGRAM_ID private note here
-/tag TELEGRAM_ID tag
-/type TELEGRAM_ID regular
-/verify TELEGRAM_ID verified optional reason
-/followup TELEGRAM_ID 7d reason
+/today
+/insights
+/growing
+/slipping
 /attention
+/followups
 /dormant
-/vip
-/regulars
+/cooling
+/top
 /health
+/rescan
 ```
 
-You can also simply send a name or username to the admin bot to search.
+You can also send a name or username directly to the private admin bot to search.
+
+## Low-touch Business Memory workflow
+
+The normal workflow does **not** require editing CSV files or manually finding Telegram IDs.
+
+1. Open a known contact with `/person @username`, `/person TELEGRAM_ID`, or normal contact search.
+2. Tap **💼 + Client deal** or **📦 + Supplier deal** on the profile.
+3. Tap one of the suggested products to record one unit immediately, or send a new product name as the next message.
+4. If the contact has previous business history, **🔁 Repeat last business deal** can repeat the last role/product/quantity/unit in one tap.
+
+Quick capture deliberately does not infer monetary value. Use the full `/deal` command only when quantity, value or a note matters.
+
+A pending quick-capture prompt expires automatically after five minutes. Tap **Cancel** or send `cancel` while the prompt is active to return to normal contact search.
+
+## Full Business Memory controls
+
+```text
+/business
+/deal client @user | Product | 2 | 120.00 | optional note
+/deal supplier @user | Product | 10 | 500.00 | optional note
+/history @user
+/clients [product]
+/suppliers [product]
+/product Product Name
+/reload Product Name
+/touchbase [days]
+/available Product Name | optional note
+/unavailable Product Name | optional note
+```
+
+Availability and reload/touch-base views are review-first. No client or supplier is messaged automatically.
+
+## Historical bulk import
+
+`import_business_history.py` remains available for genuine bulk migration/recovery when a real historical transaction source already exists.
+
+Dry-run first:
+
+```powershell
+py import_business_history.py .\business_history_template.csv
+```
+
+Apply only after validation reports zero problems:
+
+```powershell
+py import_business_history.py .\business_history_template.csv --apply
+```
+
+The CSV importer is not the normal day-to-day recording workflow.
 
 ## Relationship types
 
@@ -141,23 +180,13 @@ trusted
 restricted
 ```
 
-## V1 scoring
+## Scoring boundary
 
-Relationship score is intentionally transparent and deterministic. It uses:
+Relationship score is transparent and deterministic. It uses relationship activity/recency/consistency signals. Trust remains separate from relationship strength.
 
-- recency
-- interaction frequency
-- relationship duration
-- active-day consistency
-- important events
-- manual importance
-- shared-group presence
+Business transaction value is informational history only. It does not automatically increase trust or relationship quality.
 
-Trust is deliberately separate from relationship strength.
-
-Automated risk signals should be reviewed before serious trust penalties are applied.
-
-## Files
+## Important files
 
 ```text
 main.py
@@ -168,6 +197,10 @@ monitor.py
 admin_bot.py
 business_memory.py
 business_admin.py
+business_integration.py
+business_quick_capture.py
+business_product.py
+business_signals.py
 business_import.py
 import_business_history.py
 business_history_template.csv
@@ -177,37 +210,27 @@ requirements.txt
 tests/
 ```
 
-## Planned integration points
+## Testing
 
-The database/module boundaries are intentionally separated so later versions can integrate:
-
-- VM Guard
-- VM Universal Search
-- VM Auto Poster engagement
-- VM Reputation
-- VM Admin Command Centre
-
-## Optional local smoke test
-
-Before connecting Telegram, you can validate the database and relationship engine:
+Run Relationship Manager tests from this directory:
 
 ```powershell
-py smoke_test.py
+py -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-Expected output includes:
+GitHub Actions also compiles and tests Relationship Manager as part of VM Platform CI.
 
-```text
-SMOKE TEST PASSED
-```
+## Backup and reliability
+
+- SQLite runs in WAL mode.
+- Backups use SQLite's transactional backup API so committed WAL-backed Business Memory rows are included.
+- Background relationship intelligence refresh runs periodically.
+- Daily/weekly operator briefs are passive and admin-only.
+- No Business Memory workflow has automatic client/supplier outreach authority.
 
 ## Digest schedule
 
-Daily and weekly relationship briefs are sent to authorised admin IDs after those admins have started the bot at least once.
-
-Default timezone: `Australia/Adelaide`
-
-Configure in `.env`:
+Default timezone: `Australia/Adelaide`.
 
 ```text
 DAILY_DIGEST_HOUR=9
@@ -216,202 +239,3 @@ WEEKLY_DIGEST_HOUR=9
 ```
 
 python-telegram-bot weekday numbering is Sunday=0 through Saturday=6.
-
-
-## Master project placement
-
-This build belongs permanently at:
-
-```text
-Vending_Machine_Telegram/
-└── bots/
-    └── VM_Relationship_Manager/
-```
-
-Runtime data is automatically sorted into the existing master project:
-
-```text
-shared/
-├── exports/
-│   └── VM_Relationship_Manager/
-├── backups/
-│   └── VM_Relationship_Manager/
-└── logs/
-    └── VM_Relationship_Manager/
-```
-
-The Telethon session stays inside:
-
-```text
-bots/VM_Relationship_Manager/runtime/
-```
-
-## Recommended Windows launch
-
-From the master project:
-
-```powershell
-cd .\bots\VM_Relationship_Manager
-.\START_VM_RELATIONSHIPS.ps1
-```
-
-The launcher:
-1. checks for `.env`
-2. offers to copy `.env.example` if needed
-3. installs requirements when requested
-4. runs the smoke test
-5. starts the bot
-
-
-## Windows launcher update — v1.0.2
-
-Preferred launch method on Windows:
-
-```text
-START_VM_RELATIONSHIPS.bat
-```
-
-Double-clicking the BAT file launches the existing PowerShell startup script with a
-process-only execution-policy bypass. It does not permanently change the computer's
-PowerShell execution policy.
-
-The launcher now checks:
-1. Python dependencies, including `tzdata`
-2. `Australia/Adelaide` timezone availability
-3. `.env` configuration via `preflight.py`
-4. relationship-engine smoke test
-5. live bot startup
-
-
-## v1.0.6 Daily CRM Controls
-
-The bot is designed to stay running. The startup bootstrap finishes, then live monitoring continues.
-
-Useful admin commands:
-
-- `/rm` — relationship dashboard.
-- `/person @username` — open a contact profile.
-- `/attention` — exception/review queue.
-- `/followups` — open follow-ups with one-tap completion.
-- `/new` — recently discovered contacts.
-- `/cooling` — relationships that may be fading.
-- `/dormant` — dormant relationships.
-- `/top` — strongest relationships.
-- `/vip` — manually classified VIP contacts.
-- `/unverified` — unknown/pending verification.
-- `/rescan` — refresh recent accessible Telegram history.
-- `/health` — service health log.
-
-Profiles now show local Adelaide time by default, a computed CRM stage, suggested next action, follow-up/attention counts, group history, timeline actions, quick verification/type controls, and quick +1/+7/+30 day follow-ups.
-
-Relationship type remains a deliberate admin classification (customer, supplier, partner, regular, VIP, etc.). The bot adds automatic CRM stages and review suggestions without blindly overwriting those business meanings.
-
-
-## Relationship Intelligence (v1.2.0)
-
-The bot now separates three different concepts:
-
-- **Relationship score** — overall relationship strength.
-- **Trust score** — verification and confirmed-risk confidence.
-- **Health score** — whether the relationship is currently behaving normally relative to its own history.
-
-New passive commands:
-
-- `/today` — ranked action inbox; highest priority item per contact.
-- `/insights` — portfolio-level health, momentum and cycle overview.
-- `/growing` — fastest growing relationships.
-- `/slipping` — higher-value relationships whose health needs watching.
-
-Smart cycle alerts are suggestions only. The Relationship Manager never contacts another person automatically.
-
-## Business Memory CRM
-
-Business Memory adds a private client/supplier history layer to the existing Relationship Manager database.
-It is designed for manual recording plus passive recall: record an interaction once, then use the history later to identify regular clients, previous buyers of a product, established suppliers, and people worth touching base with.
-
-Business Memory is additive. It does not replace Telegram relationship scoring and it does not automatically contact anyone.
-
-### Commands
-
-```text
-/business
-/deal client @username | Product Name | 2 | 120.00 | optional note
-/deal supplier @username | Product Name | 10 | 500.00 | optional note
-/history @username
-/clients
-/clients Product Name
-/suppliers
-/suppliers Product Name
-/reload Product Name
-/touchbase 30
-```
-
-For `/deal`, only the role/contact and product are required. Quantity defaults to `1`; total value and note may be left blank. Monetary totals are stored as integer minor units and default to AUD.
-
-`/reload` is deliberately read-only: it ranks previous clients for a product so the operator can review who to contact. `/touchbase` identifies previous clients whose last recorded transaction is older than the chosen number of days. Neither command sends messages automatically.
-
-### Privacy and security
-
-Business-memory commands are restricted to configured admin IDs and private chats with the admin bot. Business history remains in the existing Relationship Manager SQLite database and is included in the normal database backup path. Product names, quantities, optional transaction totals, and optional operator notes are stored; Telegram message bodies are not captured by this feature.
-
-### Quality gate
-
-Relationship Manager changes are covered by a dedicated GitHub Actions compile/test job. Local focused tests can be run with:
-
-```powershell
-cd .\bots\VM_Relationship_Manager
-py -m unittest discover -s tests -p "test_*.py" -v
-```
-
-## Historical Business Memory import
-
-Use `business_history_template.csv` to backfill previous client and supplier history. Bulk import is intentionally stricter than normal contact search: `contact` must be an existing Relationship Manager Telegram ID or an exact username. Fuzzy names are rejected so a historical record cannot silently attach to the wrong person.
-
-Required columns:
-
-```text
-contact,role,product
-```
-
-Supported optional columns:
-
-```text
-quantity,unit,total,currency,occurred_at,note,external_id
-```
-
-`role` must be `client` or `supplier`. `occurred_at` may be `YYYY-MM-DD` or an ISO-8601 timestamp with a timezone. If an exact time was not recorded, use a date only. `external_id` is recommended when available because it provides the strongest idempotency key.
-
-### 1. Preview first
-
-From the permanent Relationship Manager folder:
-
-```powershell
-py import_business_history.py .\business_history_template.csv
-```
-
-Preview is the default. It validates the complete file, resolves contacts, reports invalid rows, and reports rows that have already been imported. It does not insert business transaction rows.
-
-### 2. Apply only after the preview is clean
-
-```powershell
-py import_business_history.py .\business_history_template.csv --apply
-```
-
-To attribute the import in `admin_audit`:
-
-```powershell
-py import_business_history.py .\business_history_template.csv --apply --admin-id YOUR_TELEGRAM_ID
-```
-
-### Import safety
-
-- invalid rows cause the apply operation to fail before transaction rows are written
-- repeated imports are idempotent through `external_id` or a deterministic normalized row fingerprint
-- duplicate rows inside one CSV are skipped
-- unknown contacts fail closed and must be resolved/rescanned first
-- exact usernames are case-insensitive; fuzzy display names are never used for bulk writes
-- monetary values use integer minor units in storage
-- import receipts link each accepted CSV row to the created transaction
-- importing does not send any Telegram messages
-
-If multiple genuinely separate historical transactions have otherwise identical data, give each row a unique `external_id`; otherwise safe de-duplication will treat them as one record.
