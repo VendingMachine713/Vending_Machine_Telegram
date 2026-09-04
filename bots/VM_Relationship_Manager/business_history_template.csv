@@ -1,0 +1,3 @@
+contact,role,product,quantity,unit,total,currency,occurred_at,note,external_id
+@username,client,Example Product,1,unit,100.00,AUD,2026-08-01,Example historical client transaction,legacy-client-001
+123456789,supplier,Example Product,10,unit,500.00,AUD,2026-08-02,Example historical supplier transaction,legacy-supplier-001
