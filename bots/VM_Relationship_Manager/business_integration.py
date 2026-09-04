@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from html import escape
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ParseMode
 
 from admin_bot import AdminBot
 from business_memory import BusinessMemory
+from business_quick_capture import BusinessQuickCapture
 from business_signals import BusinessOperatorBrief, BusinessSignals
+
+
+QUICK_CAPTURE_TTL_SECONDS = 300
 
 
 @dataclass(frozen=True)
@@ -164,8 +170,16 @@ def _local_date(value: str, tz) -> str:
 
 
 def _contact_label(row) -> str:
-    name = row.get("display_name") or row.get("username") or str(row.get("telegram_id") or "Unknown")
-    username = row.get("username")
+    if hasattr(row, "keys"):
+        keys = set(row.keys())
+        display_name = row["display_name"] if "display_name" in keys else None
+        username = row["username"] if "username" in keys else None
+        telegram_id = row["telegram_id"] if "telegram_id" in keys else None
+    else:
+        display_name = row.get("display_name")
+        username = row.get("username")
+        telegram_id = row.get("telegram_id")
+    name = display_name or username or str(telegram_id or "Unknown")
     return f"{name} (@{username})" if username else str(name)
 
 
@@ -178,7 +192,7 @@ def format_dashboard_section(snapshot: BusinessDashboardSnapshot) -> str:
         f"Repeat clients: <b>{snapshot.repeat_clients}</b> · "
         f"Repeat suppliers: <b>{snapshot.repeat_suppliers}</b>\n"
         f"Reconnect {snapshot.reconnect_days}d+: <b>{snapshot.reconnect_candidates}</b>\n"
-        "Use <code>/business</code> for business controls."
+        "Open a contact profile to add a deal with buttons, or use <code>/business</code> for full controls."
     )
 
 
@@ -234,14 +248,19 @@ def format_operator_brief_section(brief: BusinessOperatorBrief, tz) -> str:
 
 
 class _MessageSuffixProxy:
-    def __init__(self, message, suffix: str):
+    def __init__(self, message, suffix: str = "", extra_button_rows=None):
         self._message = message
         self._suffix = suffix
+        self._extra_button_rows = list(extra_button_rows or [])
 
     def __getattr__(self, name):
         return getattr(self._message, name)
 
     async def reply_text(self, text, *args, **kwargs):
+        if self._extra_button_rows:
+            current = kwargs.get("reply_markup")
+            existing_rows = list(current.inline_keyboard) if isinstance(current, InlineKeyboardMarkup) else []
+            kwargs["reply_markup"] = InlineKeyboardMarkup(existing_rows + self._extra_button_rows)
         return await self._message.reply_text(text + self._suffix, *args, **kwargs)
 
 
@@ -257,12 +276,13 @@ class _UpdateProxy:
 
 
 class BusinessIntegratedAdminBot(AdminBot):
-    """AdminBot with private, read-only Business Memory projections embedded."""
+    """AdminBot with private Business Memory projections and low-touch capture."""
 
     def __init__(self, settings, db, engine, business_memory: BusinessMemory, monitor=None):
         self.business_memory = business_memory
         self.business_views = BusinessViewData(business_memory)
         self.business_signals = self.business_views.signals
+        self.business_quick = BusinessQuickCapture(db, business_memory)
         super().__init__(settings, db, engine, monitor=monitor)
 
     async def dashboard(self, update: Update, context):
@@ -274,17 +294,31 @@ class BusinessIntegratedAdminBot(AdminBot):
         suffix = format_dashboard_section(snapshot)
         return await super().dashboard(_UpdateProxy(update, suffix), context)
 
+    def _profile_quick_buttons(self, telegram_id: int):
+        rows = [[
+            InlineKeyboardButton("💼 + Client deal", callback_data=f"bq:role:{telegram_id}:client"),
+            InlineKeyboardButton("📦 + Supplier deal", callback_data=f"bq:role:{telegram_id}:supplier"),
+        ]]
+        if self.business_quick.last_transaction(telegram_id) is not None:
+            rows.append([
+                InlineKeyboardButton("🔁 Repeat last business deal", callback_data=f"bq:repeat:{telegram_id}")
+            ])
+        return rows
+
     async def _send_profile_to(self, message, c):
         chat = getattr(message, "chat", None)
         if not chat or getattr(chat, "type", None) != "private":
             return await super()._send_profile_to(message, c)
 
-        snapshot = self.business_views.profile_snapshot(int(c["telegram_id"]))
-        if snapshot is None:
-            return await super()._send_profile_to(message, c)
-
-        suffix = format_profile_section(snapshot, self.settings.timezone)
-        return await super()._send_profile_to(_MessageSuffixProxy(message, suffix), c)
+        telegram_id = int(c["telegram_id"])
+        snapshot = self.business_views.profile_snapshot(telegram_id)
+        suffix = format_profile_section(snapshot, self.settings.timezone) if snapshot else ""
+        proxy = _MessageSuffixProxy(
+            message,
+            suffix,
+            extra_button_rows=self._profile_quick_buttons(telegram_id),
+        )
+        return await super()._send_profile_to(proxy, c)
 
     async def _send_today(self, message):
         chat = getattr(message, "chat", None)
@@ -294,3 +328,150 @@ class BusinessIntegratedAdminBot(AdminBot):
         brief = self.business_signals.operator_brief(inactive_days=30, limit=3)
         suffix = format_operator_brief_section(brief, self.settings.timezone)
         return await super()._send_today(_MessageSuffixProxy(message, suffix))
+
+    @staticmethod
+    def _clear_quick_state(context) -> None:
+        context.user_data.pop("business_quick_capture", None)
+
+    def _set_quick_state(self, context, telegram_id: int, role: str) -> None:
+        context.user_data["business_quick_capture"] = {
+            "telegram_id": int(telegram_id),
+            "role": role,
+            "expires_at": time.time() + QUICK_CAPTURE_TTL_SECONDS,
+        }
+
+    async def _show_quick_picker(self, message, context, telegram_id: int, role: str) -> None:
+        contact = self.business_quick.contact(telegram_id)
+        suggestions = self.business_quick.suggestions(telegram_id, role, limit=6)
+        self._set_quick_state(context, telegram_id, role)
+
+        rows = []
+        pair = []
+        for item in suggestions:
+            pair.append(
+                InlineKeyboardButton(
+                    item.name[:28],
+                    callback_data=f"bq:prod:{telegram_id}:{role}:{item.product_id}",
+                )
+            )
+            if len(pair) == 2:
+                rows.append(pair)
+                pair = []
+        if pair:
+            rows.append(pair)
+        rows.append([InlineKeyboardButton("✖ Cancel", callback_data="bq:cancel")])
+
+        if suggestions:
+            body = (
+                f"<b>Quick {escape(role)} deal — {escape(_contact_label(contact))}</b>\n\n"
+                "Tap a product to record <b>1 unit</b> now with no monetary value inferred.\n"
+                "Or send a new product name as your next message and it will be created and recorded.\n\n"
+                "Use the full <code>/deal</code> command only when quantity, value or a note matters."
+            )
+        else:
+            body = (
+                f"<b>Quick {escape(role)} deal — {escape(_contact_label(contact))}</b>\n\n"
+                "No products exist yet. Send the product name as your next message.\n"
+                "It will be created and recorded as <b>1 unit</b> with no monetary value inferred."
+            )
+        await message.reply_text(
+            body,
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(rows),
+        )
+
+    async def _confirm_quick_record(self, message, transaction_id: int) -> None:
+        tx = self.business_memory.transaction(transaction_id)
+        contact = self.db.one("SELECT * FROM contacts WHERE telegram_id=?", (int(tx["telegram_id"]),))
+        value = "not recorded" if tx["total_minor_units"] is None else f"{tx['currency']} {int(tx['total_minor_units']) / 100:,.2f}"
+        await message.reply_text(
+            (
+                "<b>✅ Business deal recorded</b>\n"
+                f"{escape(_contact_label(contact))}\n"
+                f"Role: <b>{escape(str(tx['role']).title())}</b>\n"
+                f"Product: <b>{escape(str(tx['product_name']))}</b>\n"
+                f"Quantity: {float(tx['quantity']):g} {escape(str(tx['unit']))}\n"
+                f"Value: {escape(value)}\n\n"
+                "Business Memory, profile history and passive intelligence now read this record automatically."
+            ),
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("👤 Open profile", callback_data=f"open:{int(tx['telegram_id'])}")
+            ]]),
+        )
+
+    async def search_message(self, update: Update, context):
+        state = context.user_data.get("business_quick_capture")
+        if state:
+            if float(state.get("expires_at") or 0) < time.time():
+                self._clear_quick_state(context)
+            else:
+                if not await self.allowed(update):
+                    return
+                text = (update.effective_message.text or "").strip()
+                if text.lower() == "cancel":
+                    self._clear_quick_state(context)
+                    await update.effective_message.reply_text("Quick business capture cancelled.")
+                    return
+                try:
+                    tx_id = self.business_quick.record_product_name(
+                        int(state["telegram_id"]),
+                        str(state["role"]),
+                        text,
+                        recorded_by=update.effective_user.id,
+                    )
+                except ValueError as exc:
+                    await update.effective_message.reply_text(str(exc))
+                    return
+                self._clear_quick_state(context)
+                await self._confirm_quick_record(update.effective_message, tx_id)
+                return
+        return await super().search_message(update, context)
+
+    async def callback(self, update: Update, context):
+        q = update.callback_query
+        data = str(q.data or "") if q else ""
+        if not data.startswith("bq:"):
+            return await super().callback(update, context)
+
+        if not await self.allowed(update):
+            return
+        await q.answer()
+
+        try:
+            if data == "bq:cancel":
+                self._clear_quick_state(context)
+                await q.message.reply_text("Quick business capture cancelled.")
+                return
+
+            if data.startswith("bq:role:"):
+                _, _, telegram_id, role = data.split(":", 3)
+                await self._show_quick_picker(q.message, context, int(telegram_id), role)
+                return
+
+            if data.startswith("bq:prod:"):
+                _, _, telegram_id, role, product_id = data.split(":", 4)
+                tx_id = self.business_quick.record_product_id(
+                    int(telegram_id),
+                    role,
+                    int(product_id),
+                    recorded_by=update.effective_user.id,
+                )
+                self._clear_quick_state(context)
+                await self._confirm_quick_record(q.message, tx_id)
+                return
+
+            if data.startswith("bq:repeat:"):
+                telegram_id = int(data.split(":", 2)[2])
+                tx_id = self.business_quick.repeat_last(
+                    telegram_id,
+                    recorded_by=update.effective_user.id,
+                )
+                self._clear_quick_state(context)
+                await self._confirm_quick_record(q.message, tx_id)
+                return
+        except (TypeError, ValueError, KeyError) as exc:
+            await q.message.reply_text(f"Quick business capture could not complete: {exc}")
+            return
+
+        await q.message.reply_text("Unknown quick business action.")
