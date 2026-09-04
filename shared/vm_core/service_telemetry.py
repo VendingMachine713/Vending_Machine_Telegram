@@ -9,7 +9,7 @@ from .db import PlatformDB
 from .paths import project_root
 from .service_adapters import adapter_registry
 
-TELEMETRY_CONTRACT_VERSION = 1
+TELEMETRY_CONTRACT_VERSION = 2
 DEFAULT_FRESH_SECONDS = 120
 DEFAULT_STALE_SECONDS = 600
 
@@ -116,10 +116,14 @@ def service_telemetry_snapshot(
         )
         freshness_counts[freshness] = freshness_counts.get(freshness, 0) + 1
         last_success_age = _age_seconds(observed_now, heartbeat.get("last_success_utc"))
+        runtime_updated_at = runtime.get("updated_at_utc")
+        runtime_age = _age_seconds(observed_now, runtime_updated_at)
         rows.append(
             {
                 "service": service,
                 "runtime_status": runtime_status,
+                "runtime_updated_at_utc": runtime_updated_at,
+                "runtime_age_seconds": runtime_age,
                 "pid_known": runtime.get("pid") is not None,
                 "adapter_supported": bool(adapter.get("supported", False)),
                 "adapter_id": adapter.get("adapter_id"),
