@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .canonical_readiness import canonical_operator_summary
 from .db import PlatformDB
 from .decision_engine import decision_summary
 from .entity_graph import entity_graph
@@ -22,6 +23,8 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
     decisions = decision_summary(root, limit=limit)
     opportunities = opportunity_summary(root, limit=limit)
     graph = entity_graph(root, limit=max(100, limit * 10))
+    canonical = canonical_operator_summary(root=root)
+    readiness = canonical["canonical_readiness"]
 
     runtime_counts: dict[str, int] = {}
     for service in services:
@@ -46,16 +49,21 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "blocked_opportunities": opportunities["blocked_count"],
             "entities": graph["node_count"],
             "relationships": graph["edge_count"],
+            "canonical_readiness": readiness["status"],
+            "canonical_shadow_samples": readiness["canonical_inference_count"],
+            "canonical_parity": readiness["parity_status"],
         },
         "attention": {
             "incidents": incidents,
             "conflicts": decisions["conflicts"],
             "rollback_recommendations": health_summary(root)["rollback_recommendations"],
             "blocked_opportunities": [row for row in opportunities["top_opportunities"] if row["blocked"]],
+            "canonical_readiness_reasons": list(readiness["reasons"]),
         },
         "opportunities": opportunities["top_opportunities"],
         "decisions": decisions["top_decisions"],
         "rule_health": health_summary(root),
+        "canonical": canonical,
         "graph_summary": {
             "node_count": graph["node_count"],
             "edge_count": graph["edge_count"],
