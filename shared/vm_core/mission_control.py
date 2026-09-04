@@ -18,6 +18,7 @@ from .opportunity_intelligence import opportunity_summary
 from .paths import project_root
 from .platform_aggregation import incident_intelligence_snapshot
 from .platform_registry import service_registry
+from .relationship_intelligence import relationship_intelligence_summary
 from .rule_health import health_summary
 
 MISSION_CONTROL_CONTRACT_VERSION = 4
@@ -35,6 +36,11 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
     opportunities = opportunity_summary(root, limit=limit)
     graph = entity_graph(root, limit=max(100, limit * 10))
     trust_foundation = trust_foundation_summary(root=root, limit=max(100, limit * 10))
+    relationship_intelligence = relationship_intelligence_summary(
+        root=root,
+        limit=max(100, limit * 20),
+        profile_limit=limit,
+    )
     canonical = canonical_operator_summary(root=root)
     canonical_recommendations = canonical_recommendation_summary(root=root, limit=limit)
     canonical_lifecycle = canonical_review_lifecycle_summary(root=root, limit=max(100, limit * 10))
@@ -77,6 +83,10 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "blocked_opportunities": opportunities["blocked_count"],
             "entities": graph["node_count"],
             "relationships": graph["edge_count"],
+            "relationship_intelligence_status": relationship_intelligence["status"],
+            "relationship_profiles": relationship_intelligence["profile_count"],
+            "relationship_dormant": relationship_intelligence["state_counts"].get("DORMANT", 0),
+            "relationship_cooling": relationship_intelligence["state_counts"].get("COOLING", 0),
             "trust_event_store": trust_foundation["event_store_status"],
             "canonical_subject_coverage": trust_foundation["canonical_subject_coverage"],
             "noncanonical_intelligence_subject_events": trust_foundation["noncanonical_subject_events"],
@@ -100,6 +110,9 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "conflicts": decisions["conflicts"],
             "rollback_recommendations": rule_health["rollback_recommendations"],
             "blocked_opportunities": [row for row in opportunities["top_opportunities"] if row["blocked"]],
+            "relationship_profiles": relationship_intelligence["profiles"],
+            "relationship_malformed_events": relationship_intelligence["malformed_events"],
+            "relationship_noncanonical_events_ignored": relationship_intelligence["noncanonical_events_ignored"],
             "noncanonical_intelligence_subject_events": trust_foundation["noncanonical_subject_events"],
             "canonical_readiness_reasons": list(readiness["reasons"]),
             "canonical_evidence_stale": bool(evidence_health["stale"]),
@@ -121,6 +134,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
         "decisions": decisions["top_decisions"],
         "rule_health": rule_health,
         "trust_foundation": trust_foundation,
+        "relationship_intelligence": relationship_intelligence,
         "canonical": canonical,
         "canonical_recommendations": canonical_recommendations,
         "canonical_recommendation_lifecycle": canonical_lifecycle,
