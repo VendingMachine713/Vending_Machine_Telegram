@@ -68,9 +68,16 @@ class CanonicalBridgeCorrelationTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             row = rows[0]
             self.assertEqual(row["subject_id"], canonical_entity_id("chat", "123"))
-            self.assertNotIn("999", row["payload_json"])
-            self.assertNotIn("999", row["evidence_json"])
-            self.assertIn("legacy_signal:", row["evidence_json"])
+
+            payload = json.loads(row["payload_json"])
+            evidence = json.loads(row["evidence_json"])
+            attributes = payload["attributes"]
+            item = evidence["items"][0]
+            self.assertNotIn("contact_id", attributes)
+            self.assertNotIn("contact_id", item["attributes"])
+            self.assertNotEqual(row["subject_id"], "123")
+            self.assertNotEqual(item["reference"], "relationship:presence:999:123")
+            self.assertTrue(item["reference"].startswith("legacy_signal:"))
 
     def test_bridge_preserves_legacy_signal_and_skips_unchanged_repeat(self):
         with tempfile.TemporaryDirectory() as tmp:
