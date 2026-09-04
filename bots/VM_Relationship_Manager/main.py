@@ -7,8 +7,8 @@ import sys
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 
-from admin_bot import AdminBot
 from business_admin import BusinessAdmin
+from business_integration import BusinessIntegratedAdminBot
 from business_memory import BusinessMemory
 from config import load_settings
 from database import Database, utcnow
@@ -58,9 +58,15 @@ async def main():
     db = Database(settings.database_path)
     engine = RelationshipEngine(db)
     monitor = TelegramMonitor(settings, engine)
-    admin_bot = AdminBot(settings, db, engine, monitor=monitor)
 
     business_memory = BusinessMemory(db)
+    admin_bot = BusinessIntegratedAdminBot(
+        settings,
+        db,
+        engine,
+        business_memory,
+        monitor=monitor,
+    )
     business_admin = BusinessAdmin(
         settings,
         db,
