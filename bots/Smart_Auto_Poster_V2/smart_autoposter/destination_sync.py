@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .core import refresh_system_tags, repair_routing_preferences
 from .db import Database, utcnow
+from .topic_routing import sync_forum_topics
 
 
 async def sync_destinations(db: Database, pool, auth: dict, *, fail_closed: bool = True) -> dict:
@@ -69,6 +70,7 @@ async def sync_destinations(db: Database, pool, auth: dict, *, fail_closed: bool
                                  WHERE primary_access=0 AND secondary_access=0 AND enabled=1''', (now,))
             lost = cur.rowcount
 
+    topic_result = await sync_forum_topics(db, pool, auth)
     repaired = repair_routing_preferences(db)
     system_tags = refresh_system_tags(db)
     result = {
@@ -81,6 +83,7 @@ async def sync_destinations(db: Database, pool, auth: dict, *, fail_closed: bool
         "lost_disabled": lost,
         "routing_repaired": repaired,
         "system_tags_written": system_tags,
+        "topic_routing": topic_result,
     }
     db.event("INFO", "destination_sync", "Telegram destination synchronization complete", details=str(result))
     return result

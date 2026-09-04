@@ -22,7 +22,7 @@ class MigrationTests(unittest.TestCase):
             self.assertIn("last_success_at",ac)
             self.assertIn("run_key",qc)
             self.assertIn("content_id",qc)
-            self.assertEqual(version, "6")
+            self.assertEqual(version, "7")
 
     def test_existing_content_table_migrates_before_fingerprint_index(self):
         """Regression for V2.2.3 -> V2.4: index creation must follow ALTER TABLE."""

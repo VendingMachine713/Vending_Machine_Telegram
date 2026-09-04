@@ -74,7 +74,7 @@ class V24AutonomousTests(unittest.TestCase):
 
     def test_schema_v5_has_autonomous_tables(self):
         with self.db.connect() as con:
-            self.assertEqual(con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0], "6")
+            self.assertEqual(con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0], "7")
             tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             for name in {"notifications", "heartbeats", "audit_log", "update_history", "campaign_relations", "content_tags"}:
                 self.assertIn(name, tables)

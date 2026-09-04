@@ -66,7 +66,7 @@ class V30PlatformTests(unittest.TestCase):
 
     def test_schema_v6_platform_tables_and_columns(self):
         with self.db.connect() as con:
-            self.assertEqual(con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0],'6')
+            self.assertEqual(con.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0],'7')
             tables={r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             self.assertTrue({'destination_collections','automation_rules','recommendations'}.issubset(tables))
             cols={r[1] for r in con.execute('PRAGMA table_info(campaigns)')}

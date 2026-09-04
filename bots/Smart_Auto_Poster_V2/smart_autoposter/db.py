@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .redaction import redact_text
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA = r'''
 PRAGMA journal_mode=WAL;
@@ -61,6 +61,26 @@ CREATE TABLE IF NOT EXISTS destinations (
     notes TEXT,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS destination_topics (
+    group_id INTEGER NOT NULL REFERENCES destinations(group_id) ON DELETE CASCADE,
+    topic_id INTEGER NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    closed INTEGER NOT NULL DEFAULT 0,
+    hidden INTEGER NOT NULL DEFAULT 0,
+    pinned INTEGER NOT NULL DEFAULT 0,
+    primary_access INTEGER NOT NULL DEFAULT 0,
+    secondary_access INTEGER NOT NULL DEFAULT 0,
+    preferred INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    selection_score INTEGER NOT NULL DEFAULT 0,
+    selection_reason TEXT,
+    last_seen_at TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY(group_id, topic_id)
+);
+CREATE INDEX IF NOT EXISTS idx_destination_topics_route
+ON destination_topics(group_id, preferred, enabled);
 
 CREATE TABLE IF NOT EXISTS destination_tags (
     group_id INTEGER NOT NULL REFERENCES destinations(group_id) ON DELETE CASCADE,
