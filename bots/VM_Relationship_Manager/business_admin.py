@@ -8,6 +8,7 @@ from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 from business_memory import BusinessMemory
+from business_signals import BusinessSignals
 from config import Settings
 from database import Database
 
@@ -39,6 +40,7 @@ class BusinessAdmin:
         self.db = db
         self.memory = memory
         self.monitor = monitor
+        self.signals = BusinessSignals(db)
 
     def register(self, app: Application) -> None:
         app.add_handler(CommandHandler("business", self.business))
@@ -48,6 +50,8 @@ class BusinessAdmin:
         app.add_handler(CommandHandler("suppliers", self.suppliers))
         app.add_handler(CommandHandler("reload", self.reload))
         app.add_handler(CommandHandler("touchbase", self.touchbase))
+        app.add_handler(CommandHandler("available", self.available))
+        app.add_handler(CommandHandler("unavailable", self.unavailable))
 
     async def _allowed(self, update: Update) -> bool:
         user = update.effective_user
@@ -125,21 +129,28 @@ class BusinessAdmin:
         if not await self._allowed(update):
             return
         overview = self.memory.overview()
+        available_count = len(self.signals.available_products())
         text = (
             "<b>💼 VM BUSINESS MEMORY</b>\n\n"
             f"Clients recorded: <b>{overview['clients']}</b>\n"
             f"Suppliers recorded: <b>{overview['suppliers']}</b>\n"
             f"Products tracked: <b>{overview['products']}</b>\n"
-            f"Transactions recorded: <b>{overview['transactions']}</b>\n\n"
+            f"Transactions recorded: <b>{overview['transactions']}</b>\n"
+            f"Products marked available: <b>{available_count}</b>\n\n"
             "<b>Record a deal</b>\n"
             "<code>/deal client @user | Product | 2 | 120.00 | optional note</code>\n"
             "<code>/deal supplier @user | Product | 10 | 500.00 | optional note</code>\n\n"
             "Amount and note are optional. Amount is the total transaction value in AUD.\n\n"
+            "<b>Availability</b>\n"
+            "<code>/available Product Name | optional note</code>\n"
+            "<code>/unavailable Product Name | optional note</code>\n"
+            "Availability only creates review-first reload candidates; it sends nothing automatically.\n\n"
             "<b>Lookups</b>\n"
             "<code>/history @user</code>\n"
             "<code>/clients [product]</code>\n"
             "<code>/suppliers [product]</code>\n"
-            "<code>/reload product</code>\n"
+            "<code>/product Product Name</code>\n"
+            "<code>/reload Product Name</code>\n"
             "<code>/touchbase [days]</code>"
         )
         await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
@@ -324,3 +335,53 @@ class BusinessAdmin:
                 f"last {escape(self._local_date(row['last_transaction_at']))}"
             )
         await update.effective_message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+    async def available(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await self._set_availability(update, available=True)
+
+    async def unavailable(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await self._set_availability(update, available=False)
+
+    async def _set_availability(self, update: Update, *, available: bool):
+        if not await self._allowed(update):
+            return
+        raw = (update.effective_message.text or "").partition(" ")[2].strip()
+        parts = [part.strip() for part in raw.split("|", maxsplit=1)]
+        product = parts[0] if parts else ""
+        note = parts[1] if len(parts) > 1 else None
+        command = "/available" if available else "/unavailable"
+        if not product:
+            await update.effective_message.reply_text(
+                f"Usage: {command} Product Name | optional note"
+            )
+            return
+        try:
+            status = self.signals.mark_available(
+                product,
+                available=available,
+                updated_by=update.effective_user.id,
+                note=note,
+            )
+        except ValueError as exc:
+            await update.effective_message.reply_text(str(exc))
+            return
+
+        if available:
+            candidates = self.memory.reload_candidates(status["name"], limit=100)
+            await update.effective_message.reply_text(
+                (
+                    f"<b>✅ {escape(status['name'])} marked available</b>\n"
+                    f"Previous-client reload candidates: <b>{len(candidates)}</b>\n"
+                    "This only updates passive Business Memory signals. No contact was messaged.\n"
+                    f"Use <code>/reload {escape(status['name'])}</code> to review the list."
+                ),
+                parse_mode=ParseMode.HTML,
+            )
+        else:
+            await update.effective_message.reply_text(
+                (
+                    f"<b>⏸ {escape(status['name'])} marked unavailable</b>\n"
+                    "Reload-opportunity signals for this product will expire on the next intelligence pass."
+                ),
+                parse_mode=ParseMode.HTML,
+            )
