@@ -108,16 +108,16 @@ def _already_published(
 
 
 def canonical_record_from_legacy_signal(row: dict[str, Any]) -> IntelligenceRecord | None:
-    """Translate one supported legacy signal into the canonical Trust Layer contract."""
+    """Translate one supported legacy chat signal into the canonical Trust Layer contract."""
     signal_type = str(row.get("signal_type") or "")
     source = _SIGNAL_SOURCES.get(signal_type)
     subject_type = str(row.get("subject_type") or "").strip().lower()
     subject_id = str(row.get("subject_id") or "").strip()
     observed_at = str(row.get("updated_at_utc") or "").strip()
-    if source is None or not subject_type or not subject_id or not observed_at:
+    if source is None or subject_type != "chat" or not subject_id or not observed_at:
         return None
 
-    canonical_subject = canonical_entity_id(subject_type, subject_id)
+    canonical_subject = canonical_entity_id("chat", subject_id)
     safe_evidence = _safe_evidence(row)
     signature = _semantic_signature(row)
     evidence = EvidenceRef(
@@ -132,7 +132,7 @@ def canonical_record_from_legacy_signal(row: dict[str, Any]) -> IntelligenceReco
         kind=IntelligenceKind.SIGNAL,
         record_type=signal_type,
         source=source,
-        subject_type=subject_type,
+        subject_type="chat",
         subject_id=canonical_subject,
         rationale=str(row.get("rationale") or signal_type),
         evidence=[evidence],
