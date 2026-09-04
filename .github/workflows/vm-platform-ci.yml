@@ -20,6 +20,7 @@ jobs:
       universal_search: ${{ steps.filter.outputs.universal_search }}
       vm_guard: ${{ steps.filter.outputs.vm_guard }}
       admin_command_centre: ${{ steps.filter.outputs.admin_command_centre }}
+      relationship_manager: ${{ steps.filter.outputs.relationship_manager }}
       smart_auto_poster: ${{ steps.filter.outputs.smart_auto_poster }}
       repository_health: ${{ steps.filter.outputs.repository_health }}
     steps:
@@ -64,6 +65,7 @@ jobs:
           universal_search=$(match_any '^bots/Universal_Search/')
           vm_guard=$(match_any '^bots/VM_Guard/')
           admin_command_centre=$(match_any '^bots/Admin_Command_Centre/')
+          relationship_manager=$(match_any '^bots/VM_Relationship_Manager/')
           smart_auto_poster=$(match_any '^bots/Smart_Auto_Poster_V2/')
           repository_health=$(match_any '^\.github/' '^\.gitignore$' '^README\.md$' '^tools/ci/validate_repository\.py$')
 
@@ -73,6 +75,7 @@ jobs:
             universal_search=true
             vm_guard=true
             admin_command_centre=true
+            relationship_manager=true
             smart_auto_poster=true
           fi
 
@@ -81,6 +84,7 @@ jobs:
             echo "universal_search=$universal_search"
             echo "vm_guard=$vm_guard"
             echo "admin_command_centre=$admin_command_centre"
+            echo "relationship_manager=$relationship_manager"
             echo "smart_auto_poster=$smart_auto_poster"
             echo "repository_health=$repository_health"
           } >> "$GITHUB_OUTPUT"
@@ -171,6 +175,28 @@ jobs:
         run: python -m compileall -q .
       - name: Run bot tests
         working-directory: bots/Admin_Command_Centre
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+
+  relationship-manager:
+    name: Bot core tests (VM_Relationship_Manager)
+    needs: changes
+    if: needs.changes.outputs.relationship_manager == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: bots/VM_Relationship_Manager/requirements.txt
+      - name: Install Relationship Manager dependencies
+        working-directory: bots/VM_Relationship_Manager
+        run: python -m pip install -r requirements.txt
+      - name: Compile Relationship Manager
+        working-directory: bots/VM_Relationship_Manager
+        run: python -m compileall -q .
+      - name: Run Relationship Manager tests
+        working-directory: bots/VM_Relationship_Manager
         run: python -m unittest discover -s tests -p "test_*.py" -v
 
   smart-auto-poster:
