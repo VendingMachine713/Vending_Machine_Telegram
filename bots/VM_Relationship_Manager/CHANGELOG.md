@@ -1,5 +1,14 @@
 # VM Relationship Manager Changelog
 
+## Unreleased — Passive Business Intelligence
+
+- Added explicit private `/available Product Name` and `/unavailable Product Name` status controls for products already known to Business Memory.
+- Added a private Business Memory action section to `/today` with available-product, reload-candidate, dormant-client and repeat-dormant counts plus a small ranked preview.
+- Added passive reload-opportunity and dormant-client projections without sending messages to any contact.
+- Added a read-only VM Brain adapter that maps Business Memory into aggregate chat-level signals without copying notes, message bodies, usernames, display names, raw Telegram contact IDs or product names.
+- Extended the canonical Trust Layer bridge for `business_reload_opportunity` and `business_dormant_client_opportunity` signals.
+- Canonical Business Memory integration remains signal-only: it creates no recommendation, approval or execution authority.
+
 ## Unreleased — Business Memory Product View + Safe Backup
 
 - Added private `/product Product Name` view combining previous clients and suppliers in one read-only product history surface.
