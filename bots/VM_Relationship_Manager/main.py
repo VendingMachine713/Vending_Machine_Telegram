@@ -10,6 +10,7 @@ from logging.handlers import RotatingFileHandler
 from business_admin import BusinessAdmin
 from business_integration import BusinessIntegratedAdminBot
 from business_memory import BusinessMemory
+from business_product import ProductAdmin, ProductBusinessView
 from config import load_settings
 from database import Database, utcnow
 from jobs import BackgroundJobs
@@ -74,6 +75,9 @@ async def main():
         monitor=monitor,
     )
     business_admin.register(admin_bot.app)
+
+    product_view = ProductBusinessView(db, business_memory)
+    ProductAdmin(settings, product_view).register(admin_bot.app)
 
     jobs = BackgroundJobs(settings, db, engine)
 
