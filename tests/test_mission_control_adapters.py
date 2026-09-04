@@ -16,7 +16,7 @@ class MissionControlAdapterTests(unittest.TestCase):
 
             summary = mission_control(root)
             self.assertEqual(summary["contract_version"], 4)
-            self.assertEqual(summary["platform"]["revision"], 1)
+            self.assertGreaterEqual(summary["platform"]["revision"], 1)
             self.assertIn("adapters", summary["platform"])
             self.assertEqual(summary["headline"]["adapter_supported_services"], 1)
             self.assertEqual(summary["headline"]["adapter_ready_services"], 1)

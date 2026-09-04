@@ -6,7 +6,11 @@ import json
 import unittest
 
 from shared.vm_core.db import PlatformDB
-from shared.vm_core.mission_control import MISSION_CONTROL_CONTRACT_VERSION, mission_control
+from shared.vm_core.mission_control import (
+    MISSION_CONTROL_CONTRACT_VERSION,
+    MISSION_CONTROL_PLATFORM_REVISION,
+    mission_control,
+)
 
 
 class MissionControlPlatformTests(unittest.TestCase):
@@ -37,7 +41,10 @@ class MissionControlPlatformTests(unittest.TestCase):
             )
             db = PlatformDB(root=root)
             db.init()
-            db.set_health("Demo", "READY", {"process_alive": False})
+            db.upsert_service("Demo", "Demo", "main.py", None)
+            db.set_service_runtime("Demo", "RUNNING", 321)
+            db.record_heartbeat("Demo", "demo-1", "RUNNING", counters={"ticks": 3})
+            db.set_health("Demo", "READY", {"process_alive": True})
             db.upsert_incident(
                 "incident:demo",
                 "runtime",
@@ -61,12 +68,17 @@ class MissionControlPlatformTests(unittest.TestCase):
 
         self.assertEqual(summary["contract_version"], MISSION_CONTROL_CONTRACT_VERSION)
         self.assertIn("platform", summary)
+        self.assertEqual(summary["platform"]["revision"], MISSION_CONTROL_PLATFORM_REVISION)
         self.assertEqual(summary["platform"]["registry"]["service_count"], 1)
         self.assertEqual(summary["platform"]["health"]["service_count"], 1)
         self.assertEqual(summary["platform"]["health"]["ready_count"], 1)
         self.assertEqual(summary["platform"]["incident_intelligence"]["open_incident_count"], 1)
         self.assertEqual(summary["platform"]["incident_intelligence"]["active_signal_count"], 1)
+        self.assertEqual(summary["platform"]["telemetry"]["running_count"], 1)
+        self.assertEqual(summary["platform"]["telemetry"]["fresh_running_count"], 1)
         self.assertEqual(summary["headline"]["registered_services"], 1)
+        self.assertEqual(summary["headline"]["telemetry_status"], "HEALTHY")
+        self.assertFalse(summary["platform"]["telemetry"]["automatic_execution"])
         self.assertFalse(summary["automatic_acceptance"])
         self.assertFalse(summary["automatic_execution"])
         self.assertFalse(summary["external_action_authority"])

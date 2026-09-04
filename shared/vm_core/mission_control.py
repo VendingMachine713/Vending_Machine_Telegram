@@ -22,9 +22,10 @@ from .platform_registry import service_registry
 from .relationship_intelligence import relationship_intelligence_summary
 from .rule_health import health_summary
 from .service_adapters import adapter_registry
+from .service_telemetry import service_telemetry_snapshot
 
 MISSION_CONTROL_CONTRACT_VERSION = 4
-MISSION_CONTROL_PLATFORM_REVISION = 1
+MISSION_CONTROL_PLATFORM_REVISION = 2
 
 
 def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, Any]:
@@ -61,6 +62,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
 
     registry = service_registry(root)
     adapters = adapter_registry(root)
+    telemetry = service_telemetry_snapshot(root)
     platform_health = health_snapshot(db.health_records())
     platform_intelligence = incident_intelligence_snapshot(root, limit=limit)
     rule_health = health_summary(root)
@@ -84,6 +86,11 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "adapter_supported_services": adapters["supported_count"],
             "adapter_ready_services": adapters["ready_count"],
             "adapter_evidence_required": adapters["evidence_required_count"],
+            "telemetry_status": telemetry["status"],
+            "telemetry_running_services": telemetry["running_count"],
+            "telemetry_fresh_running": telemetry["fresh_running_count"],
+            "telemetry_late_running": telemetry["late_running_count"],
+            "telemetry_attention_running": telemetry["attention_running_count"],
             "runtime_counts": runtime_counts,
             "health_unhealthy": platform_health["unhealthy_count"],
             "health_not_ready": platform_health["not_ready_count"],
@@ -125,6 +132,8 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "adapter_evidence_required": [
                 row for row in adapters["services"] if row["status"] == "EVIDENCE_REQUIRED"
             ],
+            "telemetry_attention_services": telemetry["attention_services"],
+            "telemetry_late_services": telemetry["late_services"],
             "correlated_incident_intelligence_subjects": platform_intelligence["correlated_subjects"],
             "conflicts": decisions["conflicts"],
             "rollback_recommendations": rule_health["rollback_recommendations"],
@@ -152,6 +161,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "revision": MISSION_CONTROL_PLATFORM_REVISION,
             "registry": registry,
             "adapters": adapters,
+            "telemetry": telemetry,
             "health": platform_health,
             "incident_intelligence": platform_intelligence,
         },
