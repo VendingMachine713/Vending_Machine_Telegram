@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Iterator, Any
 from .paths import project_root
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def utcnow() -> str:
@@ -64,6 +64,19 @@ class PlatformDB:
                 status TEXT NOT NULL,
                 detail_json TEXT NOT NULL DEFAULT '{}',
                 checked_at_utc TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS service_heartbeats (
+                service TEXT NOT NULL,
+                instance_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                active_task TEXT,
+                counters_json TEXT NOT NULL DEFAULT '{}',
+                last_success_utc TEXT,
+                last_error TEXT,
+                recovery_state TEXT,
+                observed_at_utc TEXT NOT NULL,
+                PRIMARY KEY(service, instance_id)
             );
 
             CREATE TABLE IF NOT EXISTS jobs (
@@ -198,6 +211,7 @@ class PlatformDB:
             CREATE INDEX IF NOT EXISTS idx_signals_subject ON intelligence_signals(subject_type, subject_id, status);
             CREATE INDEX IF NOT EXISTS idx_recommendations_status ON intelligence_recommendations(status, priority, updated_at_utc);
             CREATE INDEX IF NOT EXISTS idx_recommendations_subject ON intelligence_recommendations(subject_type, subject_id, status);
+            CREATE INDEX IF NOT EXISTS idx_service_heartbeats_observed ON service_heartbeats(service, observed_at_utc);
             """)
             con.execute(
                 "INSERT OR IGNORE INTO migrations(version, applied_at_utc, description) VALUES(?,?,?)",
@@ -210,6 +224,10 @@ class PlatformDB:
             con.execute(
                 "INSERT OR IGNORE INTO migrations(version, applied_at_utc, description) VALUES(?,?,?)",
                 (3, utcnow(), "Evidence-governed VM Intelligence recommendations"),
+            )
+            con.execute(
+                "INSERT OR IGNORE INTO migrations(version, applied_at_utc, description) VALUES(?,?,?)",
+                (4, utcnow(), "Universal service heartbeat registry"),
             )
             con.execute(
                 "INSERT OR REPLACE INTO meta(key,value) VALUES('schema_version',?)",
@@ -253,6 +271,58 @@ class PlatformDB:
     def services(self) -> list[dict[str, Any]]:
         with self.connect() as con:
             return [dict(r) for r in con.execute("SELECT * FROM services ORDER BY name")]
+
+
+    def record_heartbeat(
+        self, service: str, instance_id: str, status: str, *,
+        active_task: str | None = None, counters: dict[str, Any] | None = None,
+        last_success_utc: str | None = None, last_error: str | None = None,
+        recovery_state: str | None = None, observed_at_utc: str | None = None,
+    ) -> None:
+        observed = observed_at_utc or utcnow()
+        with self.connect() as con:
+            con.execute("""
+                INSERT INTO service_heartbeats(
+                    service,instance_id,status,active_task,counters_json,last_success_utc,
+                    last_error,recovery_state,observed_at_utc
+                ) VALUES(?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(service,instance_id) DO UPDATE SET
+                    status=excluded.status,
+                    active_task=excluded.active_task,
+                    counters_json=excluded.counters_json,
+                    last_success_utc=excluded.last_success_utc,
+                    last_error=excluded.last_error,
+                    recovery_state=excluded.recovery_state,
+                    observed_at_utc=excluded.observed_at_utc
+            """, (
+                service, instance_id, status, active_task,
+                json.dumps(counters or {}, ensure_ascii=False),
+                last_success_utc, last_error, recovery_state, observed,
+            ))
+
+    def latest_heartbeats(self) -> list[dict[str, Any]]:
+        with self.connect() as con:
+            rows = con.execute("""
+                SELECT h.*
+                FROM service_heartbeats h
+                JOIN (
+                    SELECT service, MAX(observed_at_utc) AS max_observed
+                    FROM service_heartbeats GROUP BY service
+                ) latest
+                  ON latest.service=h.service AND latest.max_observed=h.observed_at_utc
+                ORDER BY h.service
+            """).fetchall()
+            return [dict(row) for row in rows]
+
+    def heartbeat_for(self, service: str) -> dict[str, Any] | None:
+        with self.connect() as con:
+            row = con.execute("""
+                SELECT * FROM service_heartbeats
+                WHERE service=?
+                ORDER BY observed_at_utc DESC
+                LIMIT 1
+            """, (service,)).fetchone()
+            return dict(row) if row else None
 
     def add_event(self, event_type: str, source: str, payload: dict[str, Any] | None = None,
                   *, event_version: int = 1, severity: str = "INFO",
