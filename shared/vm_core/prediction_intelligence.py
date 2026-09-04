@@ -15,6 +15,14 @@ def _clamp01(value: float) -> float:
     return max(0.0, min(1.0, value))
 
 
+def _safe_limit(value: Any, *, default: int = 50) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(1, min(500, parsed))
+
+
 def _prediction_probability(
     *,
     risk_adjusted_score: float,
@@ -46,7 +54,10 @@ def prediction_summary(
     """
     root = root or project_root()
     calibration = canonical_review_calibration_summary(root=root)
-    known = int(calibration.get("known_binary_outcomes") or 0)
+    try:
+        known = max(0, int(calibration.get("known_binary_outcomes") or 0))
+    except (TypeError, ValueError):
+        known = 0
     positive_rate_raw = calibration.get("positive_rate")
     try:
         positive_rate = float(positive_rate_raw) if positive_rate_raw is not None else None
@@ -54,7 +65,10 @@ def prediction_summary(
         positive_rate = None
     empirical_ready = known >= _MIN_EMPIRICAL_OUTCOMES and positive_rate is not None
 
-    opportunities = risk_adjusted_canonical_opportunities(root=root, limit=max(1, min(500, int(limit))))
+    opportunities = risk_adjusted_canonical_opportunities(
+        root=root,
+        limit=_safe_limit(limit),
+    )
     predictions: list[dict[str, Any]] = []
     for row in opportunities:
         subject = str(row.get("canonical_subject_id") or "").strip()
