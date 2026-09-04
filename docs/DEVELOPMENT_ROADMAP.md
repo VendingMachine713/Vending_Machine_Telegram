@@ -58,6 +58,13 @@ next decisions from one surface without opening five bot-specific dashboards.
 
 ## Priority 2 - complete product workflows
 
+### Delivery status (September 2026)
+
+- **2.1 Smart Auto Poster topic routing — complete.** Passive forum-topic discovery, ambiguity review, per-account access coverage, and no-send route previews are merged in PR #123.
+- **2.2 Universal Search release chain — complete through v1.6 foundation.** Marketplace intelligence, demand/supply matching, and conservative Match Engine feedback telemetry were rebuilt as PRs #125, #126, and #128. Advanced autonomous threshold changes remain intentionally deferred.
+- **2.3 Relationship Manager data quality — complete for the current scope.** Business import runs now retain applied/rejected audit history; corrections are explicit, canonical-product mapped, and admin-audited in PR #129. Advanced value/concentration analytics remain deferred until entry criteria are met.
+- **2.4 Recovery/progress consolidation — in progress.** Current VM Platform heartbeats, telemetry, incidents, and Admin Command Centre surfaces are authoritative. Unique salvage is limited to a read-only Smart Auto Poster recovery preview gate; no automatic restart or uncertain-send retry authority is added.
+
 1. **Smart Auto Poster forum/topic routing.** Finish passive topic discovery,
    explicit handling of ambiguous forums, account capability coverage, and a
    no-send route preview before any live canary.
