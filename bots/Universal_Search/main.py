@@ -438,7 +438,7 @@ async def search_help_cmd(update, context):
     if not private_admin(update):
         return await deny(update)
     await update.effective_message.reply_text(
-        "Universal Search v1.3 private-owner guide:\n\n"
+        "Universal Search v1.4 private-owner guide:\n\n"
         "/search iphone 15\n"
         "/search \"iphone 15 pro\"\n"
         "/search iphone OR samsung\n"
@@ -463,7 +463,7 @@ async def health(update, context):
     historical = store.count("backfill")
     watches = watch_store.count_for_owner(update.effective_user.id)
     await update.effective_message.reply_text(
-        f"✅ Universal Search v1.3\n"
+        f"✅ Universal Search v1.4\n"
         f"Indexed: {total} messages\n"
         f"Live: {live} | Historical: {historical}\n"
         f"FTS5 ranking: {'enabled' if store.fts_enabled else 'fallback LIKE mode'}\n"
@@ -471,6 +471,54 @@ async def health(update, context):
         f"Central owner configured: {'yes' if central_owner_ids(ROOT) else 'no'}\n"
         "Control scope: private owner only"
     )
+
+
+async def market_cmd(update, context):
+    if not private_admin(update):
+        return await deny(update)
+    kinds = {"sale", "wanted", "trade", "service"}
+    kind = next((a.lower() for a in context.args if a.lower() in kinds), None)
+    status = None; min_price = max_price = None
+    for i, arg in enumerate(context.args[:-1]):
+        if arg == "--status": status = context.args[i + 1].lower()
+        elif arg == "--min":
+            with suppress(ValueError): min_price = float(context.args[i + 1])
+        elif arg == "--max":
+            with suppress(ValueError): max_price = float(context.args[i + 1])
+    if status not in {None, "active", "available", "pending", "sold"}: status = None
+    rows = store.market_search(kind=kind, status=status, min_price=min_price, max_price=max_price)
+    lines = ["Marketplace listings (passive/read-only):"]
+    for row in rows:
+        price = f"{row['currency']} ${row['price_cents'] / 100:.2f}" if row['price_cents'] is not None else "price n/a"
+        lines.append(f"{row['kind']} | {row['status']} | {price} | confidence={row['confidence']:.2f} | group={row['group_key']}")
+    await update.effective_message.reply_text("\n".join(lines)[:3900])
+    publisher.signal("marketplace_search", subject_type="user", subject_id=update.effective_user.id, score=min(100, len(rows) * 5), confidence=0.95, rationale="Owner-only marketplace read query completed", result_count=len(rows), kind=kind, status=status)
+
+
+async def listing_cmd(update, context):
+    if not private_admin(update): return await deny(update)
+    if len(context.args) != 2:
+        await update.effective_message.reply_text("Use /listing CHAT_ID MESSAGE_ID"); return
+    try: row = store.market_listing(int(context.args[0]), int(context.args[1]))
+    except ValueError: row = None
+    if not row:
+        await update.effective_message.reply_text("Listing not found."); return
+    price = f"{row['currency'] or 'AUD'} ${row['price_cents'] / 100:.2f}" if row['price_cents'] is not None else "-"
+    await update.effective_message.reply_text("\n".join((f"Listing {row['listing_key']}", f"Kind: {row['kind']}", f"Status: {row['status']}", f"Price: {price}", f"Condition: {row['condition'] or '-'}", f"Location: {row['location'] or '-'}", f"Confidence: {row['confidence']:.2f}", f"Repost group: {row['group_key']}")))
+
+
+async def pricehistory_cmd(update, context):
+    if not private_admin(update): return await deny(update)
+    if len(context.args) != 1:
+        await update.effective_message.reply_text("Use /pricehistory GROUP_KEY"); return
+    rows = store.market_price_history(context.args[0])
+    await update.effective_message.reply_text("Price history:\n" + ("\n".join(f"{r['currency']} ${r['price_cents'] / 100:.2f} — {r['observed_utc']}" for r in rows) or "No price history found.")[:3800])
+
+
+async def marketstats_cmd(update, context):
+    if not private_admin(update): return await deny(update)
+    rows = store.market_stats()
+    await update.effective_message.reply_text("Marketplace stats:\n" + ("\n".join(f"{r['kind']} / {r['status']}: {r['count']}" for r in rows) or "No structured listings yet."))
 
 
 async def backfill_status_cmd(update, context):
@@ -646,11 +694,15 @@ def main():
     app.add_handler(CommandHandler("searchhelp", search_help_cmd))
     app.add_handler(CommandHandler("health", health))
     app.add_handler(CommandHandler("backfillstatus", backfill_status_cmd))
+    app.add_handler(CommandHandler("market", market_cmd))
+    app.add_handler(CommandHandler("listing", listing_cmd))
+    app.add_handler(CommandHandler("pricehistory", pricehistory_cmd))
+    app.add_handler(CommandHandler("marketstats", marketstats_cmd))
     app.add_handler(CallbackQueryHandler(search_page_callback, pattern=r"^us:"))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, index_message))
     if not admin_id() and not central_owner_ids(ROOT):
         print(f"[CLAIM CODE] Send /claim {claim_code()} to this bot in a PRIVATE chat from your Telegram account.")
-    print("[READY] VM Universal Search v1.3 — passive indexing in groups, central/private-owner control only")
+    print("[READY] VM Universal Search v1.4 — passive marketplace enrichment, private-owner control only")
     publisher.started(
         indexed_messages=store.count(),
         fts_enabled=store.fts_enabled,

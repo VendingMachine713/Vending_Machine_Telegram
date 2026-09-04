@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
   "name": "Universal_Search",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "status": "existing",
   "classification": "CANONICAL",
   "entrypoint": "main.py",
@@ -50,6 +50,10 @@
     "durable_alert_queue",
     "alert_retry_backoff",
     "watch_pause_resume"
+    ,"passive_marketplace_extraction",
+    "marketplace_lifecycle_status",
+    "marketplace_price_history",
+    "owner_only_marketplace_queries"
   ],
   "lifecycle": {
     "managed_by_vm": true,

@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+from marketplace import extract_listing, utc_now
+
 SCHEMA = """
 PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS chats(
@@ -27,6 +29,22 @@ CREATE TABLE IF NOT EXISTS indexed_messages(
 );
 CREATE INDEX IF NOT EXISTS ix_messages_sender ON indexed_messages(sender_id);
 CREATE INDEX IF NOT EXISTS ix_messages_date ON indexed_messages(date_utc);
+CREATE TABLE IF NOT EXISTS marketplace_listings(
+  chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL,
+  sender_id INTEGER, listing_key TEXT NOT NULL, group_key TEXT NOT NULL,
+  kind TEXT NOT NULL, status TEXT NOT NULL, price_cents INTEGER,
+  currency TEXT, condition TEXT, location TEXT, confidence REAL NOT NULL,
+  first_seen_utc TEXT NOT NULL, last_seen_utc TEXT NOT NULL,
+  PRIMARY KEY(chat_id,message_id)
+);
+CREATE INDEX IF NOT EXISTS ix_marketplace_group ON marketplace_listings(group_key,last_seen_utc DESC);
+CREATE INDEX IF NOT EXISTS ix_marketplace_status ON marketplace_listings(status,kind,last_seen_utc DESC);
+CREATE TABLE IF NOT EXISTS marketplace_price_history(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL,
+  group_key TEXT NOT NULL, price_cents INTEGER NOT NULL, currency TEXT NOT NULL,
+  observed_utc TEXT NOT NULL, UNIQUE(chat_id,message_id,price_cents)
+);
+CREATE INDEX IF NOT EXISTS ix_marketplace_price_group ON marketplace_price_history(group_key,observed_utc DESC);
 CREATE TABLE IF NOT EXISTS search_audit(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER,
@@ -286,10 +304,21 @@ class Store:
                        source=CASE
                          WHEN indexed_messages.source='live' THEN 'live'
                          ELSE excluded.source
-                       END""",
+                   END""",
                 (chat_id, message_id, sender_id, date_utc, text, int(has_media),
                  int(looks_like_ad(text)), 1, source),
             )
+            listing = extract_listing(chat_id, message_id, text)
+            prior = c.execute("SELECT first_seen_utc FROM marketplace_listings WHERE chat_id=? AND message_id=?", (chat_id, message_id)).fetchone()
+            c.execute("DELETE FROM marketplace_listings WHERE chat_id=? AND message_id=?", (chat_id, message_id))
+            if listing:
+                now = utc_now()
+                first_seen = prior[0] if prior else now
+                c.execute("""INSERT INTO marketplace_listings
+                    (chat_id,message_id,sender_id,listing_key,group_key,kind,status,price_cents,currency,condition,location,confidence,first_seen_utc,last_seen_utc)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (chat_id,message_id,sender_id,listing.listing_key,listing.group_key,listing.kind,listing.status,listing.price_cents,listing.currency,listing.condition,listing.location,listing.confidence,first_seen,now))
+                if listing.price_cents is not None:
+                    c.execute("INSERT OR IGNORE INTO marketplace_price_history(chat_id,message_id,group_key,price_cents,currency,observed_utc) VALUES(?,?,?,?,?,?)", (chat_id,message_id,listing.group_key,listing.price_cents,listing.currency or "AUD",now))
 
     @staticmethod
     def _filters(q: Query, chat_id, args: list, *, include_text_fallback=False) -> str:
@@ -373,6 +402,33 @@ class Store:
             return c.execute(
                 "SELECT COUNT(*) FROM indexed_messages WHERE source=?", (source,)
             ).fetchone()[0]
+
+    def market_search(self, *, kind=None, status=None, min_price=None, max_price=None, limit=20):
+        """Owner-facing structured read model; never returns raw message text."""
+        clauses, args = ["1=1"], []
+        if kind:
+            clauses.append("kind=?"); args.append(kind)
+        if status:
+            clauses.append("status=?"); args.append(status)
+        if min_price is not None:
+            clauses.append("price_cents>=?"); args.append(int(min_price * 100))
+        if max_price is not None:
+            clauses.append("price_cents<=?"); args.append(int(max_price * 100))
+        limit = max(1, min(int(limit), 50)); args.append(limit)
+        with self.conn() as c:
+            return c.execute("SELECT * FROM marketplace_listings WHERE " + " AND ".join(clauses) + " ORDER BY last_seen_utc DESC LIMIT ?", args).fetchall()
+
+    def market_listing(self, chat_id, message_id):
+        with self.conn() as c:
+            return c.execute("SELECT * FROM marketplace_listings WHERE chat_id=? AND message_id=?", (chat_id, message_id)).fetchone()
+
+    def market_price_history(self, group_key, limit=50):
+        with self.conn() as c:
+            return c.execute("SELECT * FROM marketplace_price_history WHERE group_key=? ORDER BY observed_utc DESC LIMIT ?", (group_key, max(1, min(int(limit), 100)))).fetchall()
+
+    def market_stats(self):
+        with self.conn() as c:
+            return c.execute("SELECT kind,status,COUNT(*) AS count FROM marketplace_listings GROUP BY kind,status ORDER BY kind,status").fetchall()
 
     def record_search(self, user_id, query):
         with self.conn() as c:
