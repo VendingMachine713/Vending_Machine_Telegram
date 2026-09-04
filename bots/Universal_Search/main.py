@@ -521,6 +521,29 @@ async def marketstats_cmd(update, context):
     await update.effective_message.reply_text("Marketplace stats:\n" + ("\n".join(f"{r['kind']} / {r['status']}: {r['count']}" for r in rows) or "No structured listings yet."))
 
 
+async def matches_cmd(update, context):
+    if not private_admin(update): return await deny(update)
+    rows = store.market_matches(limit=50)
+    if not rows:
+        await update.effective_message.reply_text("No new demand/supply matches."); return
+    lines = ["New demand/supply matches (read-only):"]
+    for row in rows:
+        lines.append(f"demand={row['demand_chat_id']}/{row['demand_message_id']} ↔ supply={row['supply_chat_id']}/{row['supply_message_id']} | score={row['score']:.2f}")
+    await update.effective_message.reply_text("\n".join(lines)[:3900])
+    publisher.signal("marketplace_matches_reviewed", subject_type="user", subject_id=update.effective_user.id, score=min(100, len(rows) * 5), confidence=0.95, rationale="Owner-only demand/supply match review completed", result_count=len(rows))
+
+
+async def ackmatch_cmd(update, context):
+    if not private_admin(update): return await deny(update)
+    if len(context.args) != 4:
+        await update.effective_message.reply_text("Use /ackmatch DEMAND_CHAT DEMAND_MESSAGE SUPPLY_CHAT SUPPLY_MESSAGE"); return
+    try: args = [int(x) for x in context.args]
+    except ValueError:
+        await update.effective_message.reply_text("Match identifiers must be numeric."); return
+    changed = store.acknowledge_market_match(*args)
+    await update.effective_message.reply_text("✅ Match acknowledged." if changed else "Match not found.")
+
+
 async def backfill_status_cmd(update, context):
     if not private_admin(update):
         return await deny(update)
@@ -698,11 +721,13 @@ def main():
     app.add_handler(CommandHandler("listing", listing_cmd))
     app.add_handler(CommandHandler("pricehistory", pricehistory_cmd))
     app.add_handler(CommandHandler("marketstats", marketstats_cmd))
+    app.add_handler(CommandHandler("matches", matches_cmd))
+    app.add_handler(CommandHandler("ackmatch", ackmatch_cmd))
     app.add_handler(CallbackQueryHandler(search_page_callback, pattern=r"^us:"))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, index_message))
     if not admin_id() and not central_owner_ids(ROOT):
         print(f"[CLAIM CODE] Send /claim {claim_code()} to this bot in a PRIVATE chat from your Telegram account.")
-    print("[READY] VM Universal Search v1.4 — passive marketplace enrichment, private-owner control only")
+    print("[READY] VM Universal Search v1.5 — passive demand/supply matching, private-owner control only")
     publisher.started(
         indexed_messages=store.count(),
         fts_enabled=store.fts_enabled,
