@@ -13,13 +13,16 @@ from shared.vm_core.db import PlatformDB
 
 class CanonicalGovernedRuntimeTests(unittest.TestCase):
     def _seed_legacy_pair(self, db: PlatformDB, chat_id: str) -> None:
+        relationship_score = 75.0
+        activity_score = 85.0
+        expected_opportunity_score = (activity_score * 0.55) + (relationship_score * 0.45)
         db.upsert_signal(
             f"relationship:presence:{chat_id}",
             "relationship_dormant_presence",
             "Dormant relationship present",
             subject_type="chat",
             subject_id=chat_id,
-            score=75,
+            score=relationship_score,
             confidence=0.95,
             evidence={
                 "lifecycle_stage": "dormant",
@@ -32,9 +35,22 @@ class CanonicalGovernedRuntimeTests(unittest.TestCase):
             "Activity above baseline",
             subject_type="chat",
             subject_id=chat_id,
-            score=85,
+            score=activity_score,
             confidence=0.90,
             evidence={"ratio": 4.2, "window_hours": 24, "baseline_days": 7},
+        )
+        # The shadow gate intentionally compares canonical inference with the
+        # established legacy opportunity projection. Seed that baseline explicitly
+        # so this runtime test exercises orchestration rather than bypassing parity.
+        db.upsert_signal(
+            f"cross:relationship_activity:{chat_id}",
+            "relationship_activity_opportunity",
+            "Legacy relationship/activity opportunity",
+            subject_type="chat",
+            subject_id=chat_id,
+            score=expected_opportunity_score,
+            confidence=0.90,
+            evidence={"suppressed": False},
         )
 
     def test_shadow_pass_preserves_no_recommendation_contract(self) -> None:
