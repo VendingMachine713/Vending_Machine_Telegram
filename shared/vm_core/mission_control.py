@@ -21,6 +21,7 @@ from .paths import project_root
 from .platform_aggregation import incident_intelligence_snapshot
 from .platform_registry import service_registry
 from .posting_intelligence import posting_intelligence_summary
+from .prediction_intelligence import prediction_summary
 from .relationship_intelligence import relationship_intelligence_summary
 from .risk_fusion import canonical_risk_fusion_summary, risk_adjusted_canonical_opportunities
 from .rule_health import health_summary
@@ -42,6 +43,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
     opportunities = opportunity_summary(root, limit=limit)
     risk_fusion = canonical_risk_fusion_summary(root=root, limit=max(100, limit * 20))
     risk_adjusted_opportunities = risk_adjusted_canonical_opportunities(root=root, limit=limit)
+    predictions = prediction_summary(root=root, limit=limit)
     graph = entity_graph(root, limit=max(100, limit * 10))
     trust_foundation = trust_foundation_summary(root=root, limit=max(100, limit * 10))
     relationship_intelligence = relationship_intelligence_summary(
@@ -127,6 +129,10 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "risk_fusion_subjects": risk_fusion["subject_count"],
             "risk_attention_subjects": len(risk_attention),
             "risk_high_subjects": sum(1 for row in risk_fusion["subjects"] if row["high_risk"]),
+            "prediction_status": predictions["status"],
+            "prediction_count": predictions["prediction_count"],
+            "prediction_empirical_base_rate_used": predictions["empirical_base_rate_used"],
+            "prediction_verified_outcomes": predictions["verified_outcome_count"],
             "entities": graph["node_count"],
             "relationships": graph["edge_count"],
             "relationship_intelligence_status": relationship_intelligence["status"],
@@ -173,6 +179,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "risk_review_subjects": risk_attention,
             "risk_malformed_guard_events": risk_fusion["malformed_guard_events"],
             "risk_noncanonical_guard_events_ignored": risk_fusion["noncanonical_guard_events_ignored"],
+            "predictions": predictions["predictions"],
             "relationship_profiles": relationship_intelligence["profiles"],
             "relationship_malformed_events": relationship_intelligence["malformed_events"],
             "relationship_noncanonical_events_ignored": relationship_intelligence["noncanonical_events_ignored"],
@@ -206,6 +213,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
         "canonical_opportunities": opportunities["canonical_top_opportunities"],
         "risk_adjusted_canonical_opportunities": risk_adjusted_opportunities,
         "risk_fusion": risk_fusion,
+        "predictions": predictions,
         "decisions": decisions["top_decisions"],
         "rule_health": rule_health,
         "trust_foundation": trust_foundation,
