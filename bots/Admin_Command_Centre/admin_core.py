@@ -19,6 +19,12 @@ from shared.vm_core.progress_registry import format_all_progress
 from shared.vm_core.admin_exceptions import admin_exceptions,format_admin_exceptions
 from shared.vm_core.incident_runtime import incident_timeline
 from shared.vm_core.autoposter_recovery import recovery_preview, format_recovery_preview
+from shared.vm_core.canonical_recommendations import canonical_recommendation_summary
+from shared.vm_core.canonical_review_audit import canonical_review_audit_summary
+from shared.vm_core.canonical_review_feedback import (
+    CanonicalReviewFeedbackError,
+    transition_canonical_review,
+)
 MUTATING={'backup','support','start','stop','restart','supervise','poster_start','poster_stop','poster_restart'}
 POSTER_SERVICE='Smart_Auto_Poster_V2'
 
@@ -63,6 +69,11 @@ def help_text(cfg):
         'SMART AUTO POSTER\n'
         '/poster\n/poster_status\n/poster_progress\n/poster_health\n/poster_queue\n/poster_campaigns\n/poster_recovery_preview\n'
         '/poster_start\n/poster_stop\n/poster_restart\n\n'
+        'GOVERNED REVIEW\n'
+        '/review - list canonical recommendations awaiting review\n'
+        '/review_audit - read-only recommendation lifecycle audit\n'
+        '/review_accept <key> [note] - explicitly approve metadata only\n'
+        '/review_dismiss <key> [note] - dismiss a recommendation\n\n'
         'Mutating commands: '+('ENABLED' if cfg['allow_mutations'] else 'DISABLED')
     )
 
@@ -122,6 +133,39 @@ def _poster_help(cfg)->str:
         'Service mutations: '+('ENABLED' if cfg['allow_mutations'] else 'DISABLED')
     )
 
+def _review_text()->str:
+    summary=canonical_recommendation_summary(root=ROOT,limit=50)
+    rows=[row for row in summary.get('recommendations',[]) if str(row.get('status','')).upper() in {'PROPOSED','ACCEPTED'}]
+    lines=['GOVERNED REVIEW','Operator approval is required; No Telegram action is executed.']
+    if not rows: return '\n'.join(lines+['No actionable canonical recommendations.'])
+    for row in rows[:10]:
+        key=str(row.get('recommendation_key') or '')
+        action=str(row.get('action') or 'review')
+        rationale=' '.join(str(row.get('rationale') or '').split())[:180]
+        lines.append(f"\n{key}\nStatus: {str(row.get('status') or 'UNKNOWN').upper()} | Priority: {float(row.get('priority') or 0):.2f} | Confidence: {float(row.get('confidence') or 0):.2f}\nAction: {action}\nRationale: {rationale}")
+    if len(rows)>10: lines.append(f'\n…and {len(rows)-10} more. Use the canonical key with /review_accept or /review_dismiss.')
+    return '\n'.join(lines)[:3900]
+
+def _review_audit_text()->str:
+    summary=canonical_review_audit_summary(root=ROOT,limit=20)
+    stages=', '.join(f'{key}={value}' for key,value in summary.get('stage_counts',{}).items()) or 'none'
+    return (f"GOVERNED REVIEW AUDIT\nStatus: {summary.get('status','UNAVAILABLE')} | Timelines: {summary.get('count',0)}\n"
+            f"Stages: {stages}\nMalformed rows: {summary.get('malformed_rows',0)} | Duplicate events ignored: {summary.get('duplicate_events_ignored',0)}\n"
+            'Read-only projection; operator review required; automatic acceptance and execution are disabled.')[:3900]
+
+def _review_transition(user_id:int, cmd:str, args:list[str])->str:
+    if not args: return f'Usage: /{cmd} <recommendation_key> [note]'
+    key=args[0].strip()
+    note=' '.join(args[1:]).strip() or None
+    target='ACCEPTED' if cmd=='review_accept' else 'DISMISSED'
+    try:
+        decision=transition_canonical_review(key,target,actor=f'telegram:{user_id}',note=note,root=ROOT)
+    except CanonicalReviewFeedbackError as exc:
+        return f'REVIEW {target} BLOCKED\n{exc}'[:3900]
+    return (f"REVIEW {decision.status}\nKey: {decision.recommendation_key}\n"
+            f"Previous: {decision.previous_status}\nActor: {decision.actor}\nAudit event: {decision.event_id}\n"
+            'No Telegram action was executed; this changed recommendation metadata only.')[:3900]
+
 def handle_command(user_id:int,text:str,cfg:dict[str,Any]|None=None)->str:
     cfg=cfg or config()
     if not is_admin(user_id,cfg): return 'Access denied.'
@@ -137,6 +181,9 @@ def handle_command(user_id:int,text:str,cfg:dict[str,Any]|None=None)->str:
     if cmd=='poster_health': return _poster_cli('health')
     if cmd=='poster_queue': return _poster_cli('queue')
     if cmd=='poster_campaigns': return _poster_cli('campaigns')
+    if cmd in {'review','recommendations'}: return _review_text()
+    if cmd=='review_audit': return _review_audit_text()
+    if cmd in {'review_accept','review_dismiss'}: return _review_transition(user_id,cmd,args)
     if cmd=='status': return 'VM SERVICES\n'+'\n'.join(f"{('RUNNING' if r.get('process_alive') else r.get('runtime_status','UNKNOWN')):<12} {r['name']}" for r in service_status(ROOT))
     if cmd=='health': return 'VM HEALTH\n'+'\n'.join(f"{r['status']:<15} {r['service']}" for r in run_health(ROOT))
     if cmd in {'intelligence','brain'}: return format_intelligence_summary(intelligence_summary(ROOT,refresh=True))[:3900]

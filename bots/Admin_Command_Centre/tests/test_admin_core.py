@@ -14,6 +14,27 @@ class AdminCoreTests(unittest.TestCase):
     def test_allowlist(self): self.assertTrue(is_admin(123,{'admin_ids':{123}}))
     def test_access_denied(self): self.assertEqual(handle_command(456,'/status',ADMIN),'Access denied.')
     def test_mutations_disabled(self): self.assertIn('disabled',handle_command(123,'/backup',ADMIN).lower())
+    @patch('admin_core.canonical_recommendation_summary')
+    def test_review_is_read_only_preview(self,summary):
+        summary.return_value={'recommendations':[{
+            'recommendation_key':'canonical:telegram:chat:0123456789abcdef01234567',
+            'status':'PROPOSED','priority':0.8,'confidence':0.9,
+            'action':'review relationship','rationale':'Recent canonical evidence.'}], 'counts':{'PROPOSED':1}}
+        text=handle_command(123,'/review',ADMIN)
+        self.assertIn('Operator approval is required',text)
+        self.assertIn('canonical:telegram:chat:',text)
+        self.assertIn('No Telegram action is executed',text)
+        summary.assert_called_once_with(root=ROOT,limit=50)
+
+    @patch('admin_core.transition_canonical_review')
+    def test_review_accept_is_explicit_and_metadata_only(self,transition):
+        transition.return_value=type('Decision',(),{
+            'status':'ACCEPTED','recommendation_key':'canonical:telegram:chat:key',
+            'previous_status':'PROPOSED','actor':'telegram:123','event_id':7})()
+        text=handle_command(123,'/review_accept canonical:telegram:chat:key approve for pilot',ADMIN)
+        self.assertIn('REVIEW ACCEPTED',text)
+        self.assertIn('No Telegram action was executed',text)
+        transition.assert_called_once_with('canonical:telegram:chat:key','ACCEPTED',actor='telegram:123',note='approve for pilot',root=ROOT)
     @patch('admin_core.format_all_progress')
     def test_platform_progress_uses_registered_surfaces(self,formatter):
         formatter.return_value='UNIVERSAL PROGRESS ENGINE\nSurfaces: 1'
