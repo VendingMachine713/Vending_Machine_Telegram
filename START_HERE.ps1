@@ -15,6 +15,11 @@ function Open-MissionControl {
     Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", $cmd
 }
 
+function Open-GroupMemberAudit {
+    $cmd = "Set-Location -LiteralPath '$Root'; py '.\\tools\\vm_brain_phase2.py' group-audit"
+    Start-Process powershell.exe -ArgumentList "-NoExit", "-Command", $cmd
+}
+
 function Open-OperatorGuide {
     $Guide = Join-Path $Root "docs\OPERATOR_GUIDE.md"
     if (Test-Path $Guide) {
@@ -32,6 +37,7 @@ while ($true) {
     Write-Host "============================================================" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "M. Mission Control - operator home" -ForegroundColor Green
+    Write-Host "A. Group Member Audit" -ForegroundColor Green
     Write-Host "G. Operator Guide - what everything does" -ForegroundColor Green
     Write-Host ""
     Write-Host "1. Smart Auto Poster V2"
@@ -48,6 +54,7 @@ while ($true) {
 
     switch ((Read-Host "Select an option").ToUpperInvariant()) {
         "M" { Open-MissionControl }
+        "A" { Open-GroupMemberAudit }
         "G" { Open-OperatorGuide }
         "1" { Open-Project "bots\Smart_Auto_Poster_V2" }
         "2" { Open-Project "bots\VM_Guard" }

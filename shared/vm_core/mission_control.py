@@ -14,6 +14,7 @@ from .decision_engine import decision_summary
 from .entity_graph import entity_graph
 from .fleet_heartbeat import fleet_heartbeat_snapshot
 from .group_search_intelligence import group_search_intelligence_summary
+from .group_member_audit import group_member_audit_summary
 from .health_contract import health_snapshot
 from .intelligence_trust import trust_foundation_summary
 from .learning import canonical_learning_feedback_summary
@@ -57,6 +58,12 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
         root=root,
         limit=max(100, limit * 20),
         group_limit=limit,
+    )
+    group_member_audit = group_member_audit_summary(
+        root=root,
+        limit=max(1000, limit * 100),
+        group_limit=limit,
+        member_limit=max(50, limit * 5),
     )
     posting_intelligence = posting_intelligence_summary(root=root, limit=limit)
     canonical = canonical_operator_summary(root=root)
@@ -149,6 +156,10 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "relationship_cooling": relationship_intelligence["state_counts"].get("COOLING", 0),
             "group_search_intelligence_status": group_search_intelligence["status"],
             "group_activity_profiles": group_search_intelligence["group_count"],
+            "group_member_audit_status": group_member_audit["status"],
+            "group_member_audit_groups": group_member_audit["group_count"],
+            "group_member_audited_members": group_member_audit["audited_member_count"],
+            "group_member_audit_attention_groups": group_member_audit["attention_group_count"],
             "posting_intelligence_status": posting_intelligence["status"],
             "posting_destinations": posting_intelligence["destination_count"],
             "posting_attention_destinations": len(posting_attention),
@@ -196,6 +207,11 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
             "group_activity_profiles": group_search_intelligence["groups"],
             "group_search_malformed_events": group_search_intelligence["malformed_events"],
             "group_search_noncanonical_events_ignored": group_search_intelligence["noncanonical_events_ignored"],
+            "group_member_audit_groups": [
+                row for row in group_member_audit["groups"] if row["attention_count"]
+            ],
+            "group_member_audit_malformed_events": group_member_audit["malformed_events"],
+            "group_member_audit_noncanonical_events_ignored": group_member_audit["noncanonical_events_ignored"],
             "posting_destinations": posting_attention,
             "posting_malformed_rows": posting_intelligence["malformed_rows"],
             "noncanonical_intelligence_subject_events": trust_foundation["noncanonical_subject_events"],
@@ -232,6 +248,7 @@ def mission_control(root: Path | None = None, *, limit: int = 20) -> dict[str, A
         "trust_foundation": trust_foundation,
         "relationship_intelligence": relationship_intelligence,
         "group_search_intelligence": group_search_intelligence,
+        "group_member_audit": group_member_audit,
         "posting_intelligence": posting_intelligence,
         "canonical": canonical,
         "canonical_recommendations": canonical_recommendations,
