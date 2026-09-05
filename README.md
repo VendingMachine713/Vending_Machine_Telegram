@@ -2,6 +2,20 @@
 
 Permanent master project for all Vending Machine Telegram bots, tools, shared runtime data, documentation and archived material.
 
+## Operator start point
+
+Run `START_HERE.ps1` from the repository root.
+
+The launcher now exposes:
+
+- `M` — Mission Control operator home: compact health, attention, intelligence and governance summary.
+- `G` — Operator Guide: plain-English explanation of how to run and navigate the system.
+- `1-9` — existing bot, tool and folder launch options.
+
+For normal operation, start with **Mission Control**. Open individual bot folders only when investigating or performing a bot-specific task.
+
+See `docs/OPERATOR_GUIDE.md` for the complete operating flow.
+
 ## Rule
 
 Use one permanent folder per bot or tool. Update that folder in place. Do not create parallel `new`, `final`, `final2`, or version-suffixed project trees.
@@ -14,4 +28,4 @@ Use one permanent folder per bot or tool. Update that folder in place. Do not cr
 - `bots/Admin_Command_Centre/`
 - `bots/VM_Relationship_Manager/`
 
-Run `START_HERE.ps1` from the root to open the project launcher.
+Mission Control remains read-only. Automatic acceptance, automatic execution, and external action authority remain disabled unless separately governed and enabled in a future milestone.
