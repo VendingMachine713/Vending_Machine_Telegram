@@ -12,12 +12,18 @@ if str(ROOT) not in sys.path:
 from shared.vm_core.autoposter_intelligence import sync_autoposter_intelligence
 from shared.vm_core.entity_graph import entity_graph
 from shared.vm_core.mission_control import mission_control
+from shared.vm_core.operator_home import operator_home
 from shared.vm_core.opportunity_intelligence import opportunity_summary
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="VM Brain Phase 2 passive Mission Control")
-    parser.add_argument("view", choices=("mission", "graph", "opportunities", "sap-sync"), nargs="?", default="mission")
+    parser.add_argument(
+        "view",
+        choices=("home", "mission", "graph", "opportunities", "sap-sync"),
+        nargs="?",
+        default="mission",
+    )
     parser.add_argument("--limit", type=int, default=20)
     args = parser.parse_args()
 
@@ -30,7 +36,10 @@ def main() -> int:
     else:
         payload = mission_control(ROOT, limit=args.limit)
 
-    print(json.dumps(payload, indent=2, ensure_ascii=False))
+    if args.view == "home":
+        print(operator_home(payload))
+    else:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
     return 0
 
 
