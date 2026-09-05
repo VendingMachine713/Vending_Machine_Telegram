@@ -24,6 +24,7 @@ def operator_home(snapshot: dict[str, Any]) -> str:
     risk_reviews = _count(snapshot, "risk_attention_subjects")
     posting_attention = _count(snapshot, "posting_attention_destinations")
     awaiting_outcome = _count(snapshot, "canonical_reviews_awaiting_outcome")
+    group_audit_attention = _count(snapshot, "group_member_audit_attention_groups")
 
     needs_attention = any(
         (
@@ -35,6 +36,7 @@ def operator_home(snapshot: dict[str, Any]) -> str:
             risk_reviews,
             posting_attention,
             awaiting_outcome,
+            group_audit_attention,
         )
     )
     overall = "ATTENTION" if needs_attention else "HEALTHY"
@@ -85,6 +87,10 @@ def operator_home(snapshot: dict[str, Any]) -> str:
         attention_items.append(
             f"{awaiting_outcome} completed review(s) await outcome evidence"
         )
+    if group_audit_attention:
+        attention_items.append(
+            f"{group_audit_attention} group member audit(s) need review"
+        )
 
     if attention_items:
         lines.extend(f"- {item}" for item in attention_items)
@@ -102,6 +108,7 @@ def operator_home(snapshot: dict[str, Any]) -> str:
             f"- Cooling relationships: {_count(snapshot, 'relationship_cooling')}",
             f"- Dormant relationships: {_count(snapshot, 'relationship_dormant')}",
             f"- Group activity profiles: {_count(snapshot, 'group_activity_profiles')}",
+            f"- Audited group members: {_count(snapshot, 'group_member_audited_members')}",
             "",
             "BRAIN / GOVERNANCE",
             f"- Canonical readiness: {headline.get('canonical_readiness', 'UNKNOWN')}",
