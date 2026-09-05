@@ -9,6 +9,7 @@ Run `START_HERE.ps1` from the repository root.
 The launcher now exposes:
 
 - `M` — Mission Control operator home: compact health, attention, intelligence and governance summary.
+- `A` — Group Member Audit: passive group composition, classification confidence, attention and audit history.
 - `G` — Operator Guide: plain-English explanation of how to run and navigate the system.
 - `1-9` — existing bot, tool and folder launch options.
 
